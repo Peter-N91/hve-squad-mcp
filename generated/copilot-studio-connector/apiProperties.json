@@ -1,0 +1,31 @@
+{
+  "properties": {
+    "connectionParameters": {
+      "token": {
+        "type": "oauthSetting",
+        "oAuthSettings": {
+          "identityProvider": "aadcertificate",
+          "clientId": "<ENTRA_CLIENT_ID>",
+          "scopes": [
+            "Squad.Research",
+            "Squad.Plan",
+            "Squad.Review",
+            "Squad.Architect",
+            "Squad.Run",
+            "Squad.Run",
+            "Squad.Render"
+          ],
+          "properties": {
+            "IsFirstParty": "false",
+            "AzureActiveDirectoryResourceId": "<SQUAD_MCP_AUDIENCE>"
+          }
+        }
+      }
+    },
+    "iconBrandColor": "#0b5394",
+    "capabilities": [
+      "actions"
+    ],
+    "publisher": "hve-squad"
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "name": "@hve-squad/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Outbound Model Context Protocol (MCP) server that exposes the hve-squad as 5 coarse intent tools (squad_research, squad_plan, squad_review, squad_architect, squad_run) to MCP hosts such as VS Code GitHub Copilot. Phase 0: local stdio, delegated execution.",
+  "license": "MIT",
+  "bin": {
+    "hve-squad-mcp": "dist/src/server.js"
+  },
+  "files": [
+    "dist/src",
+    "tools.catalog.yml",
+    "generated/mcp-tools.schema.json",
+    "generated/copilot-studio-connector",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "lint": "tsc --noEmit --pretty false",
+    "generate": "tsx generators/build-manifests.ts",
+    "generate:connector": "tsx generators/build-copilot-studio-connector.ts",
+    "snapshot:cast": "tsx host/snapshot-cast.ts",
+    "snapshot:render": "tsx host/snapshot-render.ts",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "test:conformance": "node --import tsx --test \"test/conformance/**/*.test.ts\"",
+    "start": "node dist/src/server.js",
+    "start:http": "node dist/src/server-http.js",
+    "start:worker": "node dist/src/worker-main.js"
+  },
+  "dependencies": {
+    "@azure/identity": "^4.5.0",
+    "@modelcontextprotocol/sdk": "^1.11.0",
+    "ajv": "^8.17.1",
+    "jose": "^5.9.6",
+    "yaml": "^2.5.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "targets": [
+    "copilot-studio"
+  ],
+  "fidelityClaim": "squad-guided / embedded",
+  "protocol": "mcp-streamable-1.0",
+  "tools": [
+    {
+      "name": "squad_research",
+      "title": "Squad Research",
+      "description": "Run the squad's research stage on a question or codebase. Routes to the Task Researcher (squad `researcher` role) at the `auto`, parallel-eligible tier to investigate, explore, and gather evidence before any plan or change. Embedded execution (squad-guided / embedded): the server runs this squad stage under its gates and methodology and returns the finished artifact. Use for \"research\", \"investigate\", \"explore\", or \"find out\" requests.",
+      "scope": "Squad.Research"
+    },
+    {
+      "name": "squad_plan",
+      "title": "Squad Plan",
+      "description": "Run the squad's planning stage. Routes to the Task Planner (squad `lead` role) at the `confirm` tier to break a task down, sequence the work, and produce an implementation-ready plan. Planning is non-parallel and lands no change without confirmation. Embedded execution (squad-guided / embedded): the server runs this squad stage under its gates and methodology and returns the finished artifact. Use for \"plan\", \"break down\", \"sequence\", or \"design plan\" requests.",
+      "scope": "Squad.Plan"
+    },
+    {
+      "name": "squad_review",
+      "title": "Squad Review",
+      "description": "Run the squad's review stage. Routes to the Task Reviewer (squad `tester` role) at the `auto` tier for quality, correctness, and standards review. When the request asks for a pre-implementation go/no-go or crosses two or more council domains, it engages the council row (architect, security, cost-manager, product-owner, and optionally rai) at the `confirm` tier. Embedded execution (squad-guided / embedded): the server runs the review stage under the squad's gates and methodology and returns a finished reviewer artifact (a single reviewer pass, not a convened council verdict). Use for \"review\", \"validate\", \"check quality\", \"council\", or \"go/no-go\" requests.",
+      "scope": "Squad.Review"
+    },
+    {
+      "name": "squad_architect",
+      "title": "Squad Architect",
+      "description": "Run the squad's architecture stage. Routes to the System Architecture Reviewer (squad `architect` role) at the `auto`, parallel-eligible tier to review system design, component boundaries, and design tradeoffs (the Squad Azure Architect authors Azure HLD/LLD as the alternate). Embedded execution (squad-guided / embedded): the server runs this squad stage under its gates and methodology and returns the finished artifact. Use for \"architecture\", \"system design\", or \"components\" requests.",
+      "scope": "Squad.Architect"
+    },
+    {
+      "name": "squad_run",
+      "title": "Squad Run",
+      "description": "Run the full squad pipeline for any request. Hands the request to the Squad Coordinator, which classifies it against the routing table and dispatches the matched roles through Research -> Plan -> Implement -> Review, carrying the council Implementation Gate, the autopilot/autonomous Human Gates, and the notification approval contract unchanged. This is the catch-all entry point and runs at the `confirm` tier with gates. Set `mode=autonomous` for the bounded validator loop or `mode=autopilot` for the full gated pipeline. Embedded execution (squad-guided / embedded): the server runs the full squad pipeline server-side under its gates and methodology. Because the pipeline is gated, the call returns immediately with a run id and PAUSES at the Human Gate; poll squad_status with that run id to advance the run after an out-of-band approval and to retrieve the finished artifact.",
+      "scope": "Squad.Run"
+    },
+    {
+      "name": "squad_status",
+      "title": "Squad Status",
+      "description": "Poll an async squad run by its run id (squad-guided / embedded). Returns the run status; when the run is complete, returns the finished squad-guided artifact. A held run stays paused until an operator approves it out-of-band — the squad never auto-releases a gate.",
+      "scope": "Squad.Run"
+    },
+    {
+      "name": "squad_render_pptx",
+      "title": "Squad Render PPTX",
+      "description": "Render a PowerPoint deck from content YAML and style YAML and return a short-lived download link to the generated .pptx file. Deterministic file output: no model call and no impactful action. Served only when the operator has enabled the render feature.",
+      "scope": "Squad.Render"
+    }
+  ],
+  "deferredTargets": [
+    "m365",
+    "agent-365",
+    "cowork"
+  ]
+}

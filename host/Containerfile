@@ -1,0 +1,52 @@
+# hve-squad MCP server — container image for the remote (embedded) thin slice.
+#
+# Multi-stage Node build. The runtime image runs the HTTP server
+# (`dist/src/server-http.js`) which serves the Streamable HTTP `/mcp` endpoint.
+# TLS is terminated at the Azure Container Apps ingress (HTTPS-only, SEC-8); the
+# container listens on plain HTTP on $PORT behind that ingress.
+#
+# No secrets are baked into the image (SEC-10): the model token comes from the
+# Container App's managed identity at runtime, and operator config arrives as
+# environment variables sourced from the Container App config + Key Vault.
+
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY tsconfig.json tools.catalog.yml ./
+COPY src ./src
+COPY generators ./generators
+COPY generated ./generated
+RUN npm run build && npm prune --omit=dev
+
+FROM node:22-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3000
+# Copy only what the runtime needs. The embedded engine prefers REAL persona bytes
+# loaded from `/app/.github/agents` (the single-source invariant) and falls back to
+# the paraphrased persona records when the bundle is absent; see host/cast/README.md.
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/tools.catalog.yml ./tools.catalog.yml
+COPY --from=build /app/generated ./generated
+# Bundle the pinned full-cast snapshot at /app/.github so resolveSquadAgentsRoots()
+# resolves REAL persona bytes for every roster agent in the image. The tree is
+# produced reproducibly by `npm run snapshot:cast` and drift-checked by
+# test/cast-bundle.test.ts; see host/cast/README.md for the pinned SHA.
+COPY host/cast/.github ./.github
+# squad_render_pptx (opt-in via SQUAD_MCP_ENABLE_RENDER_PPTX): the deterministic
+# python-pptx build toolchain. lxml/Pillow/PyYAML come from Alpine prebuilt wheels
+# (no musl compilation); python-pptx is pip-installed. LibreOffice/poppler/Copilot
+# CLI are NOT installed — those back the Export/Validate actions, which the render
+# tool never runs (build-only). The build scripts are snapshotted into the image by
+# `npm run snapshot:render` (they live outside the squad-mcp build context).
+RUN apk add --no-cache python3 py3-lxml py3-pillow py3-yaml \
+  && python3 -m venv --system-site-packages /opt/render-venv \
+  && /opt/render-venv/bin/pip install --no-cache-dir python-pptx
+COPY host/render/scripts ./render/scripts
+ENV SQUAD_MCP_RENDER_PYTHON_PATH=/opt/render-venv/bin/python3
+ENV SQUAD_MCP_RENDER_SCRIPTS_DIR=/app/render/scripts
+USER node
+EXPOSE 3000
+CMD ["node", "dist/src/server-http.js"]

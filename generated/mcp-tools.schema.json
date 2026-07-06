@@ -1,0 +1,339 @@
+{
+  "name": "hve-squad-mcp",
+  "schemaVersion": "0.1.0",
+  "generatedBy": "generators/build-manifests.ts",
+  "source": "tools.catalog.yml",
+  "tools": [
+    {
+      "name": "squad_research",
+      "title": "Squad Research",
+      "description": "Run the squad's research stage on a question or codebase. Routes to the Task Researcher (squad `researcher` role) at the `auto`, parallel-eligible tier to investigate, explore, and gather evidence before any plan or change. Delegated execution: returns the Squad Coordinator persona, the matched routing row, and a framed dispatch request; the calling host runs the subagent loop. Use for \"research\", \"investigate\", \"explore\", or \"find out\" requests.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The research question or topic for the squad this turn."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "default",
+              "full",
+              "security",
+              "design",
+              "architecture",
+              "azure",
+              "product"
+            ],
+            "description": "Optional squad profile to seed when the project has no squad yet."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "default"
+            ],
+            "description": "Optional model-tier hint overriding the coordinator's cost-first default."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Optional Member Name from team.md to pick a specific named member."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "autonomous",
+              "autopilot"
+            ],
+            "description": "Optional autonomy mode for the turn (autonomous validator loop or autopilot pipeline)."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional free-form context (files, constraints, prior findings) to frame the request."
+          }
+        }
+      },
+      "routing": {
+        "intent": "research, investigate, explore, find out",
+        "role": "Task Researcher",
+        "tier": "auto",
+        "parallelEligible": true,
+        "catchAll": false,
+        "gates": false,
+        "council": []
+      }
+    },
+    {
+      "name": "squad_plan",
+      "title": "Squad Plan",
+      "description": "Run the squad's planning stage. Routes to the Task Planner (squad `lead` role) at the `confirm` tier to break a task down, sequence the work, and produce an implementation-ready plan. Planning is non-parallel and lands no change without confirmation. Delegated execution: returns the Coordinator persona, matched routing, and a framed dispatch request for the host to run. Use for \"plan\", \"break down\", \"sequence\", or \"design plan\" requests.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The work to plan this turn."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "default",
+              "full",
+              "security",
+              "design",
+              "architecture",
+              "azure",
+              "product"
+            ],
+            "description": "Optional squad profile to seed when the project has no squad yet."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "default"
+            ],
+            "description": "Optional model-tier hint overriding the coordinator's cost-first default."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Optional Member Name from team.md to pick a specific named member."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "autonomous",
+              "autopilot"
+            ],
+            "description": "Optional autonomy mode for the turn."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional free-form context (research artifacts, constraints) to frame the plan."
+          }
+        }
+      },
+      "routing": {
+        "intent": "plan, break down, sequence, design plan",
+        "role": "Task Planner",
+        "tier": "confirm",
+        "parallelEligible": false,
+        "catchAll": false,
+        "gates": false,
+        "council": []
+      }
+    },
+    {
+      "name": "squad_review",
+      "title": "Squad Review",
+      "description": "Run the squad's review stage. Routes to the Task Reviewer (squad `tester` role) at the `auto` tier for quality, correctness, and standards review. When the request asks for a pre-implementation go/no-go or crosses two or more council domains, it engages the council row (architect, security, cost-manager, product-owner, and optionally rai) at the `confirm` tier. Delegated execution: returns the Coordinator persona, matched routing, and a framed dispatch request. Use for \"review\", \"validate\", \"check quality\", \"council\", or \"go/no-go\" requests.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "What to review, validate, or take to council this turn."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "default",
+              "full",
+              "security",
+              "design",
+              "architecture",
+              "azure",
+              "product"
+            ],
+            "description": "Optional squad profile to seed when the project has no squad yet."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "default"
+            ],
+            "description": "Optional model-tier hint overriding the coordinator's cost-first default."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Optional Member Name from team.md to pick a specific named member."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "autonomous",
+              "autopilot"
+            ],
+            "description": "Optional autonomy mode for the turn."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional free-form context (the change, plan, or design under review)."
+          }
+        }
+      },
+      "routing": {
+        "intent": "review, validate, check quality",
+        "role": "Task Reviewer",
+        "tier": "auto",
+        "parallelEligible": true,
+        "catchAll": false,
+        "gates": false,
+        "council": [
+          "System Architecture Reviewer",
+          "Security Planner",
+          "Squad Cost Manager",
+          "ADO Backlog Manager",
+          "RAI Planner"
+        ]
+      }
+    },
+    {
+      "name": "squad_architect",
+      "title": "Squad Architect",
+      "description": "Run the squad's architecture stage. Routes to the System Architecture Reviewer (squad `architect` role) at the `auto`, parallel-eligible tier to review system design, component boundaries, and design tradeoffs (the Squad Azure Architect authors Azure HLD/LLD as the alternate). Delegated execution: returns the Coordinator persona, matched routing, and a framed dispatch request. Use for \"architecture\", \"system design\", or \"components\" requests.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The architecture or system-design question this turn."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "default",
+              "full",
+              "security",
+              "design",
+              "architecture",
+              "azure",
+              "product"
+            ],
+            "description": "Optional squad profile to seed when the project has no squad yet."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "default"
+            ],
+            "description": "Optional model-tier hint overriding the coordinator's cost-first default."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Optional Member Name from team.md to pick a specific named member."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "autonomous",
+              "autopilot"
+            ],
+            "description": "Optional autonomy mode for the turn."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional free-form context (existing design, constraints, IaC) to frame the review."
+          }
+        }
+      },
+      "routing": {
+        "intent": "architecture, system design, components",
+        "role": "System Architecture Reviewer",
+        "tier": "auto",
+        "parallelEligible": true,
+        "catchAll": false,
+        "gates": false,
+        "council": []
+      }
+    },
+    {
+      "name": "squad_run",
+      "title": "Squad Run",
+      "description": "Run the full squad pipeline for any request. Hands the request to the Squad Coordinator, which classifies it against the routing table and dispatches the matched roles through Research -> Plan -> Implement -> Review, carrying the council Implementation Gate, the autopilot/autonomous Human Gates, and the notification approval contract unchanged. This is the catch-all entry point and runs at the `confirm` tier with gates. Set `mode=autonomous` for the bounded validator loop or `mode=autopilot` for the full gated pipeline. Delegated execution: returns the Coordinator persona, matched routing, and a framed dispatch request for the host to drive. Use when no narrower squad_* tool fits, or for end-to-end work.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The work for the squad this turn (any intent; the Coordinator classifies it)."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "default",
+              "full",
+              "security",
+              "design",
+              "architecture",
+              "azure",
+              "product"
+            ],
+            "description": "Optional squad profile to seed when the project has no squad yet."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "default"
+            ],
+            "description": "Optional model-tier hint overriding the coordinator's cost-first default."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Optional Member Name from team.md to pick a specific named member."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "autonomous",
+              "autopilot"
+            ],
+            "description": "Optional autonomy mode: autonomous (bounded validator loop) or autopilot (full gated pipeline)."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional free-form context to frame the pipeline."
+          }
+        }
+      },
+      "routing": {
+        "intent": "*",
+        "role": "Squad Coordinator",
+        "tier": "confirm",
+        "parallelEligible": false,
+        "catchAll": true,
+        "gates": true,
+        "council": []
+      }
+    }
+  ]
+}
