@@ -1,0 +1,6 @@
+project_slug: mcp-plugin-exposure
+owner: '@hve-squad/maintainers'
+default_status: accepted
+decision_id_format: 'NNNN'
+template_source: madr-v4
+last_decision_id: '0001'
