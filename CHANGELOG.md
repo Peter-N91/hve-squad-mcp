@@ -10,6 +10,15 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
+## [0.1.2] - 2026-07-08
+
+### Changed
+
+- Bumped the package pin to `Peter-N91/hve-squad@0.8.23` and cut this release to track it.
+  Run `npm run snapshot:cast` on this branch if the bundled cast changed (the cast-bundle CI check enforces it).
+
+[0.1.2]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.1.2
+
 ## [0.1.1] - 2026-07-08
 
 ### Changed
