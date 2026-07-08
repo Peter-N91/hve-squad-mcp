@@ -4,12 +4,12 @@
 #   1. updates the package pin (host/cast/package-pin.json) to the new hve-squad
 #      version, and
 #   2. bumps this repo's release number (package.json + package-lock.json),
-# then opens a pull request. It does NOT regenerate the bundled cast under
+# then commits straight to main and dispatches release.yml to cut the tag +
+# GitHub Release. It does NOT regenerate the bundled cast under
 # host/cast/.github — that needs the deployed package cast (agents), which this
-# lightweight job does not build. A maintainer runs `npm run snapshot:cast` on
-# the PR branch when the squad roster actually changed; the cast-bundle CI check
-# fails the PR until the bundle matches the pinned package, so a stale cast can
-# never merge unnoticed.
+# lightweight job does not build. A maintainer runs `npm run snapshot:cast` when
+# the squad roster actually changed; the cast-bundle CI check on main fails until
+# the bundle matches the pinned package, so a stale cast never goes unnoticed.
 #
 # Triggers:
 #   * schedule  — daily poll, shortly after the package's 06:00 UTC sync.
@@ -47,7 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
+      actions: write
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -153,25 +153,37 @@ jobs:
                { print }' CHANGELOG.md > CHANGELOG.tmp
           mv CHANGELOG.tmp CHANGELOG.md
 
-      # ── Open a PR (a maintainer regenerates the cast + merges) ───────────
-      #    Use PACKAGE_SYNC_TOKEN (a PAT) so the pushed branch triggers PR CI;
-      #    the default job token would push without triggering workflows.
-      - name: Open pull request
+      # ── Commit the bump straight to main ─────────────────────────────────
+      #    Push with PACKAGE_SYNC_TOKEN (a PAT). GITHUB_TOKEN-authored pushes do
+      #    not trigger other workflows, so we also dispatch release.yml
+      #    explicitly below to cut the tag + GitHub Release.
+      - name: Commit and push
+        if: steps.decide.outputs.skip != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.PACKAGE_SYNC_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+          git add host/cast/package-pin.json package.json package-lock.json CHANGELOG.md
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(release): pin ${PACKAGE_REPO}@${{ steps.target.outputs.version }}; bump to v${{ steps.bump.outputs.mcp_version }}"
+            git push origin main
+            echo "::notice::Pushed release bump to v${{ steps.bump.outputs.mcp_version }} (pinned ${PACKAGE_REPO}@${{ steps.target.outputs.version }})"
+          else
+            echo "::notice::No changes after regeneration — nothing to commit."
+          fi
+
+      # ── Dispatch the release workflow ────────────────────────────────────
+      #    GITHUB_TOKEN/PAT-authored pushes may not trigger release.yml's push
+      #    event, so dispatch it explicitly. It reads the new version from
+      #    package.json and cuts the tag + GitHub Release.
+      - name: Trigger release
         if: steps.decide.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.PACKAGE_SYNC_TOKEN || github.token }}
         run: |
-          set -euo pipefail
-          BRANCH="bump/hve-squad-${{ steps.target.outputs.version }}"
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
-          git checkout -b "$BRANCH"
-          git add host/cast/package-pin.json package.json package-lock.json CHANGELOG.md
-          git commit -m "chore(release): pin ${PACKAGE_REPO}@${{ steps.target.outputs.version }}; bump to v${{ steps.bump.outputs.mcp_version }}"
-          git push --force -u origin "$BRANCH"
-          gh pr create \
-            --base main --head "$BRANCH" \
-            --title "chore(release): pin ${PACKAGE_REPO}@${{ steps.target.outputs.version }} + bump to v${{ steps.bump.outputs.mcp_version }}" \
-            --body "Automated bump: package pin -> ${{ steps.target.outputs.version }}, MCP release -> v${{ steps.bump.outputs.mcp_version }}. If the squad roster changed, run 'npm run snapshot:cast' on this branch and push — the cast-bundle CI check fails until the bundle matches the pinned package." \
-            || echo "::notice::A pull request for $BRANCH may already exist."
+          gh workflow run release.yml --ref main
+          echo "::notice::Triggered release.yml for v${{ steps.bump.outputs.mcp_version }}"
