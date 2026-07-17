@@ -10,6 +10,21 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
+## [0.2.1] - 2026-07-17
+
+### Added
+
+- **Federation-level autopilot** surfaced through `squad_federate`, tracking the federation-autopilot feature now shipped in `hve-squad@0.10.2`. When `mode=autopilot` is passed with **no** `squad=` target, the delegated payload now drives the federation-level meta-pipeline: order the meta-routing-selected sub-squads by dependency, run each sub-squad's standard autopilot inner run scoped to `members/<name>/`, aggregate every Impactful-Action and Risk Gate to the federation level (attributed to the raising sub-squad), apply one aggregate `cost-ceiling`, and end with a single consolidated final-outcome validation.
+  - New `FEDERATION_AUTOPILOT_NOTE` persona block and federation-autopilot framed-request branch in the delegated engine (`src/engine/persona.ts`, `src/engine/delegated.ts`). A single `squad=` target still forwards autopilot to that one sub-squad unchanged.
+  - Updated the `squad_federate` `mode` input description in `tools.catalog.yml` and regenerated `generated/mcp-tools.schema.json` and the Copilot Studio connector.
+
+### Changed
+
+- Bumped the bundled cast pin to `Peter-N91/hve-squad@0.10.2` and refreshed the snapshot (`host/cast/`), so the Squad Federation Coordinator's **Federation Autopilot Mode** section and the new `squad-federation-autopilot.instructions.md` are on disk for persona resolution and the generator drift check.
+- Updated the README federation section: a coordinated federation-wide autopilot is now shipped (was previously deferred).
+
+[0.2.1]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.2.1
+
 ## [0.2.0] - 2026-07-17
 
 ### Added

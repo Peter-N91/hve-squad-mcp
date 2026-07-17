@@ -49,7 +49,7 @@ Every tool's input mirrors the `/squad` prompt arguments: `request` (required), 
 - **`squad_federate`** maps to the **Squad Federation Coordinator**. It reads the federation registry (`federation.md`) and meta-routing (`meta-routing.md`), routes the request to the matching sub-squad(s) — or the explicit `squad=<name>` — and runs each scoped to its own root. Pass `init` to build a federation (propose → confirm → create).
 - **The `squad` input** on the five coarse tools targets a single sub-squad directly (`squad_research` with `squad=azure` scopes to `members/azure/`).
 
-Federation is additive: on a plain repository (no `federation.md`) the `squad` input is simply omitted and every tool behaves as before. Autonomy modes are forwarded to a single targeted sub-squad; a coordinated federation-wide pipeline across sub-squads is deferred.
+Federation is additive: on a plain repository (no `federation.md`) the `squad` input is simply omitted and every tool behaves as before. Autonomy modes are forwarded to a single targeted sub-squad; with `mode=autopilot` and no `squad=` target, `squad_federate` runs a coordinated **federation-wide autopilot** meta-pipeline across sub-squads (ordered inner autopilot runs, federation-level gates attributed to the raising sub-squad, one aggregate `cost-ceiling`, and a single consolidated final-outcome validation).
 
 ## Execution model — delegated (local VS Code)
 

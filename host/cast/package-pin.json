@@ -1,5 +1,5 @@
 {
   "package": "Peter-N91/hve-squad",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "note": "The hve-squad APM package version this squad-mcp release (see package.json) is built against. The bundled cast under host/cast/.github is snapshotted from this package version. Bump this pin together with the package version for any related change, then run 'npm run snapshot:cast' to refresh the bundle; the snapshot fails if the resolved package version does not match this pin."
 }

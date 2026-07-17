@@ -416,7 +416,7 @@
               "autonomous",
               "autopilot"
             ],
-            "description": "Optional autonomy mode forwarded to the selected sub-squad's run (single sub-squad; a coordinated federation-wide pipeline is not yet shipped)."
+            "description": "Optional autonomy mode. With a single sub-squad target it is forwarded to that sub-squad's run; with mode=autopilot and no squad= target the Federation Coordinator runs the federation-level autopilot meta-pipeline (ordered sub-squad autopilot runs, aggregated federation gates, one consolidated final-outcome validation)."
           },
           "context": {
             "type": "string",

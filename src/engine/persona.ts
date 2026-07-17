@@ -112,6 +112,25 @@ export const GATE_INSTRUCTIONS = [
 ].join("\n");
 
 /**
+ * Federation-level autopilot note, paraphrased from
+ * squad-src/.github/instructions/squad/squad-federation-autopilot.instructions.md.
+ * Appended for `squad_federate` when `mode=autopilot` is set with no `squad=`
+ * target — the opt-in meta-pipeline that orders sub-squad autopilot runs.
+ */
+export const FEDERATION_AUTOPILOT_NOTE = [
+  "**Federation autopilot (mode=autopilot, no `squad=` target).** Run the",
+  "federation-level meta-pipeline: order the meta-routing-selected sub-squads by",
+  "declared dependency (confirm the order with the user at the first gate), run",
+  "each sub-squad's standard single-squad autopilot inner run scoped to its",
+  "`members/<name>/` root, and aggregate every Impactful-Action and Risk Gate to",
+  "the federation level, attributed to the sub-squad that raised it",
+  "(most-restrictive-wins). Apply one optional `cost-ceiling` across the whole",
+  "federation run and end with a single consolidated final-outcome validation.",
+  "Never auto-release. A single `squad=` target instead forwards autopilot to that",
+  "one sub-squad unchanged; each sub-squad's inner pipeline is unchanged.",
+].join("\n");
+
+/**
  * The autonomy-mode note, paraphrased from the squad prompt + autonomous/
  * autopilot conventions. Appended when a `mode` is supplied.
  */

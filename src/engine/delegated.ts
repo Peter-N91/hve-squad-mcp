@@ -23,6 +23,7 @@ import type {
 } from "./coordinator-engine.js";
 import {
   COORDINATOR_PERSONA,
+  FEDERATION_AUTOPILOT_NOTE,
   FEDERATION_COORDINATOR_PERSONA,
   FEDERATION_DETECTION_NOTE,
   GATE_INSTRUCTIONS,
@@ -63,6 +64,11 @@ function composeSystemPrompt(tool: CatalogTool, request: CoordinatorRequest): st
   if (modeBlock.length > 0) {
     blocks.push(modeBlock);
   }
+  // A federation autopilot run with no pinned sub-squad drives the meta-pipeline
+  // across sub-squads; surface the federation-level autopilot contract.
+  if (federation && request.mode === "autopilot" && !request.squad) {
+    blocks.push(FEDERATION_AUTOPILOT_NOTE);
+  }
   return blocks.join("\n\n");
 }
 
@@ -82,6 +88,16 @@ function composeFramedRequest(tool: CatalogTool, request: CoordinatorRequest): s
         `Acting as the Squad Federation Coordinator, route this request to the ` +
           `**${request.squad}** sub-squad and run its normal per-turn protocol scoped ` +
           "to `.copilot-tracking/squad/members/" + request.squad + "/`. Do NOT do the work inline.",
+      );
+    } else if (request.mode === "autopilot") {
+      lines.push(
+        "Acting as the Squad Federation Coordinator, run the federation-level autopilot",
+        "meta-pipeline: read `federation.md` and `meta-routing.md`, order the selected",
+        "sub-squads by dependency (confirm the order at the first gate), run each",
+        "sub-squad's standard autopilot inner run scoped to its `members/<name>/` root,",
+        "aggregate every Impactful-Action and Risk Gate to the federation level",
+        "(attributed to the raising sub-squad), and end with one consolidated",
+        "final-outcome validation. Never auto-release. Do NOT do the work inline.",
       );
     } else {
       lines.push(
