@@ -19,6 +19,20 @@
 export const SQUAD_STATE_ROOT = ".copilot-tracking/squad/";
 
 /**
+ * Resolve the squad state root for a turn. In a federation, an explicit
+ * sub-squad name scopes state to `members/<name>/`; otherwise the default root
+ * applies. The name is trusted only as a path segment after a strict shape
+ * check (lower-kebab-case), mirroring the sub-squad naming rule in
+ * squad-federation.instructions.md.
+ */
+export function squadStateRoot(squad?: string): string {
+  if (squad && /^[a-z0-9][a-z0-9-]*$/.test(squad)) {
+    return `${SQUAD_STATE_ROOT}members/${squad}/`;
+  }
+  return SQUAD_STATE_ROOT;
+}
+
+/**
  * The Squad Coordinator persona, reduced to the part that is load-bearing for
  * delegated drive: the Dispatch Discipline. Paraphrased from
  * squad-coordinator.agent.md.
@@ -38,6 +52,42 @@ export const COORDINATOR_PERSONA = [
   "counts as run only when the dispatched agent produced its artifact and the",
   "Squad Scribe wrote a `history/<agent>.md` entry; no history entry means the",
   "stage did not happen.",
+].join("\n");
+
+/**
+ * The Squad Federation Coordinator persona, paraphrased from
+ * squad-src/.github/agents/squad/squad-federation-coordinator.agent.md. Used by
+ * `squad_federate`: it orchestrates named sub-squads rather than roles directly.
+ */
+export const FEDERATION_COORDINATOR_PERSONA = [
+  "You are the **Squad Federation Coordinator**, a user-invocable meta-orchestrator",
+  "of several named sub-squads in one repository. You read the federation registry",
+  "(`.copilot-tracking/squad/federation.md`) and meta-routing",
+  "(`.copilot-tracking/squad/meta-routing.md`), classify the request to one or more",
+  "sub-squads (or honor an explicit `squad=<name>` target), and run each sub-squad's",
+  "normal per-turn protocol scoped to `.copilot-tracking/squad/members/<name>/`.",
+  "",
+  "**Dispatch Discipline (non-negotiable).** You never perform a sub-squad's work",
+  "yourself. You classify to sub-squad(s), drive each sub-squad's standard protocol,",
+  "collect, synthesize, and escalate. Every sub-squad name is required, unique, and",
+  "lower-kebab-case (it is both the `members/<name>/` folder and the `squad=<name>`",
+  "selector); on a collision or an unknown target, stop and escalate. Federation-level",
+  "decisions and history are written by the Squad Scribe at the federation root, and",
+  "each sub-squad's own state stays inside its root.",
+].join("\n");
+
+/**
+ * Federation awareness appended to the delegated payload. It tells the host how
+ * to resolve the right sub-squad before dispatching so a federation repo is not
+ * driven against a missing top-level roster.
+ */
+export const FEDERATION_DETECTION_NOTE = [
+  "**Federation detection.** If the repo has a `.copilot-tracking/squad/federation.md`",
+  "registry (no top-level `team.md`), this is a federation: resolve the target",
+  "sub-squad from an explicit `squad=<name>`, else from `meta-routing.md`, and scope",
+  "the turn to `.copilot-tracking/squad/members/<name>/`. When the target is ambiguous",
+  "or unknown, escalate and ask which sub-squad to use rather than seeding a top-level",
+  "squad. A plain repo (top-level `team.md`, no `federation.md`) runs unchanged.",
 ].join("\n");
 
 /**

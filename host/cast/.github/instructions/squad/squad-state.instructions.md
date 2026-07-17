@@ -9,9 +9,18 @@ These conventions define where squad state lives, who may change it, and how the
 
 State is per-project and runtime-created. It is never packaged with the squad source — only the coordinator produces it under `.copilot-tracking/squad/` when a project first runs the squad.
 
+## Squad Root (parameterized state root)
+
+Every state path below is relative to a **squad root**. The root is parameterized so the same layout can serve either a single squad or a sub-squad within a federation:
+
+* The default squad root is `.copilot-tracking/squad/`. When no root is supplied, the paths in this file are literal and behavior is exactly today's single-squad behavior.
+* In a **federation** (opt-in), each sub-squad roots at `.copilot-tracking/squad/members/<name>/`, and every path in this file is read as `<squadRoot>/...`. The Squad Coordinator and Squad Scribe accept an optional `squadRoot`; when omitted, the default preserves single-squad behavior.
+
+The federation layout, the registry, meta-routing, detection precedence (`federation.md` → federation, else `team.md` → plain squad, else Init), and the two-level single-writer rule are defined in `.github/instructions/squad/squad-federation.instructions.md`. The remainder of this file describes the state tree under a single squad root; it applies unchanged to each sub-squad root in a federation.
+
 ## State Layout
 
-All squad state lives under `.copilot-tracking/squad/`:
+All squad state lives under the squad root (`.copilot-tracking/squad/` by default; `.copilot-tracking/squad/members/<name>/` for a federation sub-squad):
 
 | Path                  | Purpose                                                                    | Write Semantics      |
 |-----------------------|----------------------------------------------------------------------------|----------------------|
@@ -34,7 +43,7 @@ The Scribe seeds `state.json` on first run and overwrites it as the squad advanc
 
 ```json
 {
-  "schemaVersion": "1.1",
+  "schemaVersion": "1.2",
   "updated": "",
   "turn": 0,
   "mode": "interactive",
@@ -57,6 +66,8 @@ The Scribe seeds `state.json` on first run and overwrites it as the squad advanc
 ```
 
 The `notify` object follows `.github/instructions/squad/squad-notifications.instructions.md`: `approvalChannel` is `in-chat`, `github-issue`, or `webhook`; the `github` block is used only by the `github-issue` channel; and webhook URLs are never stored here. The `mode` field records the autonomy mode in effect for the current turn (`interactive`, `autonomous`, or `autopilot`). The `currentRun` object holds the run totals `estCostUsd` and `estCreditsTotal`, both seeded at 0 and overwritten by the Scribe as dispatches accumulate; they are per-run estimates, not billed amounts (see [Consumption Tracking](#consumption-tracking)).
+
+Watch Mode runs additionally carry an optional `trigger` object recording the event that started the run (`source`, `ref`, `eventId`, `actor`, `receivedAt`, `runId`). It is additive and omitted for interactive, autonomous, and autopilot runs that were not event-triggered; see `.github/instructions/squad/squad-watch-mode.instructions.md`.
 
 ## Consumption Tracking
 
@@ -123,6 +134,8 @@ Squad learnings live on up to three distinct surfaces: a consumer-local writable
 * An optional tenant-internal playbook is the third surface, present only when the organization configured the tenant APM dependency. It deploys to `.agents/skills/squad-learnings-tenant/tenant-learnings.md`, and the coordinator consults it as read-only, authoritative context after the shipped playbook and never writes to it.
 * Consumer-local memory is never auto-promoted into either shared surface. Promotion is a deliberate, human-reviewed path documented in `CONTRIBUTING.md`, which keeps a maintainer review gate between a local note and shared content; that governance covers both upstream promotion to the shipped playbook and promotion to a tenant-internal repository.
 
-## Deferred: Watch Mode (DR-01)
+## Watch Mode (DR-01)
 
-A GitHub Actions "watch mode" hook — triggering the squad automatically on repository events — is intentionally deferred. The state layout already supports it: a future Actions workflow can read `routing.md` and append to `decisions.md` and `history/<agent>.md` through the same single-writer scribe path. No state-schema change is required to add watch mode later.
+Watch Mode — triggering the squad automatically on repository events (a new issue, a PR, a `/squad` comment, a schedule) so a run produces a pull request — is specified in `.github/instructions/squad/squad-watch-mode.instructions.md`. A Watch Mode run reads `routing.md` and appends to `decisions.md` and `history/<agent>.md` through the same single-writer Scribe path an interactive run uses.
+
+Watch Mode adds one backward-compatible state change: an optional `trigger` object in `state.json`, with `schemaVersion` moving to `1.2` (see [state.json Shape](#statejson-shape)). The object is additive — a squad that never runs in Watch Mode omits it — so existing state stays valid. The inbound approval half ships as the reference workflow `.github/skills/squad/github-approval-watcher.workflow.yml`; the outbound trigger half ships as the reference workflow `.github/skills/squad/squad-watch.workflow.yml`.

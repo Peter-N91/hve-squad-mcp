@@ -25,6 +25,10 @@ export interface CoordinatorRequest {
   mode?: string;
   /** Optional free-form context. */
   context?: string;
+  /** Optional federation sub-squad name to target (scopes state to members/<name>/). */
+  squad?: string;
+  /** Optional flag to run Federation Init Mode (squad_federate only). */
+  init?: boolean;
 }
 
 /** The routing decision attached to a tool, surfaced back to the host. */

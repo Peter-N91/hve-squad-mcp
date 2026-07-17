@@ -60,12 +60,12 @@ test("the drift check FAILS when a council member is not installed", () => {
   assert.ok(errors.some((message) => /Ghost Council Member/.test(message)));
 });
 
-test("buildDescriptor projects exactly the 5 catalog tools", () => {
+test("buildDescriptor projects exactly the 6 catalog tools", () => {
   const descriptor = buildDescriptor(inputs.catalog);
-  assert.equal(descriptor.tools.length, 5);
+  assert.equal(descriptor.tools.length, 6);
   assert.deepEqual(
     descriptor.tools.map((tool) => tool.name).sort(),
-    ["squad_architect", "squad_plan", "squad_research", "squad_review", "squad_run"],
+    ["squad_architect", "squad_federate", "squad_plan", "squad_research", "squad_review", "squad_run"],
   );
   for (const tool of descriptor.tools) {
     assert.equal(typeof tool.routing.role, "string");

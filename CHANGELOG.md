@@ -10,6 +10,22 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
+## [0.2.0] - 2026-07-17
+
+### Added
+
+- **Federation support** for the opt-in in-repo sub-squads shipped in `hve-squad@0.10.1`.
+  - New `squad_federate` tool mapping to the **Squad Federation Coordinator**: reads the federation registry (`federation.md`) and meta-routing (`meta-routing.md`), routes to one or more named sub-squads (or an explicit `squad=<name>`), and runs each scoped to `.copilot-tracking/squad/members/<name>/`. Supports `init` for Federation Init Mode. Catch-all tool at the `confirm` tier with gates.
+  - New optional `squad` input on the five coarse tools (`squad_research`, `squad_plan`, `squad_review`, `squad_architect`, `squad_run`) to target a federation sub-squad; the delegated state context and framed request scope to that sub-squad's root.
+  - Delegated engine gains a Federation Coordinator persona, a federation-detection note (resolve the sub-squad from `squad=`/meta-routing before dispatching), and a `squadStateRoot()` helper (`src/engine/persona.ts`, `src/engine/delegated.ts`, `src/engine/coordinator-engine.ts`, `src/router/router.ts`).
+  - Refreshed the bundled cast snapshot from `hve-squad@0.10.1` so the Squad Federation Coordinator persona and `squad-federation.instructions.md` are on disk for persona resolution and the generator drift check (`host/cast/`).
+
+### Notes
+
+- Autonomy modes are forwarded to a single targeted sub-squad; a coordinated federation-wide pipeline across sub-squads (the embedded/async multi-sub-squad case) is deferred, mirroring the deferred federation-autopilot work in the package.
+
+[0.2.0]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.2.0
+
 ## [0.1.9] - 2026-07-17
 
 ### Changed

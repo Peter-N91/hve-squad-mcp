@@ -105,6 +105,8 @@ export class ToolRouter {
       owner: optionalString(record.owner),
       mode: optionalString(record.mode),
       context: optionalString(record.context),
+      squad: optionalString(record.squad),
+      init: record.init === true,
     };
   }
 }

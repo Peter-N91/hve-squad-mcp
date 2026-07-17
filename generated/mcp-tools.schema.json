@@ -56,6 +56,11 @@
           "context": {
             "type": "string",
             "description": "Optional free-form context (files, constraints, prior findings) to frame the request."
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional federation sub-squad to target (state under .copilot-tracking/squad/members/<name>/); omit outside a federation."
           }
         }
       },
@@ -121,6 +126,11 @@
           "context": {
             "type": "string",
             "description": "Optional free-form context (research artifacts, constraints) to frame the plan."
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional federation sub-squad to target (state under .copilot-tracking/squad/members/<name>/); omit outside a federation."
           }
         }
       },
@@ -186,6 +196,11 @@
           "context": {
             "type": "string",
             "description": "Optional free-form context (the change, plan, or design under review)."
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional federation sub-squad to target (state under .copilot-tracking/squad/members/<name>/); omit outside a federation."
           }
         }
       },
@@ -257,6 +272,11 @@
           "context": {
             "type": "string",
             "description": "Optional free-form context (existing design, constraints, IaC) to frame the review."
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional federation sub-squad to target (state under .copilot-tracking/squad/members/<name>/); omit outside a federation."
           }
         }
       },
@@ -322,12 +342,91 @@
           "context": {
             "type": "string",
             "description": "Optional free-form context to frame the pipeline."
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional federation sub-squad to target (state under .copilot-tracking/squad/members/<name>/); omit outside a federation."
           }
         }
       },
       "routing": {
         "intent": "*",
         "role": "Squad Coordinator",
+        "tier": "confirm",
+        "parallelEligible": false,
+        "catchAll": true,
+        "gates": true,
+        "council": []
+      }
+    },
+    {
+      "name": "squad_federate",
+      "title": "Squad Federate",
+      "description": "Run the squad **federation** meta layer for a repository that hosts several named sub-squads (for example a `product` sub-squad for the business team and an `azure` sub-squad for the architects). Hands the request to the Squad Federation Coordinator, which reads the federation registry (`federation.md`) and meta-routing (`meta-routing.md`), selects the target sub-squad(s) — or honors an explicit `squad=<name>` — and runs each sub-squad's normal per-turn protocol scoped to `.copilot-tracking/squad/members/<name>/`. Set `init` to build a federation (propose → confirm → create) on a fresh project. This is the catch-all federation entry point and runs at the `confirm` tier with gates. Delegated execution: returns the Federation Coordinator persona, the federation routing decision, and a framed dispatch request for the host to drive. Use for cross-sub-squad requests, an explicit sub-squad target, or federation setup.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The work for the federation this turn (routed to one or more sub-squads)."
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional sub-squad name to target directly, overriding meta-routing."
+          },
+          "init": {
+            "type": "boolean",
+            "description": "When true, run Federation Init Mode (propose → confirm → create) before routing."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "default",
+              "full",
+              "security",
+              "design",
+              "architecture",
+              "azure",
+              "product"
+            ],
+            "description": "Optional profile hint forwarded to a sub-squad's Init when it has no squad yet."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "default"
+            ],
+            "description": "Optional model-tier hint forwarded to the selected sub-squad's run."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Optional Member Name forwarded to the selected sub-squad's run."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "autonomous",
+              "autopilot"
+            ],
+            "description": "Optional autonomy mode forwarded to the selected sub-squad's run (single sub-squad; a coordinated federation-wide pipeline is not yet shipped)."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional free-form context to frame the federation turn."
+          }
+        }
+      },
+      "routing": {
+        "intent": "*",
+        "role": "Squad Federation Coordinator",
         "tier": "confirm",
         "parallelEligible": false,
         "catchAll": true,

@@ -21,6 +21,7 @@ agents:
   - Squad As-Built Author
   - Squad Azure Diagnose
   - Squad Modernization Planner
+  - Squad SQL Migration Advisor
   - PRD Builder
   - BRD Builder
   - Meeting Analyst
@@ -52,7 +53,7 @@ The coordinator only classifies, dispatches, collects, synthesizes, and escalate
 
 ## Governing Conventions
 
-Three squad instruction files define the data and rules this agent depends on. They live under `.github/instructions/squad/` when deployed (authored under `squad-src/.github/instructions/squad/`) and auto-apply through their `applyTo` pattern whenever squad state under `.copilot-tracking/squad/**` is touched.
+Eight squad instruction files define the data and rules this agent depends on. They live under `.github/instructions/squad/` when deployed (authored under `squad-src/.github/instructions/squad/`) and auto-apply through their `applyTo` pattern whenever squad state under `.copilot-tracking/squad/**` is touched.
 
 * `.github/instructions/squad/squad-roster.instructions.md` — the roster schema and cast catalog mapping each squad role to a deployed HVE Core agent.
 * `.github/instructions/squad/squad-routing.instructions.md` — the routing table mapping request patterns to roles, autonomy tiers, and parallel eligibility.
@@ -61,6 +62,7 @@ Three squad instruction files define the data and rules this agent depends on. T
 * `.github/instructions/squad/squad-autonomous.instructions.md` — the opt-in `auto-validated` tier and the bounded re-validation loop (cap, divergence detection, mandatory escalation triggers, cost ceiling, history entries).
 * `.github/instructions/squad/squad-autopilot.instructions.md` — the opt-in `mode=autopilot` full pipeline (research→plan→implement→review) with Human Gates only on impactful actions and final-outcome validation.
 * `.github/instructions/squad/squad-notifications.instructions.md` — the user-contact capture at squad build time and the delivery-agnostic notification (ping) contract for each mode.
+* `.github/instructions/squad/squad-watch-mode.instructions.md` — the event-driven Watch Mode (DR-01) trigger contract: opt-in gates, the event-to-intent map, injection-safe payload handling, profile inference, and the pull-request deliverable.
 
 ## Inputs
 
@@ -69,6 +71,7 @@ Three squad instruction files define the data and rules this agent depends on. T
 * (Optional) A model-tier hint (`fast` or `default`) the user supplies to override cost-first defaults.
 * (Optional) A mode hint (`mode=autonomous` for the bounded validator loop, or `mode=autopilot` for the full research→plan→implement→review pipeline). When omitted, the coordinator runs the interactive per-turn protocol where each stage is gated by its routing autonomy tier.
 * (Optional) A member-owner hint (`owner=<Member Name>`) that picks a specific named member from `team.md` when two rows share the same `Role`.
+* (Optional) A squad-root override (`squadRoot=<path>`) that points the per-turn protocol at a specific squad root instead of the default `.copilot-tracking/squad/`. The Squad Federation Coordinator sets this to `.copilot-tracking/squad/members/<name>/` when it drives a sub-squad; a normal `/squad` invocation omits it and the default root applies. All state reads and writes in the protocol below are relative to the resolved `squadRoot` (see `.github/instructions/squad/squad-federation.instructions.md`).
 * (Optional) An explicit role or roster override when the user names the agent to dispatch.
 
 ## Cast and Dispatch
@@ -95,6 +98,15 @@ Apply cost-first model selection on every dispatch so the squad reserves expensi
 When a project has no `.copilot-tracking/squad/team.md`, the coordinator enters Init Mode and helps the user choose the squad that fits their project before doing any work. Init Mode runs as two phases — **propose** then **create** — and never writes files until the user confirms.
 
 The available profiles and the cast they map to are defined in `.github/instructions/squad/squad-roster.instructions.md` under *Squad Profiles*.
+
+### Phase 0: Single Squad or Federation
+
+Before proposing a profile, when neither `.copilot-tracking/squad/team.md` nor `.copilot-tracking/squad/federation.md` exists, offer the user two ways to set up:
+
+* **A single squad** (the default and recommended starting point) — one team for the whole repository. Continue with Phase 1 below.
+* **A federation of sub-squads** — several named squads in the same repository, each seeded from its own profile (for example, a `product` sub-squad for the business team and an `azure` sub-squad for the architects). Choose this when different teams or domains want their own squad side by side.
+
+Present both briefly and ask which the user wants. When the user chooses a federation, do not seed a single squad — hand off to the Squad Federation Coordinator (the `/squad-federation` entry point), which runs Federation Init Mode (propose → confirm → create) per `.github/instructions/squad/squad-federation.instructions.md`. When the user chooses a single squad, or does not want the extra choice, continue with Phase 1 unchanged. This offer is skippable: a user who just wants to get going keeps the single-squad default.
 
 ### Phase 1: Propose
 
@@ -130,6 +142,11 @@ Run these six steps in order on every turn.
 ### Step 1: Read or Initialize State
 
 Read `.copilot-tracking/squad/team.md` and `.copilot-tracking/squad/routing.md`. When either file is missing, enter **Init Mode** (see above): discover the project, propose a profile, and only after the user confirms hand the chosen roster to the Squad Scribe to stamp out the seed files. The coordinator initiates the write; the scribe performs it. Confirm the roster and routing table are present before classifying.
+
+**Squad root and federation detection.** All state paths in this protocol are relative to the resolved `squadRoot` (default `.copilot-tracking/squad/`; see `.github/instructions/squad/squad-federation.instructions.md`). Resolve the root before reading state:
+
+* When invoked with an explicit `squadRoot` (the Squad Federation Coordinator sets it to `.copilot-tracking/squad/members/<name>/`), operate scoped to that sub-squad root: read `<squadRoot>/team.md` and `<squadRoot>/routing.md`, Init at that root when missing, and hand every write to the Scribe with the same `squadRoot`.
+* When no `squadRoot` is supplied, check `.copilot-tracking/squad/` using the detection precedence: if `federation.md` is present, this project is a **federation** — do not run a single-squad turn; direct the user to `/squad-federation` (the Squad Federation Coordinator owns federation turns). If `federation.md` is absent and `team.md` is present, run the normal single-squad turn against the default root (today's behavior, unchanged). If neither is present, enter Init Mode, which opens with the single-squad-or-federation offer (Phase 0) before proposing a profile.
 
 Then reconcile the consumption ledger before doing new work. When `history/` already holds dispatch entries but `.copilot-tracking/squad/consumption.md` is still at its seed (no per-role rows, or the seed note still claims no dispatches have run) — or `state.json` `currentRun` is still `0` while history shows dispatches — a prior turn dropped consumption attribution. Hand the existing `history/<agent>.md` entries to the Squad Scribe to backfill the per-dispatch consumption blocks and rewrite `consumption.md` (self-deriving tier-default estimates) so the ledger reflects every dispatch that has run. This self-heals a disrupted run on the next turn; it is a Scribe-only write and touches no implementation file.
 
@@ -184,7 +201,7 @@ Autopilot never auto-releases: after review it compiles the outcome, fires a `fi
 
 When the user passes `mode=autonomous` to `/squad`, the coordinator runs the bounded re-validation loop defined in `.github/instructions/squad/squad-autonomous.instructions.md` for the matched implementation pattern. The loop runs on a single turn as: council dispatch (Step 3 council branch) → verdict synthesis through the Scribe → implementer dispatch on `Go` or `Go-With-Conditions` → council re-validation (cycle 1) → optional council re-validation (cycle 2). The cap is two re-validation cycles.
 
-The coordinator never authors the Council Verdict and never authors the autonomous-loop summary; the Scribe is the sole writer of both, per the single-writer rule in `.github/instructions/squad/squad-state.instructions.md`. The coordinator only assembles the synthesis payload (raw findings, council membership, topic id, timestamp, cycle index) and hands it to the Scribe.
+The coordinator never authors the Council Verdict and never authors the autonomous-loop summary; the Scribe is the sole writer of both, per the single-writer rule in `.github/instructions/squad/squad-state.instructions.md`. The coordinator only assembles the synthesis payload (raw findings, council membership, topic id, timestamp, cycle index) and hands it to the Scribe. When it reports a verdict to the user or opens a gate, the coordinator includes the **Decision Ref** the Scribe returns (the `decisions.md` path plus the entry's heading anchor, per `.github/instructions/squad/squad-council.instructions.md`) so the human can open the exact verdict section instead of scanning the append-only file.
 
 The coordinator stops the loop and escalates to the user immediately on any mandatory trigger from the autonomous conventions:
 

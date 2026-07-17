@@ -1,6 +1,6 @@
 # hve-squad MCP server
 
-An outbound [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes the **hve-squad** as five coarse, model-invocable tools so MCP hosts can call the squad directly.
+An outbound [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes the **hve-squad** as coarse, model-invocable tools (five per-role intent tools plus `squad_federate` for the opt-in federation of sub-squads) so MCP hosts can call the squad directly.
 
 This is the outbound inverse of the squad's existing inbound MCP template (`squad-src/.github/skills/squad/mcp.template.json`, which registers servers the squad *consumes*). This package ships the squad's *own* server, which other hosts consume.
 
@@ -27,9 +27,9 @@ This server has **two execution modes**, at different maturity levels. Be precis
 
 > Distribution: local **stdio** (delegated) targets VS Code; the remote Streamable HTTP + Entra path (embedded) reaches Copilot Studio and is deployed per [host/RUNBOOK.md](host/RUNBOOK.md). M365 Copilot and Cowork are not targeted yet.
 
-## The five tools
+## The tools
 
-Each tool maps 1:1 to a routing-table intent row in `squad-routing.instructions.md` (not to one of the ~200 agents). The Squad Coordinator owns routing; these tools are shortcuts into it.
+Each per-role tool maps 1:1 to a routing-table intent row in `squad-routing.instructions.md` (not to one of the ~200 agents); `squad_federate` maps to the Squad Federation Coordinator and drives the opt-in federation meta layer. The Squad Coordinator owns routing; these tools are shortcuts into it.
 
 | Tool | Routing intent | Primary role | Tier |
 | --- | --- | --- | --- |
@@ -38,8 +38,18 @@ Each tool maps 1:1 to a routing-table intent row in `squad-routing.instructions.
 | `squad_review` | review, validate, check quality (+ council go/no-go) | Task Reviewer (+ council) | auto / confirm |
 | `squad_architect` | architecture, system design, components | System Architecture Reviewer | auto |
 | `squad_run` | full classify-and-dispatch pipeline (catch-all) | Squad Coordinator | confirm + gates |
+| `squad_federate` | federation meta layer: route across named sub-squads (catch-all) | Squad Federation Coordinator | confirm + gates |
 
-Every tool's input mirrors the `/squad` prompt arguments: `request` (required), plus optional `profile`, `tier`, `owner`, `mode`, and `context`.
+Every tool's input mirrors the `/squad` prompt arguments: `request` (required), plus optional `profile`, `tier`, `owner`, `mode`, and `context`. All tools also accept an optional `squad` sub-squad name to target a federation sub-squad; `squad_federate` additionally accepts `init` to build a federation.
+
+### Federation (sub-squads)
+
+`hve-squad@0.10.x` added an opt-in **federation**: one repository can host several named sub-squads (for example a `product` sub-squad for the business team and an `azure` sub-squad for the architects), each an ordinary squad rooted at `.copilot-tracking/squad/members/<name>/`. The server surfaces this two ways:
+
+- **`squad_federate`** maps to the **Squad Federation Coordinator**. It reads the federation registry (`federation.md`) and meta-routing (`meta-routing.md`), routes the request to the matching sub-squad(s) — or the explicit `squad=<name>` — and runs each scoped to its own root. Pass `init` to build a federation (propose → confirm → create).
+- **The `squad` input** on the five coarse tools targets a single sub-squad directly (`squad_research` with `squad=azure` scopes to `members/azure/`).
+
+Federation is additive: on a plain repository (no `federation.md`) the `squad` input is simply omitted and every tool behaves as before. Autonomy modes are forwarded to a single targeted sub-squad; a coordinated federation-wide pipeline across sub-squads is deferred.
 
 ## Execution model — delegated (local VS Code)
 

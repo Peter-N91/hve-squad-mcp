@@ -9,15 +9,16 @@ const router = new ToolRouter(catalog);
 
 const EXPECTED_TOOLS = [
   "squad_architect",
+  "squad_federate",
   "squad_plan",
   "squad_research",
   "squad_review",
   "squad_run",
 ];
 
-test("tools/list returns exactly the 5 coarse squad tools", () => {
+test("tools/list returns exactly the 6 coarse squad tools", () => {
   const descriptors = router.listToolDescriptors();
-  assert.equal(descriptors.length, 5);
+  assert.equal(descriptors.length, 6);
   assert.deepEqual(
     descriptors.map((d) => d.name).sort(),
     EXPECTED_TOOLS,

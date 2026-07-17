@@ -23,10 +23,17 @@ import type {
 } from "./coordinator-engine.js";
 import {
   COORDINATOR_PERSONA,
+  FEDERATION_COORDINATOR_PERSONA,
+  FEDERATION_DETECTION_NOTE,
   GATE_INSTRUCTIONS,
-  SQUAD_STATE_ROOT,
   modeInstructions,
+  squadStateRoot,
 } from "./persona.js";
+
+/** True for the federation meta tool (routes across named sub-squads). */
+function isFederationTool(tool: CatalogTool): boolean {
+  return tool.role === "Squad Federation Coordinator";
+}
 
 function toMatchedRouting(tool: CatalogTool): MatchedRouting {
   return {
@@ -41,10 +48,16 @@ function toMatchedRouting(tool: CatalogTool): MatchedRouting {
 }
 
 function composeSystemPrompt(tool: CatalogTool, request: CoordinatorRequest): string {
-  const blocks: string[] = [COORDINATOR_PERSONA];
+  const federation = isFederationTool(tool);
+  const blocks: string[] = [federation ? FEDERATION_COORDINATOR_PERSONA : COORDINATOR_PERSONA];
   // Gating instructions are load-bearing only for the pipeline/council tools.
   if (tool.gates || tool.council.length > 0) {
     blocks.push(GATE_INSTRUCTIONS);
+  }
+  // Surface federation resolution for the federation tool, or for any tool that
+  // did not pin a sub-squad (a plain repo ignores it; a federation repo needs it).
+  if (federation || !request.squad) {
+    blocks.push(FEDERATION_DETECTION_NOTE);
   }
   const modeBlock = modeInstructions(request.mode);
   if (modeBlock.length > 0) {
@@ -55,7 +68,30 @@ function composeSystemPrompt(tool: CatalogTool, request: CoordinatorRequest): st
 
 function composeFramedRequest(tool: CatalogTool, request: CoordinatorRequest): string {
   const lines: string[] = [];
-  if (tool.catchAll) {
+  if (isFederationTool(tool)) {
+    if (request.init) {
+      lines.push(
+        "Acting as the Squad Federation Coordinator, run Federation Init Mode",
+        "(propose -> confirm -> create): discover the repo, propose a set of named",
+        "sub-squads (each seeded from a profile), require a unique lower-kebab-case",
+        "name per sub-squad, and create the registry plus each sub-squad. Then route",
+        "the request below. Do NOT do the work inline.",
+      );
+    } else if (request.squad) {
+      lines.push(
+        `Acting as the Squad Federation Coordinator, route this request to the ` +
+          `**${request.squad}** sub-squad and run its normal per-turn protocol scoped ` +
+          "to `.copilot-tracking/squad/members/" + request.squad + "/`. Do NOT do the work inline.",
+      );
+    } else {
+      lines.push(
+        "Acting as the Squad Federation Coordinator, read `federation.md` and",
+        "`meta-routing.md`, classify this request to the matching sub-squad(s), and run",
+        "each scoped to its own `members/<name>/` root. Escalate if the target is",
+        "ambiguous or unknown. Do NOT do the work inline.",
+      );
+    }
+  } else if (tool.catchAll) {
     lines.push(
       "Acting as the Squad Coordinator, classify this request against the routing",
       "table and dispatch the matched roles through Research -> Plan -> Implement",
@@ -78,6 +114,13 @@ function composeFramedRequest(tool: CatalogTool, request: CoordinatorRequest): s
           "Council Verdict before any implementer dispatches.",
       );
     }
+    if (request.squad) {
+      lines.push(
+        "",
+        `Scope this dispatch to the **${request.squad}** federation sub-squad ` +
+          "(`.copilot-tracking/squad/members/" + request.squad + "/`).",
+      );
+    }
   }
   lines.push("", `> ${request.request.replace(/\n/g, "\n> ")}`);
   if (request.context && request.context.trim().length > 0) {
@@ -87,8 +130,10 @@ function composeFramedRequest(tool: CatalogTool, request: CoordinatorRequest): s
 }
 
 function composeStateContext(request: CoordinatorRequest): string {
+  const stateRoot = squadStateRoot(request.squad);
   const lines: string[] = [
-    `- squad state root: \`${SQUAD_STATE_ROOT}\` (create on first use via the Squad Scribe)`,
+    `- squad state root: \`${stateRoot}\` (create on first use via the Squad Scribe)`,
+    `- sub-squad: ${request.squad ?? "(none / plain squad; resolve from meta-routing in a federation)"}`,
     `- profile: ${request.profile ?? "(coordinator discovers / proposes)"}`,
     `- tier: ${request.tier ?? "(cost-first default)"}`,
     `- owner: ${request.owner ?? "(role-only dispatch)"}`,

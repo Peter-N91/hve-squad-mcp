@@ -1,9 +1,9 @@
 {
   "name": "@hve-squad/mcp",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Outbound Model Context Protocol (MCP) server that exposes the hve-squad as 5 coarse intent tools (squad_research, squad_plan, squad_review, squad_architect, squad_run) to MCP hosts such as VS Code GitHub Copilot. Phase 0: local stdio, delegated execution.",
+  "description": "Outbound Model Context Protocol (MCP) server that exposes the hve-squad as coarse intent tools (squad_research, squad_plan, squad_review, squad_architect, squad_run) plus squad_federate for the opt-in federation of named sub-squads, to MCP hosts such as VS Code GitHub Copilot. Phase 0: local stdio, delegated execution.",
   "license": "MIT",
   "bin": {
     "hve-squad-mcp": "dist/src/server.js"
