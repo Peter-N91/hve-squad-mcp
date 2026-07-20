@@ -6,7 +6,9 @@
  *   * squad-src/.github/agents/squad/squad-coordinator.agent.md (persona,
  *     Dispatch Discipline);
  *   * squad-src/.github/instructions/squad/squad-routing.instructions.md
- *     (Implementation Gate, Review Follow-Through).
+ *     (Implementation Gate, Review Follow-Through);
+ *   * squad-src/.github/instructions/squad/squad-intake-gate.instructions.md
+ *     (Intake Gate, Intake Readiness Verdict).
  *
  * They are embedded (not copied verbatim) so the Phase 0 server is deterministic
  * and runnable without a deployed consumer on disk. In a deployed workspace the
@@ -96,6 +98,21 @@ export const FEDERATION_DETECTION_NOTE = [
  * pipeline/council tools (`squad_run`, `squad_review`) where gating applies.
  */
 export const GATE_INSTRUCTIONS = [
+  "**Intake Gate.** When the request is grounded in requirement or input",
+  "artifacts (a PRD, BRD, spec, user story, design doc, transcript, or a",
+  "referenced input file) and will lead to a plan, a build, or a deliverable,",
+  "validate those inputs FIRST via the `intake-validator` role (resolved by",
+  "input type: PRD -> PRD Quality Reviewer, BRD -> BRD Quality Reviewer,",
+  "assumption/scope pressure-test -> Task Challenger, else Product Manager",
+  "Advisor). Record an `## Intake Readiness Verdict` (Ready / Ready-With-Gaps /",
+  "Not-Ready) in `.copilot-tracking/squad/decisions.md`. On `Not-Ready`, run the",
+  "bounded auto-remediation loop (dispatch `analyst`/`product-owner` to fill the",
+  "blocking gaps, then re-validate; cap two cycles) or escalate when a gap needs",
+  "a human decision. The gate is conditional (a no-op when no input artifact",
+  "grounds the work) and runs AHEAD of the Implementation Gate. `intake-validator`",
+  "ships with the `product` and `full` profiles; when a run is requirements-driven",
+  "but the roster lacks it, offer to add the role rather than skipping the check.",
+  "",
   "**Implementation Gate.** Before dispatching any implementation-tier role,",
   "confirm the methodology artifacts exist: a research artifact under",
   "`.copilot-tracking/research/`, a plan under `.copilot-tracking/plans/`, and —",

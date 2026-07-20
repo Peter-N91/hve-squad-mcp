@@ -51,6 +51,14 @@ Every tool's input mirrors the `/squad` prompt arguments: `request` (required), 
 
 Federation is additive: on a plain repository (no `federation.md`) the `squad` input is simply omitted and every tool behaves as before. Autonomy modes are forwarded to a single targeted sub-squad; with `mode=autopilot` and no `squad=` target, `squad_federate` runs a coordinated **federation-wide autopilot** meta-pipeline across sub-squads (ordered inner autopilot runs, federation-level gates attributed to the raising sub-squad, one aggregate `cost-ceiling`, and a single consolidated final-outcome validation).
 
+### Requirements intake gate
+
+`hve-squad@0.10.3` added a conditional **intake gate**: when a run is grounded in requirement or input artifacts (a PRD, BRD, spec, user story, design doc, transcript, or a referenced file), the coordinator validates those inputs for completeness, clarity, testability, consistency, and scope **before** it plans or builds, recording an `## Intake Readiness Verdict` (`Ready`, `Ready-With-Gaps`, `Not-Ready`) in `decisions.md`. On `Not-Ready` it runs a bounded auto-remediation loop (dispatch the analyst/product-owner to fill the blocking gaps, then re-validate; capped at two cycles) and escalates when a gap needs a human decision.
+
+The server surfaces the gate in the **delegated (local VS Code)** path: the coordinator persona's gate context now instructs the host to run the intake gate ahead of the Implementation Gate whenever a request is requirements-driven. The gate maps to a new `intake-validator` role that reuses existing agents by input type (Product Manager Advisor by default; PRD/BRD Quality Reviewer; Task Challenger), shipped with the `product` and `full` profiles. The gate is conditional and additive &mdash; with no input artifacts in scope it is a silent no-op.
+
+Surfacing the intake gate as an explicit stage of the **embedded/advisory pipeline** (`squad_run`) is deferred to a later release, mirroring how the embedded federation pipeline was staged; the delegated path carries the full behavior today.
+
 ## Execution model — delegated (local VS Code)
 
 The Step 0.1 delegated-drive spike validated this path (Question A = PASS): VS Code Copilot auto-invokes the tool and drives its own in-host dispatch loop. The spike was a disposable de-risking exercise; it is **not** shipped with the package (it is git-ignored — see `.gitignore`). In the delegated (local) mode the server runs **no model**; it returns:

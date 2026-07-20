@@ -10,6 +10,24 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
+## [0.2.2] - 2026-07-20
+
+### Added
+
+- **Requirements intake gate awareness**, tracking the conditional intake gate now shipped in `hve-squad@0.10.3`. When a request is grounded in requirement or input artifacts and will lead to a plan, a build, or a deliverable, the delegated coordinator payload now instructs the host to validate those inputs first via the new `intake-validator` role, record an `## Intake Readiness Verdict` (`Ready` / `Ready-With-Gaps` / `Not-Ready`), and on `Not-Ready` run the bounded auto-remediation loop (dispatch `analyst`/`product-owner` → re-validate, capped at two cycles) or escalate — all ahead of the Implementation Gate.
+  - New Intake Gate paragraph in the delegated persona gate context (`src/engine/persona.ts`, `GATE_INSTRUCTIONS`), surfaced for the pipeline/council tools (`squad_run`, `squad_review`, `squad_federate`).
+
+### Changed
+
+- Bumped the bundled cast pin to `Peter-N91/hve-squad@0.10.3` and refreshed the snapshot (`host/cast/`), so `squad-intake-gate.instructions.md`, the `intake-validator` roster row, and the Intake Gate routing section are on disk for the routing engine, persona resolution, and the drift check.
+- Documented the intake gate in the README.
+
+### Notes
+
+- Surfacing the intake gate as an explicit stage of the embedded/advisory pipeline (`squad_run`) is deferred, mirroring the staged embedded federation work; the delegated (local VS Code) path carries the full intake-gate behavior today.
+
+[0.2.2]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.2.2
+
 ## [0.2.1] - 2026-07-17
 
 ### Added

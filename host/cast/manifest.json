@@ -1,9 +1,9 @@
 {
   "generatedBy": "host/snapshot-cast.ts",
   "sourcePackage": "Peter-N91/hve-squad",
-  "linkedPackageVersion": "0.10.2",
-  "sourceCommit": "8769945f68bbcd269cc2d0e1eeb5adffa9d13a2e",
-  "generatedAt": "2026-07-17",
+  "linkedPackageVersion": "0.10.3",
+  "sourceCommit": "237c02e0bd8e8f184ead44585ecd9eda6895b87d",
+  "generatedAt": "2026-07-20",
   "agentFileCount": 103,
   "agentNames": [
     "Accessibility Framework Assessor",
@@ -116,6 +116,7 @@
     "instructions/squad/squad-council.instructions.md",
     "instructions/squad/squad-federation-autopilot.instructions.md",
     "instructions/squad/squad-federation.instructions.md",
+    "instructions/squad/squad-intake-gate.instructions.md",
     "instructions/squad/squad-mcp-capability.instructions.md",
     "instructions/squad/squad-notifications.instructions.md",
     "instructions/squad/squad-roster.instructions.md",
