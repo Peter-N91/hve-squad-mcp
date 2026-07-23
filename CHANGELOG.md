@@ -9,7 +9,17 @@ This server is a companion to the [hve-squad](https://github.com/Peter-N91/hve-s
 APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
+## [0.2.4] - 2026-07-23
 
+### Changed
+
+- Bumped the bundled cast pin to `Peter-N91/hve-squad@0.10.5` and refreshed the snapshot (`host/cast/`, pinned commit `e23817890bd75230a1aa22ca7179004eb252d9fc`), bringing the squad's **Auto-mode step-completion hardening** on disk for the routing engine, persona resolution, and the drift check. The refresh adds the coordinator's **Step 7: Verify Before Responding** turn-completion checklist and **Fast-Tier Robustness** callout, the federation coordinator's two-level Step 7 verification, the autopilot **Per-Stage Advance Checklist**, and the federation-autopilot **Meta-Stage Advance and Gate-Propagation Checklist** (`squad-coordinator.agent.md`, `squad-federation-coordinator.agent.md`, `squad-autopilot.instructions.md`, `squad-federation-autopilot.instructions.md`).
+
+### Notes
+
+- The hardening restates the existing proof-of-dispatch and artifact-gate rules as mechanical checklists so a lighter or auto-selected model on the delegated (local VS Code) path follows every stage instead of narrating skipped work. The embedded/advisory pipeline (`squad_run`) already enforces stage completion in code, so this refresh keeps the bundled reference and drift check current rather than changing embedded runtime behavior.
+
+[0.2.4]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.2.4
 ## [0.2.3] - 2026-07-22
 
 ### Changed
