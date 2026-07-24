@@ -9,6 +9,15 @@ This server is a companion to the [hve-squad](https://github.com/Peter-N91/hve-s
 APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
+## [0.2.5] - 2026-07-24
+
+### Changed
+
+- Bumped the package pin to `Peter-N91/hve-squad@0.10.6` and cut this release to track it.
+  Run `npm run snapshot:cast` on this branch if the bundled cast changed (the cast-bundle CI check enforces it).
+
+[0.2.5]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.2.5
+
 ## [0.2.4] - 2026-07-23
 
 ### Changed
