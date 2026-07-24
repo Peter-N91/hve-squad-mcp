@@ -383,7 +383,7 @@
           },
           "init": {
             "type": "boolean",
-            "description": "When true, run Federation Init Mode (propose → confirm → create) before routing."
+            "description": "When true, run Federation Init Mode (propose → confirm → create) on a fresh project, or Federation Expansion Mode (add a new sub-squad and register it) when a federation already exists, before routing."
           },
           "promote": {
             "type": "boolean",

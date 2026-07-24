@@ -9,6 +9,18 @@ This server is a companion to the [hve-squad](https://github.com/Peter-N91/hve-s
 APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
+## [0.2.7] - 2026-07-24
+
+### Added
+
+- **`squad_federate` `init` now also adds a sub-squad to an existing federation** surfacing the squad's new Federation Expansion Mode. On a fresh project `init` builds a federation; on an existing federation (`federation.md` present) `init` runs Expansion — propose, confirm, seed `members/<new>/`, and register the new sub-squad in `federation.md` and `meta-routing.md`. No new tool input is needed; the delegated framed-request builder now emits build-vs-expand guidance and the catalog description is updated (`src/engine/delegated.ts`, `tools.catalog.yml`, regenerated `generated/mcp-tools.schema.json`).
+
+### Changed
+
+- Bumped the package pin to `Peter-N91/hve-squad@0.10.8` and refreshed the bundled cast snapshot (`host/cast/`, pinned commit `a97801f4492b2229a013276c6e5b7506e6f90625`), bringing the **Federation Expansion** contract on disk: the *Expansion: Add a Sub-Squad to an Existing Federation* section in `squad-federation.instructions.md`, the Federation Coordinator's **Expansion Mode**, and the Scribe's **Step 11** register-a-new-sub-squad step, so persona resolution and the drift check reflect the expansion behavior.
+
+[0.2.7]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.2.7
+
 ## [0.2.6] - 2026-07-24
 
 ### Added

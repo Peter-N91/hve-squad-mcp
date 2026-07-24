@@ -90,11 +90,15 @@ function composeFramedRequest(tool: CatalogTool, request: CoordinatorRequest): s
       );
     } else if (request.init) {
       lines.push(
-        "Acting as the Squad Federation Coordinator, run Federation Init Mode",
-        "(propose -> confirm -> create): discover the repo, propose a set of named",
-        "sub-squads (each seeded from a profile), require a unique lower-kebab-case",
-        "name per sub-squad, and create the registry plus each sub-squad. Then route",
-        "the request below. Do NOT do the work inline.",
+        "Acting as the Squad Federation Coordinator, run Federation Init Mode when no",
+        "`federation.md` exists yet (propose -> confirm -> create): discover the repo,",
+        "propose a set of named sub-squads (each seeded from a profile), require a unique",
+        "lower-kebab-case name per sub-squad, and create the registry plus each sub-squad.",
+        "When a `federation.md` ALREADY exists, instead run Federation Expansion Mode:",
+        "propose and confirm the new sub-squad, seed it under `members/<new>/`, and register",
+        "it by appending its row to `federation.md` and its route to `meta-routing.md`",
+        "(preserving every existing row). Then route the request below. Do NOT do the work",
+        "inline.",
       );
     } else if (request.squad) {
       lines.push(

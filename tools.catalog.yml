@@ -356,7 +356,7 @@ tools:
           description: "Optional sub-squad name to target directly, overriding meta-routing."
         init:
           type: boolean
-          description: "When true, run Federation Init Mode (propose → confirm → create) before routing."
+          description: "When true, run Federation Init Mode (propose → confirm → create) on a fresh project, or Federation Expansion Mode (add a new sub-squad and register it) when a federation already exists, before routing."
         promote:
           type: boolean
           description: "When true on an existing single-squad project (a top-level team.md, no federation.md), run Federation Promotion Mode: adopt the existing squad into a federation as its first sub-squad, relocating its state intact, before routing."
