@@ -107,6 +107,7 @@ export class ToolRouter {
       context: optionalString(record.context),
       squad: optionalString(record.squad),
       init: record.init === true,
+      promote: record.promote === true,
     };
   }
 }

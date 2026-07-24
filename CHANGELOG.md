@@ -9,6 +9,18 @@ This server is a companion to the [hve-squad](https://github.com/Peter-N91/hve-s
 APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
+## [0.2.6] - 2026-07-24
+
+### Added
+
+- **`squad_federate` gains a `promote` input** surfacing the squad's new single-squad → federation promotion path. When a repository is already a single squad (a top-level `team.md`, no `federation.md`), `squad_federate` with `promote=true` runs the Federation Coordinator's **Promotion Mode** — adopting the existing squad into a federation as its first sub-squad by relocating its state tree into `members/<name>/` intact and seeding the meta layer — before routing. Plumbed through the catalog, the `CoordinatorRequest` type, the router, and the delegated framed-request builder, which now emits an explicit Promotion Mode dispatch instruction (`tools.catalog.yml`, `src/engine/coordinator-engine.ts`, `src/router/router.ts`, `src/engine/delegated.ts`, regenerated `generated/mcp-tools.schema.json`).
+
+### Changed
+
+- Bumped the package pin to `Peter-N91/hve-squad@0.10.7` and refreshed the bundled cast snapshot (`host/cast/`, pinned commit `34e79555085639e199555aa1a33739f78cf1c66b`), bringing the squad's **single-squad → federation promotion** contract on disk: the *Promotion: Single Squad → Federation* section in `squad-federation.instructions.md`, the Federation Coordinator's **Promotion Mode**, and the Scribe's **Step 10** relocation-and-seed step, so persona resolution and the drift check reflect the promotion behavior.
+
+[0.2.6]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.2.6
+
 ## [0.2.5] - 2026-07-24
 
 ### Changed

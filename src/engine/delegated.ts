@@ -75,7 +75,20 @@ function composeSystemPrompt(tool: CatalogTool, request: CoordinatorRequest): st
 function composeFramedRequest(tool: CatalogTool, request: CoordinatorRequest): string {
   const lines: string[] = [];
   if (isFederationTool(tool)) {
-    if (request.init) {
+    if (request.promote) {
+      lines.push(
+        "Acting as the Squad Federation Coordinator, run Federation Promotion Mode",
+        "(propose -> confirm -> migrate -> seed -> route) to adopt the EXISTING single",
+        "squad into a federation as its first sub-squad: read the top-level `team.md`,",
+        "propose a unique lower-kebab-case sub-squad name (default from its profile), and",
+        "on confirmation have the Squad Scribe relocate the whole top-level state tree",
+        "into `.copilot-tracking/squad/members/<name>/` intact (append-only decision and",
+        "history logs preserved) and seed the federation meta layer (`federation.md`,",
+        "`meta-routing.md`, and the federation-level decisions/history). Refuse if a",
+        "`federation.md` already exists or the target `members/<name>/` is taken. Then",
+        "route the request below. Do NOT do the work inline.",
+      );
+    } else if (request.init) {
       lines.push(
         "Acting as the Squad Federation Coordinator, run Federation Init Mode",
         "(propose -> confirm -> create): discover the repo, propose a set of named",

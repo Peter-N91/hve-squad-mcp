@@ -326,7 +326,9 @@ tools:
       sub-squad(s) — or honors an explicit `squad=<name>` — and runs each
       sub-squad's normal per-turn protocol scoped to
       `.copilot-tracking/squad/members/<name>/`. Set `init` to build a federation
-      (propose → confirm → create) on a fresh project. This is the catch-all
+      (propose → confirm → create) on a fresh project, or `promote` to adopt an
+      existing single squad (a top-level `team.md`) into a federation as its first
+      sub-squad, relocating its state intact. This is the catch-all
       federation entry point and runs at the `confirm` tier with gates.
       Delegated execution: returns the Federation Coordinator persona, the
       federation routing decision, and a framed dispatch request for the host to
@@ -355,6 +357,9 @@ tools:
         init:
           type: boolean
           description: "When true, run Federation Init Mode (propose → confirm → create) before routing."
+        promote:
+          type: boolean
+          description: "When true on an existing single-squad project (a top-level team.md, no federation.md), run Federation Promotion Mode: adopt the existing squad into a federation as its first sub-squad, relocating its state intact, before routing."
         profile:
           type: string
           enum: [default, full, security, design, architecture, azure, product]

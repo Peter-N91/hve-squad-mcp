@@ -363,7 +363,7 @@
     {
       "name": "squad_federate",
       "title": "Squad Federate",
-      "description": "Run the squad **federation** meta layer for a repository that hosts several named sub-squads (for example a `product` sub-squad for the business team and an `azure` sub-squad for the architects). Hands the request to the Squad Federation Coordinator, which reads the federation registry (`federation.md`) and meta-routing (`meta-routing.md`), selects the target sub-squad(s) — or honors an explicit `squad=<name>` — and runs each sub-squad's normal per-turn protocol scoped to `.copilot-tracking/squad/members/<name>/`. Set `init` to build a federation (propose → confirm → create) on a fresh project. This is the catch-all federation entry point and runs at the `confirm` tier with gates. Delegated execution: returns the Federation Coordinator persona, the federation routing decision, and a framed dispatch request for the host to drive. Use for cross-sub-squad requests, an explicit sub-squad target, or federation setup.",
+      "description": "Run the squad **federation** meta layer for a repository that hosts several named sub-squads (for example a `product` sub-squad for the business team and an `azure` sub-squad for the architects). Hands the request to the Squad Federation Coordinator, which reads the federation registry (`federation.md`) and meta-routing (`meta-routing.md`), selects the target sub-squad(s) — or honors an explicit `squad=<name>` — and runs each sub-squad's normal per-turn protocol scoped to `.copilot-tracking/squad/members/<name>/`. Set `init` to build a federation (propose → confirm → create) on a fresh project, or `promote` to adopt an existing single squad (a top-level `team.md`) into a federation as its first sub-squad, relocating its state intact. This is the catch-all federation entry point and runs at the `confirm` tier with gates. Delegated execution: returns the Federation Coordinator persona, the federation routing decision, and a framed dispatch request for the host to drive. Use for cross-sub-squad requests, an explicit sub-squad target, or federation setup.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -384,6 +384,10 @@
           "init": {
             "type": "boolean",
             "description": "When true, run Federation Init Mode (propose → confirm → create) before routing."
+          },
+          "promote": {
+            "type": "boolean",
+            "description": "When true on an existing single-squad project (a top-level team.md, no federation.md), run Federation Promotion Mode: adopt the existing squad into a federation as its first sub-squad, relocating its state intact, before routing."
           },
           "profile": {
             "type": "string",

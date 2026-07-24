@@ -29,6 +29,8 @@ export interface CoordinatorRequest {
   squad?: string;
   /** Optional flag to run Federation Init Mode (squad_federate only). */
   init?: boolean;
+  /** Optional flag to run Federation Promotion Mode: adopt an existing single squad into a federation (squad_federate only). */
+  promote?: boolean;
 }
 
 /** The routing decision attached to a tool, surfaced back to the host. */
