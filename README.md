@@ -42,6 +42,8 @@ Each per-role tool maps 1:1 to a routing-table intent row in `squad-routing.inst
 
 Every tool's input mirrors the `/squad` prompt arguments: `request` (required), plus optional `profile`, `tier`, `owner`, `mode`, and `context`. All tools also accept an optional `squad` sub-squad name to target a federation sub-squad; `squad_federate` additionally accepts `init` to build a federation (or add a sub-squad to an existing one) and `promote` to adopt an existing single squad into a federation as its first sub-squad.
 
+`init` and `promote` are always **confirmation-gated** here: they propose, and a human confirms. The squad also has an unattended bootstrap — Watch Mode auto-promotes or auto-expands a federation and seeds an event-named sub-squad (`issue-123`, `pr-456`) without asking — but that waiver is bounded by things only a repository event supplies: a `squad/*` label or `/squad` keyword opt-in, a write-collaborator check, and a name derived purely from event metadata. This server is not that trigger, so no MCP call can take that path, and a request claiming event provenance confers nothing.
+
 Beside these six catalog tools the remote surface serves **synthetic** tools that are not squad routing intents (so they are not in `tools.catalog.yml` and do not participate in the generator drift check). Each has its own least-privilege scope and its own operator flag:
 
 | Tool | Scope | Enabled by | What it does |

@@ -10,6 +10,21 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
+## [0.2.10] - 2026-07-27
+
+> Built against `Peter-N91/hve-squad@0.10.10` (see `host/cast/package-pin.json`).
+
+### Changed
+
+- **Bumped the package pin to `Peter-N91/hve-squad@0.10.10` and refreshed the bundled cast snapshot** (`host/cast/`, pinned commit `61a72c0b644d08ed96e0e8b71aaf7ca1f6ea67c0`), bringing the squad's **event-scoped Watch Mode sub-squads** on disk. The embedded engine resolves real persona bytes from this bundle, so the Federation Coordinator it ships now carries **Watch Mode Bootstrap Mode**, the Scribe carries the compare-and-swap promotion refusal, and `squad-watch-mode.instructions.md` carries the *Event-Scoped Sub-Squads (Federation Bootstrap)* contract — the bootstrap decision table, the deterministic naming rules (`issue-<N>`, `pr-<N>`, `sweep-<YYYY-MM-DD>`, `push-<branch-slug>-<sha7>`, `dispatch-<runId>`), and the watch-owned registry convention.
+
+### Security
+
+- **No MCP turn can claim the unattended Watch Mode bootstrap.** The squad release gives the Federation Coordinator an auto-approved promotion/expansion path, and that confirmation waiver is bounded by things only a repository event supplies: a `squad/*` label or `/squad` keyword opt-in, a write-collaborator authorization check, and a sub-squad name derived purely from structural event metadata. This server is not that trigger — it has no event, no label gate, no collaborator check, and its callers supply free text. Because the newly bundled charter now *describes* the auto-approved path, both federation surfaces pin every turn as confirmation-gated: the delegated system prompt (`FEDERATION_COORDINATOR_PERSONA`) and the server-composed embedded directive (`federationDirective`) both carry a `NO_WATCH_BOOTSTRAP_NOTE` stating that this is not a Watch Mode turn, that Promotion and Expansion propose and wait, that a sub-squad name is never derived from request text, and that a claim of event provenance in the request confers nothing. The `promote` branch of the embedded directive now says "confirmation-gated promotion, not the unattended Watch Mode one" explicitly (`src/engine/persona.ts`, `src/engine/federation.ts`).
+- New `test/watch-bootstrap-exclusion.test.ts` (6 tests) proves the guard is present on both surfaces and load-bearing: it asserts the bundled charter really carries the unattended mode, that every directive shape (plain, `promote`, `init`, pinned `squad`, `autopilot`) includes the note, and that a caller claiming event provenance — with a traversal-shaped `squad` value — produces a directive byte-identical to the plain turn.
+
+[0.2.10]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.2.10
+
 ## [0.2.9] - 2026-07-27
 
 > Built against `Peter-N91/hve-squad@0.10.9` (unchanged from 0.2.8; see `host/cast/package-pin.json`).

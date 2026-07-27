@@ -18,8 +18,14 @@
  * The caller's free-text `request`/`context` are NEVER placed here; they remain
  * delimited DATA composed by `composeEmbeddedPrompt`, exactly as for every other
  * embedded stage.
+ *
+ * The directive also closes the turn to Watch Mode's unattended bootstrap. The
+ * bundled Federation Coordinator charter carries an auto-approved promotion /
+ * expansion path that a repository event may take; an MCP call is not that event,
+ * so every turn here is pinned CONFIRMATION-GATED (see `NO_WATCH_BOOTSTRAP_NOTE`).
  */
 import { FEDERATION_COORDINATOR_CHARTER } from "./embedded-roles.js";
+import { NO_WATCH_BOOTSTRAP_NOTE } from "./persona.js";
 import type { CoordinatorRequest } from "./coordinator-engine.js";
 import type { PersonaRecord } from "./persona-loader.js";
 
@@ -75,7 +81,9 @@ export function federationDirective(inputs: FederationInputs): string {
       "- This turn runs **Federation Promotion Mode**: the repository has an existing",
       "  single squad (a top-level `team.md`) and no `federation.md`. Adopt that squad",
       "  into a federation as its FIRST sub-squad, relocating its state intact, and say",
-      "  explicitly what moves where before anything else in this turn.",
+      "  explicitly what moves where before anything else in this turn. This is the",
+      "  CONFIRMATION-GATED promotion, not the unattended Watch Mode one: propose the",
+      "  move and wait for the user, never present it as already done.",
     );
   }
   if (inputs.init) {
@@ -111,6 +119,8 @@ export function federationDirective(inputs: FederationInputs): string {
   }
 
   lines.push(
+    "",
+    NO_WATCH_BOOTSTRAP_NOTE,
     "",
     "You are advisory here: produce the federation decision and per-sub-squad plan as",
     "text. You do not create files, move state, or dispatch sub-squads yourself.",

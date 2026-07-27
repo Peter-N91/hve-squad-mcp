@@ -1,9 +1,9 @@
 {
   "generatedBy": "host/snapshot-cast.ts",
   "sourcePackage": "Peter-N91/hve-squad",
-  "linkedPackageVersion": "0.10.8",
-  "sourceCommit": "a97801f4492b2229a013276c6e5b7506e6f90625",
-  "generatedAt": "2026-07-24",
+  "linkedPackageVersion": "0.10.10",
+  "sourceCommit": "61a72c0b644d08ed96e0e8b71aaf7ca1f6ea67c0",
+  "generatedAt": "2026-07-27",
   "agentFileCount": 103,
   "agentNames": [
     "Accessibility Framework Assessor",
