@@ -90,6 +90,18 @@ export interface RunState {
   request?: string;
   context?: string;
   /**
+   * The REMAINING coordinator inputs (profile, tier, owner, mode, and the
+   * federation `squad` / `init` / `promote` flags) persisted as a JSON blob so an
+   * async run reconstructs the FULL {@link import("./coordinator-engine.js").CoordinatorRequest}
+   * after an out-of-band approval. Without this, a resumed run silently dropped
+   * every input except `request`/`context` — which made a federation run
+   * (`squad_federate`) indistinguishable from a plain `squad_run` once it crossed
+   * the durable boundary. Encrypted at rest with the same cipher as
+   * `request`/`context` (MEDIUM-3): `owner` is a person's name and `context`-class
+   * data, so it gets the same protection.
+   */
+  params?: string;
+  /**
    * WI-06 — the out-of-band OPERATOR approval, persisted ON the run record so it
    * is visible to EVERY replica (a store-backed {@link HumanApprovalChannel} reads
    * these). The in-process approval map only released a hold on the replica that

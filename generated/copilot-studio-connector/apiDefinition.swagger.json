@@ -2,7 +2,7 @@
   "swagger": "2.0",
   "info": {
     "title": "hve-squad (squad-guided / embedded)",
-    "description": "Calls the hve-squad MCP server (squad-guided / embedded). The squad runs server-side under its gates and methodology; this connector exposes squad_research, squad_plan, squad_review, squad_architect, squad_run, squad_status, squad_render_pptx.",
+    "description": "Calls the hve-squad MCP server (squad-guided / embedded). The squad runs server-side under its gates and methodology; this connector exposes squad_research, squad_plan, squad_review, squad_architect, squad_run, squad_federate, squad_status, squad_render_pptx, squad_memory_read, squad_memory_write, squad_business_plan, squad_backlog.",
     "version": "1.0"
   },
   "host": "<SQUAD_MCP_HOST>",
@@ -43,7 +43,12 @@
         "Squad.Review": "Invoke squad_review",
         "Squad.Architect": "Invoke squad_architect",
         "Squad.Run": "Invoke squad_status",
-        "Squad.Render": "Invoke squad_render_pptx"
+        "Squad.Federate": "Invoke squad_federate",
+        "Squad.Render": "Invoke squad_render_pptx",
+        "Squad.Memory": "Invoke squad_memory_read",
+        "Squad.MemoryWrite": "Invoke squad_memory_write",
+        "Squad.Business": "Invoke squad_business_plan",
+        "Squad.Backlog": "Invoke squad_backlog"
       }
     }
   },

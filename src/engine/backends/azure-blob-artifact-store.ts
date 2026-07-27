@@ -179,6 +179,46 @@ export class AzureBlobArtifactStore {
     }
   }
 
+  /**
+   * WI-03 — PUT arbitrary bytes at a caller-minted, tenant-scoped `blobPath`
+   * (create-or-replace), the overflow channel for the squad-memory store. Unlike
+   * {@link putBlob} this takes an explicit `contentType` (the payload is an
+   * encrypted memory envelope, not a `.pptx`) and mints NO SAS — reads are
+   * server-side via {@link getObject}, never a caller-facing download link.
+   */
+  async putObject(
+    blobPath: string,
+    bytes: Uint8Array,
+    contentType = "application/octet-stream",
+  ): Promise<void> {
+    const url = `${this.baseUrl}/${this.container}/${blobPath}`;
+    const headers = await this.authHeaders({
+      "x-ms-blob-type": "BlockBlob",
+      "Content-Type": contentType,
+    });
+    const response = await this.fetchImpl(url, { method: "PUT", headers, body: bytes });
+    if (!response.ok) {
+      throw new Error(`Blob upload failed with status ${response.status}.`);
+    }
+  }
+
+  /**
+   * WI-03 — GET the bytes at `blobPath`, or `undefined` when the blob is absent
+   * (404). Server-side read used by the overflow channel to rehydrate a memory
+   * pointer entity; error paths never include the response body (SEC-10).
+   */
+  async getObject(blobPath: string): Promise<Uint8Array | undefined> {
+    const url = `${this.baseUrl}/${this.container}/${blobPath}`;
+    const response = await this.fetchImpl(url, { method: "GET", headers: await this.authHeaders() });
+    if (response.status === 404) {
+      return undefined;
+    }
+    if (!response.ok) {
+      throw new Error(`Blob download failed with status ${response.status}.`);
+    }
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
   /** Ask the service for a user-delegation key valid over [start, expiry]. */
   private async getUserDelegationKey(start: Date, expiry: Date): Promise<UserDelegationKey> {
     const url = `${this.baseUrl}/?restype=service&comp=userdelegationkey`;

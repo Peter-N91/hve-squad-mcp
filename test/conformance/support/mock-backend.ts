@@ -27,6 +27,12 @@ export interface MockBackendOptions {
   costUsdPerCall?: number;
   /** Optional hook run on every call (e.g. to exercise the logger redaction path). */
   onComplete?: (request: BackendRequest) => void;
+  /**
+   * A fixed completion text returned instead of the role-structured artifact.
+   * Used by corpora that assert on a SHAPED result (for example the structured
+   * backlog contract), where the deterministic role artifact is not the subject.
+   */
+  reply?: string;
 }
 
 /** Produce a deterministic, role-structured artifact from the system authority. */
@@ -91,7 +97,7 @@ export class MockModelBackend implements ModelBackend {
       return Promise.reject(this.options.failWith);
     }
     return Promise.resolve({
-      text: roleArtifact(request.system),
+      text: this.options.reply ?? roleArtifact(request.system),
       finishReason: "stop",
       usage: {
         inputTokens: 120,

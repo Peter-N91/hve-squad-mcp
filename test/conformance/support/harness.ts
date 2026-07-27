@@ -25,6 +25,8 @@ import {
   type HttpResponseLike,
 } from "../../../src/transports/http-core.js";
 import type { PptxRenderService } from "../../../src/engine/render/pptx-render-service.js";
+import type { SquadMemoryStore } from "../../../src/engine/squad-memory-state.js";
+import type { AutoMemory } from "../../../src/engine/auto-memory.js";
 import { MockModelBackend } from "./mock-backend.js";
 import { FakeJwtVerifier, TEST_AUDIENCE, TEST_ISSUER, bearer } from "./fake-auth.js";
 import { createCapturingLogger } from "./log-capture.js";
@@ -52,6 +54,16 @@ export interface HarnessOptions {
   pipelineExposed?: boolean;
   /** Optional PPTX render service; when set, squad_render_pptx is exposed. */
   renderService?: PptxRenderService;
+  /**
+   * Optional shared-state memory broker store; when set, the resource read
+   * surface and the `squad_memory_*` tools are served (the operator enabled the
+   * memory feature). Absent by default — the advisory-only posture.
+   */
+  memoryStore?: SquadMemoryStore;
+  /** Whether the business-facing tools are served (default false, as in production). */
+  businessToolsExposed?: boolean;
+  /** Deterministic server-side memory continuity; absent = the manual-memory default. */
+  autoMemory?: AutoMemory;
 }
 
 export interface Harness {
@@ -104,6 +116,7 @@ export function buildHarness(options: HarnessOptions = {}): Harness {
     gates,
     runStateStore: options.runStateStore,
     approvals,
+    autoMemory: options.autoMemory,
     logger,
   });
 
@@ -120,6 +133,8 @@ export function buildHarness(options: HarnessOptions = {}): Harness {
     // pipelineExposed:false to assert the safe hero-only default.
     pipelineExposed: options.pipelineExposed ?? true,
     renderService: options.renderService,
+    memoryStore: options.memoryStore,
+    businessToolsExposed: options.businessToolsExposed ?? false,
   });
 
   return {

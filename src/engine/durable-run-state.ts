@@ -88,6 +88,7 @@ export class DurableRunStateStore implements RunStateStore {
       ...run,
       request: encryptField(this.cipher, run.request),
       context: encryptField(this.cipher, run.context),
+      params: encryptField(this.cipher, run.params),
       stages: this.sealStages(run.stages),
       councilVerdict: this.sealVerdict(run.councilVerdict),
     };
@@ -99,6 +100,7 @@ export class DurableRunStateStore implements RunStateStore {
       ...run,
       request: decryptField(this.cipher, run.request),
       context: decryptField(this.cipher, run.context),
+      params: decryptField(this.cipher, run.params),
       stages: this.openStages(run.stages),
       councilVerdict: this.openVerdict(run.councilVerdict),
     };

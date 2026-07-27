@@ -42,6 +42,16 @@ Each per-role tool maps 1:1 to a routing-table intent row in `squad-routing.inst
 
 Every tool's input mirrors the `/squad` prompt arguments: `request` (required), plus optional `profile`, `tier`, `owner`, `mode`, and `context`. All tools also accept an optional `squad` sub-squad name to target a federation sub-squad; `squad_federate` additionally accepts `init` to build a federation (or add a sub-squad to an existing one) and `promote` to adopt an existing single squad into a federation as its first sub-squad.
 
+Beside these six catalog tools the remote surface serves **synthetic** tools that are not squad routing intents (so they are not in `tools.catalog.yml` and do not participate in the generator drift check). Each has its own least-privilege scope and its own operator flag:
+
+| Tool | Scope | Enabled by | What it does |
+| --- | --- | --- | --- |
+| `squad_status` | `Squad.Run` | `SQUAD_MCP_REMOTE_PIPELINE_ENABLED` | Poll an async run by id. |
+| `squad_render_pptx` | `Squad.Render` | `SQUAD_MCP_ENABLE_RENDER_PPTX` | Render content YAML to a `.pptx` download link. |
+| `squad_memory_read` / `_write` / `_sync` | `Squad.Memory` / `Squad.MemoryWrite` | `SQUAD_MCP_ENABLE_MEMORY` | Read / CAS-write / batch-flush the project's own squad memory. |
+| `squad_business_plan` | `Squad.Business` | `SQUAD_MCP_ENABLE_BUSINESS_TOOLS` | A plain-language business plan for a non-technical stakeholder. |
+| `squad_backlog` | `Squad.Backlog` | `SQUAD_MCP_ENABLE_BUSINESS_TOOLS` | A **validated JSON** backlog contract for the native ADO/Jira connectors. |
+
 ### Federation (sub-squads)
 
 `hve-squad@0.10.x` added an opt-in **federation**: one repository can host several named sub-squads (for example a `product` sub-squad for the business team and an `azure` sub-squad for the architects), each an ordinary squad rooted at `.copilot-tracking/squad/members/<name>/`. The server surfaces this two ways:
@@ -50,6 +60,8 @@ Every tool's input mirrors the `/squad` prompt arguments: `request` (required), 
 - **The `squad` input** on the five coarse tools targets a single sub-squad directly (`squad_research` with `squad=azure` scopes to `members/azure/`).
 
 Federation is additive: on a plain repository (no `federation.md`) the `squad` input is simply omitted and every tool behaves as before. Autonomy modes are forwarded to a single targeted sub-squad; with `mode=autopilot` and no `squad=` target, `squad_federate` runs a coordinated **federation-wide autopilot** meta-pipeline across sub-squads (ordered inner autopilot runs, federation-level gates attributed to the raising sub-squad, one aggregate `cost-ceiling`, and a single consolidated final-outcome validation).
+
+**Federation over the remote boundary.** `squad_federate` is reachable from Copilot Studio when the operator enables the gated pipeline (`SQUAD_MCP_REMOTE_PIPELINE_ENABLED=true`). It is the same safety class as `squad_run` — a gated catch-all — so it inherits the same rules: it holds at the non-bypassable Human Gate, returns a run id, and is released out-of-band via `POST /admin/approve` before `squad_status` drives it to a finished federation decision. It requires its own **`Squad.Federate`** scope, deliberately separate from `Squad.Run`, and its `squad` / `init` / `promote` / `mode` inputs are persisted with the run so they survive the approve → poll cycle. Server-side it runs as a Federation Coordinator advisory stage: the routing decision, the per-sub-squad plan, dependencies, and federation-level gates as finished text. The scoping directive is composed only from validated inputs; the caller's free text stays delimited DATA.
 
 ### Requirements intake gate
 
@@ -78,6 +90,35 @@ Over the remote Streamable HTTP `/mcp` boundary the server runs the squad stage 
 - **Async pipeline** (`squad_run` → held run id; `squad_status` → poll) — exposed only when the operator sets `SQUAD_MCP_REMOTE_PIPELINE_ENABLED=true` with a durable run-state backend (`file` local dir, or `table` = Azure Table Storage for multi-replica). `squad_run` holds at a non-bypassable Human Gate; an operator releases a held run out-of-band via `POST /admin/approve` (distinct `Squad.Operate` role), then `squad_status` drives it to completion. Cross-replica release uses the Table backend's ETag compare-and-swap + a store-backed approval record; long runs (>240s) are driven by an optional worker ACA Job (`SQUAD_MCP_WORKER_ENABLED=true`). See the [status section](#status--what-works-today-read-this-first) for the remaining limit (2-stage slice).
 
 The embedded and delegated modes share the same router, tool schema, and persona source of truth behind one `CoordinatorEngine` seam; the security model is enforced in `src/transports/http-core.ts`, `src/auth/`, and `src/engine/` and proven by the conformance suites under `test/conformance/`.
+
+## Squad memory — automatic, and portable beyond Azure
+
+The shared-state broker exposes the project's own `.copilot-tracking/squad/` memory as tenant-isolated MCP resources plus compare-and-swap write tools (`SQUAD_MCP_ENABLE_MEMORY=true`). Two additions make it usable by a business user in Copilot Studio.
+
+**Automatic continuity (`SQUAD_MCP_MEMORY_AUTO_ENABLED=true`).** Memory used to work only if the agent remembered to call the memory tools with a project name it invented — unreliable under generative orchestration, and different every session. With auto-memory on, the server does it: before each embedded dispatch it reads the resolved project's `state` and `decisions` and injects them as **delimited DATA** (never authority, so memory cannot act as instructions); after a completed dispatch it writes the artifact to `history/<toolId>-<runId>` and appends a digest line to `state` under CAS with a bounded retry. The partition comes from a pinned federation sub-squad, else `SQUAD_MCP_MEMORY_DEFAULT_PROJECT` — never from caller free text, so continuity is reproducible and a caller cannot land memory in an arbitrary partition. Reads are capped so unbounded history cannot blow the context window, and a memory outage degrades the run to "no continuity" rather than failing it.
+
+**Choose where memory lives.** `SQUAD_MCP_MEMORY_BACKEND` accepts:
+
+| Backend | Persistence | CAS | Notes |
+| --- | --- | --- | --- |
+| `file` | local directory | in-file version+hash | single-replica / dev |
+| `table` | Azure Table Storage | ETag | multi-replica / production |
+| `graph` | **SharePoint document library or OneDrive** via Microsoft Graph | native `eTag` + `If-Match` | one readable `.md` per entry at `<rootPath>/<tenantId>/<project>/<path>.md` |
+
+The `graph` backend keeps content **plaintext by default** — the point of a SharePoint target is that a human can open, review, and search the file — so encryption there is an explicit opt-in (`SQUAD_MCP_MEMORY_GRAPH_ENCRYPT=true`). The app identity needs an application permission on the target drive; [host/infra/graph-memory-permissions.bicep](host/infra/graph-memory-permissions.bicep) provisions it as least privilege — `Sites.Selected` (which grants no site access on its own) plus a write grant on the single designated site — so the server can reach only the library the operator chose. It is a separate, admin-run deployment so routine app deploys never need Graph admin rights.
+
+A deployment can offer **several destinations at once** with `SQUAD_MCP_MEMORY_TARGETS` (a JSON array of named destinations) plus `SQUAD_MCP_MEMORY_DEFAULT_TARGET`. The memory tools then accept an optional `target` naming one of them. The operator owns every credential-bearing field — drive ids, storage accounts, directories — and the caller only ever sees an opaque name, the same allow-list pattern already used for model endpoints. An undeclared name is rejected before any I/O and never silently falls back to the default. Tenant isolation is unaffected: selecting a target changes *where* memory is written, never *whose* memory is reachable.
+
+## Business-user surface (Copilot Studio and Teams)
+
+`SQUAD_MCP_ENABLE_BUSINESS_TOOLS=true` adds two tools aimed at non-technical users:
+
+- **`squad_business_plan`** — turns an idea or brief into a fixed-section, plain-language business plan (summary, problem and customer, proposed solution, value and success measures, scope, go-to-market, cost outline, risks, milestones, open questions). The fixed section order means successive runs are comparable and the agent can quote a section back to the user.
+- **`squad_backlog`** — turns a request, business plan, or requirements document into a **validated JSON backlog contract**: epics → user stories with Given/When/Then acceptance criteria → tasks, plus a flattened `workItems[]` carrying stable `ref` / `parentRef` ids.
+
+`squad_backlog` is the piece that makes the Azure DevOps / Jira flow reliable. The native connector needs one call per work item with typed fields, so a prose handoff forces the orchestrator to parse English — the dominant failure mode (one giant work item, lost acceptance criteria, invented parents). With the JSON contract the agent iterates `workItems` in order, creates parents first, and links children by matching `parentRef` against the ids it recorded — no title matching, no guessing. The server validates and normalizes the model's JSON and fails cleanly if it cannot, so the agent never receives half-parsed output.
+
+**The trust boundary is unchanged.** Neither tool writes to Azure DevOps or Jira. This server produces the plan; the certified native connector performs every write on the end user's own connection, under that connector's auth, DLP, and throttles. See [.copilot-tracking/changes/2026-07-24/scenario-a-copilot-studio-ado-jira-runbook.md](.copilot-tracking/changes/2026-07-24/scenario-a-copilot-studio-ado-jira-runbook.md) for the operator runbook, and the generated [agent-instructions.md](generated/copilot-studio-connector/README.md) for the paste-ready Copilot Studio instructions block.
 
 ## Build and run
 

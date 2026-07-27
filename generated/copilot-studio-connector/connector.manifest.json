@@ -36,6 +36,12 @@
       "scope": "Squad.Run"
     },
     {
+      "name": "squad_federate",
+      "title": "Squad Federate",
+      "description": "Run the squad **federation** meta layer for a repository that hosts several named sub-squads (for example a `product` sub-squad for the business team and an `azure` sub-squad for the architects). Hands the request to the Squad Federation Coordinator, which reads the federation registry (`federation.md`) and meta-routing (`meta-routing.md`), selects the target sub-squad(s) — or honors an explicit `squad=<name>` — and runs each sub-squad's normal per-turn protocol scoped to `.copilot-tracking/squad/members/<name>/`. Set `init` to build a federation (propose → confirm → create) on a fresh project, or `promote` to adopt an existing single squad (a top-level `team.md`) into a federation as its first sub-squad, relocating its state intact. This is the catch-all federation entry point and runs at the `confirm` tier with gates. Embedded execution (squad-guided / embedded): the server runs the federation meta layer server-side under its gates and methodology. Because the federation layer is gated, the call returns immediately with a run id and PAUSES at the Human Gate; poll squad_status with that run id to advance the run after an out-of-band approval and to retrieve the finished federation decision. Use for cross-sub-squad requests, an explicit sub-squad target, or federation setup.",
+      "scope": "Squad.Federate"
+    },
+    {
       "name": "squad_status",
       "title": "Squad Status",
       "description": "Poll an async squad run by its run id (squad-guided / embedded). Returns the run status; when the run is complete, returns the finished squad-guided artifact. A held run stays paused until an operator approves it out-of-band — the squad never auto-releases a gate.",
@@ -46,6 +52,30 @@
       "title": "Squad Render PPTX",
       "description": "Render a PowerPoint deck from content YAML and style YAML and return a short-lived download link to the generated .pptx file. Deterministic file output: no model call and no impactful action. Served only when the operator has enabled the render feature.",
       "scope": "Squad.Render"
+    },
+    {
+      "name": "squad_memory_read",
+      "title": "Squad Memory Read",
+      "description": "Read one entry of the project's own squad memory (its `.copilot-tracking/squad/` state, decisions, or per-agent history) and return its content and etag — the etag to pass as expectedEtag on a subsequent write. Deterministic read: no model call and no impactful action. Served only when the operator has enabled the shared-state memory broker.",
+      "scope": "Squad.Memory"
+    },
+    {
+      "name": "squad_memory_write",
+      "title": "Squad Memory Write",
+      "description": "Write (create or replace) one entry of the project's own squad memory under compare-and-swap and return the new etag; pass the prior etag as expectedEtag to avoid clobbering a concurrent writer, or omit it for a first write. Deterministic write-back to the project's own memory: no model call and no impactful squad action. Served only when the operator has enabled the shared-state memory broker.",
+      "scope": "Squad.MemoryWrite"
+    },
+    {
+      "name": "squad_business_plan",
+      "title": "Squad Business Plan",
+      "description": "Turn an idea, brief, or opportunity into a decision-ready business plan (squad-guided / embedded) written in plain language for a non-technical stakeholder: summary, problem and customer, proposed solution, value and success measures, scope, go-to-market, cost outline, risks, milestones, and open questions. Advisory text only — nothing is created or changed in any system. Served only when the operator has enabled the business tools.",
+      "scope": "Squad.Business"
+    },
+    {
+      "name": "squad_backlog",
+      "title": "Squad Backlog",
+      "description": "Turn a request, business plan, or requirements document into a structured delivery backlog (squad-guided / embedded) returned as JSON: epics, user stories with Given/When/Then acceptance criteria, and tasks, plus a flattened 'workItems' array with stable 'ref'/'parentRef' ids. Create the items by calling the Azure DevOps or Jira connector once per element of 'workItems', parents first, linking children by 'parentRef'. This tool only plans — it writes nothing to Azure DevOps or Jira. Served only when the operator has enabled the business tools.",
+      "scope": "Squad.Backlog"
     }
   ],
   "deferredTargets": [

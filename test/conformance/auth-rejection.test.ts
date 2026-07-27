@@ -269,8 +269,8 @@ test("PROD-1: tools/list advertises the remotely-exposed tools over HTTP", async
   const tools = (res.body as { result?: { tools?: { name: string }[] } }).result?.tools ?? [];
   assert.deepEqual(
     tools.map((tool) => tool.name).sort(),
-    ["squad_architect", "squad_plan", "squad_research", "squad_review", "squad_run", "squad_status"],
-    "the remote surface lists the advisory tools plus squad_run and squad_status",
+    ["squad_architect", "squad_federate", "squad_plan", "squad_research", "squad_review", "squad_run", "squad_status"],
+    "the remote surface lists the advisory tools plus the gated squad_run / squad_federate and squad_status",
   );
 });
 

@@ -74,6 +74,8 @@ interface RunEntity {
   artifact?: string;
   request?: string;
   context?: string;
+  /** The remaining coordinator inputs, JSON-serialized then field-encrypted. */
+  params?: string;
   approvedBy?: string;
   approvedAt?: number;
   expiresAt?: number;
@@ -99,6 +101,12 @@ export class AzureTableRunStateStore implements RunStateStore {
   private readonly fetchImpl: typeof fetch;
   private readonly logger?: RedactingLogger;
   private readonly baseUrl: string;
+  /**
+   * WI-07 — memoized create-if-not-exists guard. Resolved once the table is known
+   * to exist (or was just created); a failure clears it so the next write retries
+   * rather than poisoning every subsequent write with a cached rejection.
+   */
+  private tableEnsured?: Promise<void>;
 
   constructor(options: AzureTableRunStateStoreOptions) {
     this.account = options.account;
@@ -124,6 +132,36 @@ export class AzureTableRunStateStore implements RunStateStore {
     };
   }
 
+  /**
+   * WI-07 — idempotently create the backing table before the first write. Issues
+   * `POST <baseUrl>/Tables` with `{"TableName": <tableName>}`; a 201/204 means it
+   * was created and a 409 means it already exists — both are success. The result
+   * is memoized so only the FIRST write pays the round-trip; a failure clears the
+   * memo so a later write can retry instead of inheriting a cached rejection.
+   */
+  private ensureTable(): Promise<void> {
+    if (this.tableEnsured === undefined) {
+      this.tableEnsured = this.createTable().catch((error: unknown) => {
+        this.tableEnsured = undefined;
+        throw error;
+      });
+    }
+    return this.tableEnsured;
+  }
+
+  private async createTable(): Promise<void> {
+    const response = await this.fetchImpl(`${this.baseUrl}/Tables`, {
+      method: "POST",
+      headers: await this.headers({ Prefer: "return-no-content" }),
+      body: JSON.stringify({ TableName: this.tableName }),
+    });
+    // 201/204 -> created; 409 -> already exists. Both mean the table is ready.
+    if (response.status === 201 || response.status === 204 || response.status === 409) {
+      return;
+    }
+    throw new Error(`Table create failed with status ${response.status}.`);
+  }
+
   private entityUrl(tenantId: string, runId: string): string {
     return `${this.baseUrl}/${this.tableName}(PartitionKey='${encodeURIComponent(tenantId)}',RowKey='${encodeURIComponent(runId)}')`;
   }
@@ -144,6 +182,8 @@ export class AzureTableRunStateStore implements RunStateStore {
     if (sealedRequest !== undefined) entity.request = sealedRequest;
     const sealedContext = encryptField(this.cipher, run.context);
     if (sealedContext !== undefined) entity.context = sealedContext;
+    const sealedParams = encryptField(this.cipher, run.params);
+    if (sealedParams !== undefined) entity.params = sealedParams;
     if (run.approvedBy !== undefined) entity.approvedBy = run.approvedBy;
     if (run.approvedAt !== undefined) entity.approvedAt = run.approvedAt;
     if (run.expiresAt !== undefined) entity.expiresAt = run.expiresAt;
@@ -174,6 +214,7 @@ export class AzureTableRunStateStore implements RunStateStore {
       artifact: entity.artifact,
       request: decryptField(this.cipher, entity.request),
       context: decryptField(this.cipher, entity.context),
+      params: decryptField(this.cipher, entity.params),
       approvedBy: entity.approvedBy,
       approvedAt: entity.approvedAt,
       expiresAt: entity.expiresAt,
@@ -219,6 +260,8 @@ export class AzureTableRunStateStore implements RunStateStore {
       updatedAt: now,
       expiresAt: init.ttlMs !== undefined ? now + init.ttlMs : undefined,
     };
+    // WI-07 — create the backing table on first write (memoized).
+    await this.ensureTable();
     const response = await this.fetchImpl(`${this.baseUrl}/${this.tableName}`, {
       method: "POST",
       headers: await this.headers({ Prefer: "return-no-content" }),

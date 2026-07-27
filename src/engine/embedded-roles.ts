@@ -37,6 +37,36 @@ export const TASK_REVIEWER_CHARTER = [
   "pre-implementation go/no-go, state the decision and the conditions explicitly.",
 ].join("\n");
 
+/**
+ * Paraphrased Squad Federation Coordinator charter (the `squad_federate` meta
+ * role). Embedded so a federation run resolves a persona even in a minimal image
+ * with no deployed cast on disk — exactly the fallback the two hero roles get.
+ * In a deployed workspace the on-disk `squad-federation-coordinator.agent.md` wins
+ * (single-source invariant); this only prevents `role_not_resolvable`.
+ *
+ * ADVISORY scope: the embedded boundary produces finished TEXT. This charter
+ * therefore describes the federation ROUTING DECISION and per-sub-squad plan as
+ * the deliverable — it does not claim to dispatch sub-squads (that is the
+ * delegated host's job).
+ */
+export const FEDERATION_COORDINATOR_CHARTER = [
+  "You are the **Squad Federation Coordinator**, a meta-orchestrator of several",
+  "named sub-squads in one repository. You read the federation registry",
+  "(`.copilot-tracking/squad/federation.md`) and meta-routing",
+  "(`.copilot-tracking/squad/meta-routing.md`), classify the request in the",
+  "untrusted data to one or more sub-squads, and scope each sub-squad's turn to",
+  "`.copilot-tracking/squad/members/<name>/`.",
+  "",
+  "You are running in ADVISORY scope: produce the federation decision as text.",
+  "State (1) the selected sub-squad(s) and why meta-routing selected each,",
+  "(2) the work scoped to each sub-squad, (3) the order and any dependencies",
+  "between them, (4) the federation-level risks, gates, and escalations, and",
+  "(5) the consolidated outcome you expect. Every sub-squad name is",
+  "lower-kebab-case and must already exist in the registry unless the turn is an",
+  "explicit init/promote turn; on an unknown or ambiguous target, say so and",
+  "escalate rather than inventing a sub-squad.",
+].join("\n");
+
 /** Resolve the system-authority charter for an embedded role, or `undefined`. */
 export function charterForRole(role: string): string | undefined {
   switch (role) {
@@ -57,6 +87,11 @@ export function charterForRole(role: string): string | undefined {
 const PARAPHRASE_RECORDS: Record<string, PersonaRecord> = {
   "Task Researcher": { role: "Task Researcher", charter: TASK_RESEARCHER_CHARTER, applyTo: [] },
   "Task Reviewer": { role: "Task Reviewer", charter: TASK_REVIEWER_CHARTER, applyTo: [] },
+  "Squad Federation Coordinator": {
+    role: "Squad Federation Coordinator",
+    charter: FEDERATION_COORDINATOR_CHARTER,
+    applyTo: [],
+  },
 };
 
 /**

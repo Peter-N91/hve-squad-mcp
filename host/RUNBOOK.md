@@ -113,15 +113,28 @@ delegated scopes) and add exactly the scopes the connector requests:
 | `Squad.Review` | invoke `squad_review` |
 | `Squad.Architect` | invoke `squad_architect` |
 | `Squad.Run` | invoke `squad_run` and poll `squad_status` |
+| `Squad.Federate` | invoke `squad_federate` (the federation meta layer) |
 
-Add all five scopes — the generated connector requests every one of them. The
+Add all six scopes — the generated connector requests every one of them. The
 `Squad.Operate` app role is separate: it authorizes the out-of-band operator
 approval route (`POST /admin/approve`) and is granted as an Entra **app role**, not
 a delegated connector scope.
 
+`Squad.Federate` is deliberately distinct from `Squad.Run`: authorization to run
+one squad is not authorization to drive a whole federation. `squad_federate` is a
+gated catch-all like `squad_run` — it is served only when
+`SQUAD_MCP_REMOTE_PIPELINE_ENABLED=true`, holds at the Human Gate, and is released
+by the same out-of-band `/admin/approve` route.
+
 If you enable the optional deterministic render tool (below), also add a
 `Squad.Render` delegated scope — it authorizes `squad_render_pptx` and is
 least-privilege (a render grant does not imply research/plan/run).
+
+If you enable the shared-state memory broker, add `Squad.Memory` (read) and
+`Squad.MemoryWrite` (compare-and-swap write / batch flush). If you enable the
+business tools, add `Squad.Business` (`squad_business_plan`) and `Squad.Backlog`
+(`squad_backlog`). Every scope is fail-closed: a missing scope returns 403 with no
+work performed.
 
 Notes:
 
@@ -401,6 +414,220 @@ How it works and what is safe by construction:
 
 Optional branding: set `renderBrandTemplatePath` to a `.pptx` baked into the image to
 brand every deck; absent, the render uses the skill default look and says so in the result.
+
+### Optional: automatic squad memory (`SQUAD_MCP_MEMORY_AUTO_ENABLED`)
+
+The memory broker (`SQUAD_MCP_ENABLE_MEMORY=true`, `enableMemory=true` in
+`main.bicepparam`) exposes memory as tools the agent must choose to call. Under
+Copilot Studio's generative orchestration that is unreliable: the agent may skip the
+call, and it invents a different `project` name each session, so continuity silently
+disappears.
+
+Set `SQUAD_MCP_MEMORY_AUTO_ENABLED=true` (`enableMemoryAuto=true` in
+`main.bicepparam`) to make continuity a SERVER behavior instead:
+
+- before each embedded dispatch the server reads the resolved project's `state` and
+  `decisions` and injects them as **delimited DATA** — never authority, so memory can
+  never act as instructions (SEC-5);
+- after a completed dispatch it writes the artifact to `history/<toolId>-<runId>` and
+  appends a digest line to `state` under compare-and-swap with a bounded retry.
+
+The partition is derived from a pinned federation sub-squad, else
+`SQUAD_MCP_MEMORY_DEFAULT_PROJECT` (default `default`, lower-kebab-case). It is never
+taken from caller free text. Requires `SQUAD_MCP_ENABLE_MEMORY=true`; boot fails fast
+otherwise. When this is on, tell your Copilot Studio agent **not** to call the memory
+tools (remove the memory section from the generated agent instructions).
+
+### Optional: persist memory to SharePoint or OneDrive (`SQUAD_MCP_MEMORY_BACKEND=graph`)
+
+Set `enableMemory=true` and `memoryBackend='graph'` in `main.bicepparam`, plus
+`memoryGraphDriveId`. The template projects these environment variables:
+
+| Variable | `main.bicep` parameter | Meaning |
+| --- | --- | --- |
+| `SQUAD_MCP_MEMORY_BACKEND=graph` | `memoryBackend` | Persist memory through Microsoft Graph instead of Azure Table / local disk. |
+| `SQUAD_MCP_MEMORY_GRAPH_DRIVE_ID` | `memoryGraphDriveId` | The target document library's drive id (or a OneDrive drive). Required. |
+| `SQUAD_MCP_MEMORY_GRAPH_ROOT_PATH` | `memoryGraphRootPath` | Folder within the drive that roots squad memory (empty = the drive root). |
+| `SQUAD_MCP_MEMORY_GRAPH_ENDPOINT` | `memoryGraphEndpoint` | Override the Graph endpoint for a sovereign cloud. |
+| `SQUAD_MCP_MEMORY_GRAPH_ENCRYPT` | `memoryGraphEncrypt` | `true` to field-encrypt content at rest. **Default false.** |
+
+Each entry becomes one readable markdown file at
+`<rootPath>/<tenantId>/<project>/<path>.md`, versioned by SharePoint and subject to
+your existing retention, search, and DLP policy. Concurrency uses Graph's native
+`eTag` with `If-Match`, so a stale write loses the race rather than clobbering.
+
+Content is **plaintext by default** — the reason to target SharePoint is that a human
+can open the file, and encrypting it defeats that. Opt into ciphertext only if your
+policy requires it, and configure `runEncryptionKeyBase64` when you do.
+
+The `tenantId` from the validated token is always the first path segment, so tenant
+isolation is preserved regardless of destination.
+
+#### Grant the app identity access to the library (`graph-memory-permissions.bicep`)
+
+The app's managed identity needs a Microsoft Graph **application** permission on the
+target drive. Deploy `host/infra/graph-memory-permissions.bicep`, which does both
+halves idempotently:
+
+1. assigns **`Sites.Selected`** to the identity — the least-privilege choice, which
+   on its own grants access to **no** site and only makes the identity eligible;
+2. grants that identity **write on exactly one site** (`POST /sites/{siteId}/permissions`),
+   so the server can reach only the library you designated — not every site in the
+   tenant.
+
+This is a **separate deployment on purpose.** It requires
+`AppRoleAssignment.ReadWrite.All` and `Sites.FullControl.All`, a far higher privilege
+than deploying the Container App; keeping it apart means your routine app deploys never
+need Graph admin rights. Both operations are Graph data-plane calls with no ARM resource
+type, so they run in one deployment script authenticated as a **managed identity you
+supply** — no credential is passed to or stored in the template, and re-running the
+deployment is a no-op.
+
+```bash
+# 1. Resolve the site id (the hostname,siteCollectionId,siteId triple).
+SITE_ID=$(az rest --method GET \
+  --url "https://graph.microsoft.com/v1.0/sites/<TENANT>.sharepoint.com:/sites/<SITE_PATH>" \
+  --query id --output tsv)
+
+# 2. Resolve the drive id of the document library that will hold squad memory.
+az rest --method GET \
+  --url "https://graph.microsoft.com/v1.0/sites/$SITE_ID/drives" \
+  --query "value[].{name:name,id:id}" --output table
+
+# 3. Fill in graph-memory-permissions.bicepparam (appPrincipalId + appClientId come
+#    from the main.bicep outputs) and deploy as an administrator.
+az deployment group create \
+  --resource-group "$RG" \
+  --template-file host/infra/graph-memory-permissions.bicep \
+  --parameters host/infra/graph-memory-permissions.bicepparam
+```
+
+Leave `sharePointSiteId` empty to assign `Sites.Selected` only. That is a deliberate
+safe partial state: the identity is eligible but reaches nothing, so a half-finished
+onboarding never silently exposes a library.
+
+
+### Optional: offer several memory destinations (`SQUAD_MCP_MEMORY_TARGETS`)
+
+To let a team choose where their agent saves, declare an allow-list:
+
+```jsonc
+// SQUAD_MCP_MEMORY_TARGETS
+[
+  { "name": "azure",      "backend": "table", "tableName": "squadmemory" },
+  { "name": "sharepoint", "backend": "graph", "driveId": "<DRIVE_ID>", "rootPath": "squad-memory" }
+]
+```
+
+with `SQUAD_MCP_MEMORY_DEFAULT_TARGET=azure` (`memoryTargets` / `memoryDefaultTarget`
+in `main.bicepparam`). The memory tools then accept an optional `target` naming one of
+these. **You** own every credential-bearing field; the caller only ever sees the opaque
+name. An undeclared name is rejected before any I/O and never falls back to the
+default. Declaring no targets keeps the single-destination behavior and the `target`
+input is ignored.
+
+### Optional: the business-user tools (`SQUAD_MCP_ENABLE_BUSINESS_TOOLS`)
+
+Set `SQUAD_MCP_ENABLE_BUSINESS_TOOLS=true` (`enableBusinessTools=true` in
+`main.bicepparam`) to serve `squad_business_plan` and `squad_backlog` (scopes
+`Squad.Business` / `Squad.Backlog`). Both are advisory: one server-side dispatch each,
+no gate, no impactful action. Requires `SQUAD_MCP_MODEL_ENDPOINT`.
+
+`squad_backlog` returns a validated JSON contract (`epics` → `stories` → `tasks`, plus
+a flattened `workItems[]` with stable `ref` / `parentRef`) designed to be looped one
+call per item into the **native** Azure DevOps or Jira connector. This server performs
+no ADO/Jira write — see the Scenario A runbook for the connector, licensing, throttle,
+and DLP guidance, and paste
+`generated/copilot-studio-connector/agent-instructions.md` into your agent so it maps
+the contract correctly and asks for confirmation before creating items.
+
+
+## Optional — register hve-squad-mcp for Agents 365 governed-tenant onboarding (WI-05)
+
+> **Documentation-only.** This optional section is a reference sequence for onboarding the
+> deployed `/mcp` endpoint as a governed **bring-your-own (BYO) MCP** tool through the
+> Agents 365 admin flow, so a Copilot Studio maker in a governed tenant can consume it
+> under central approval. It governs the tool; it does NOT make this server an agent host
+> on M365 or Cowork (see "What this deployment intentionally does NOT do" below).
+
+Use this path when your tenant requires MCP tools to be admin-approved before a maker can
+add them, rather than each maker importing the custom connector ad hoc (Step 8). The
+underlying endpoint, Entra app, and scopes are the same ones stood up in Steps 2 and 8;
+this flow adds a tenant-level registration and approval in front of them.
+
+### Prerequisites
+
+- The server is deployed and smoke-tested (Steps 1 to 8): you have `mcpFqdn`, the Entra
+  `APP_ID`, and `api://<APP_ID>` as the audience.
+- The Entra app exposes the connector scopes (Step 2): `Squad.Research`, `Squad.Plan`,
+  `Squad.Review`, `Squad.Architect`, `Squad.Run` (and `Squad.Render` if you enabled the
+  optional render tool).
+- You (or a tenant admin) hold the **Microsoft 365 admin** role needed to approve BYO
+  tools, and a Copilot Studio maker seat exists in the same tenant.
+- **Generative orchestration** can be enabled on the consuming agent; it is required for
+  the agent to call MCP tools.
+- A **Data Loss Prevention (DLP)** classification is planned for the tool. Governed
+  tenants block unclassified connectors by default, and blocking a connector also blocks
+  the connected MCP server's tools.
+
+### Step A — register the server via the Agents 365 CLI
+
+Register the deployed endpoint as a BYO MCP tool. Exact command names and flags track the
+current Agents 365 CLI documentation; the shape is:
+
+```bash
+# Authenticate the CLI to the same tenant as the deployment.
+agents365 login --tenant "<ENTRA_TENANT_ID>"
+
+# Register the MCP endpoint as a bring-your-own tool in the tenant catalog.
+agents365 tool register \
+  --name "hve-squad-mcp" \
+  --protocol mcp-streamable \
+  --endpoint "https://<mcpFqdn>/mcp" \
+  --auth entra-oauth2 \
+  --audience "api://<ENTRA_CLIENT_ID>" \
+  --scopes "Squad.Research Squad.Plan Squad.Review Squad.Architect Squad.Run"
+```
+
+The endpoint advertises `x-ms-agentic-protocol: mcp-streamable-1.0`; it is Streamable HTTP
+only (SSE is unsupported after August 2025). Registration submits the tool for admin
+approval; it does not make the tool consumable until Step B approves it.
+
+### Step B — approve the tool in the Microsoft 365 Admin Center
+
+A tenant admin reviews and approves the registered tool before any maker can add it:
+
+```text
+1. Open the Microsoft 365 Admin Center, then Copilot / Agents & tools, then pending approvals.
+2. Locate the "hve-squad-mcp" BYO MCP tool submitted in Step A.
+3. Review the endpoint (https://<mcpFqdn>/mcp), the Entra audience (api://<APP_ID>), and
+   the requested scopes; confirm they match this deployment.
+4. Assign the DLP classification (Business vs Non-Business) so the tool is permitted in the
+   intended environment and blocked where it should not run.
+5. Approve the tool (optionally scope it to specific environments or maker groups).
+```
+
+Approval is what lets governed-tenant makers see and add the tool; without it the
+registration stays pending and is not consumable.
+
+### Step C — consume the approved tool in Copilot Studio
+
+Once approved, a maker adds it like any governed tool:
+
+```text
+1. In Copilot Studio, open the agent, then Tools, then Add a tool, then Model Context Protocol.
+2. Select the approved "hve-squad-mcp" tool from the tenant catalog; no manual OpenAPI
+   import is needed once it is admin-approved.
+3. Complete the Entra OAuth 2.0 connection, consenting to the scopes from Step 2.
+4. Enable generative orchestration on the agent so it can call the MCP tools.
+5. Test: "research X with the squad" reaches /mcp and returns a squad-guided / embedded
+   artifact; "run the full squad on X" returns a run id and holds at the Human Gate.
+```
+
+Success criteria: a tenant admin has approved the registered `hve-squad-mcp` BYO MCP tool,
+a governed-tenant Copilot Studio maker can add it under the assigned DLP classification,
+and the agent (with generative orchestration enabled) calls the advisory tools over the
+Entra-authenticated `/mcp` endpoint.
 
 ## Step 9 — operate and tear down
 

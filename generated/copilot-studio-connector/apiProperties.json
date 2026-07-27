@@ -12,8 +12,12 @@
             "Squad.Review",
             "Squad.Architect",
             "Squad.Run",
-            "Squad.Run",
-            "Squad.Render"
+            "Squad.Federate",
+            "Squad.Render",
+            "Squad.Memory",
+            "Squad.MemoryWrite",
+            "Squad.Business",
+            "Squad.Backlog"
           ],
           "properties": {
             "IsFirstParty": "false",

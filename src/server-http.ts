@@ -23,8 +23,18 @@ import { EphemeralWorkspaceManager } from "./engine/workspace.js";
 import { GateKeeper, RunStoreApprovalChannel, TenantQuotaTracker, type HumanApprovalChannel } from "./engine/gates.js";
 import { DurableRunStateStore } from "./engine/durable-run-state.js";
 import { AzureTableRunStateStore } from "./engine/backends/azure-table-run-state.js";
+import { AzureTableSquadMemoryStore } from "./engine/backends/azure-table-squad-memory.js";
+import { FileSquadMemoryStore } from "./engine/backends/file-squad-memory.js";
+import { GraphSquadMemoryStore } from "./engine/backends/graph-squad-memory.js";
+import { TargetedSquadMemoryStore } from "./engine/targeted-squad-memory.js";
+import { AutoMemory } from "./engine/auto-memory.js";
+import {
+  OverflowSquadMemoryStore,
+  type MemoryBlobWriter,
+} from "./engine/backends/overflow-squad-memory.js";
 import { AesGcmFieldCipher, NullFieldCipher, type FieldCipher } from "./engine/field-cipher.js";
 import type { RunStateStore } from "./engine/run-state.js";
+import type { SquadMemoryStore } from "./engine/squad-memory-state.js";
 import { AzureOpenAIBackend, type ModelPricing } from "./engine/backends/azure-openai.js";
 import { AzureBlobArtifactStore } from "./engine/backends/azure-blob-artifact-store.js";
 import { PythonPptxRenderBackend } from "./engine/render/python-pptx-render-backend.js";
@@ -37,6 +47,15 @@ import { createHttpServer } from "./transports/http.js";
 
 /** The Azure Storage OAuth scope for the managed-identity Table token. */
 const STORAGE_SCOPE = "https://storage.azure.com/.default";
+
+/**
+ * The Microsoft Graph OAuth scope for the managed-identity token used by the
+ * SharePoint / OneDrive memory backend. The app identity needs an application
+ * permission on the target drive (`Sites.Selected` scoped to the site, or
+ * `Files.ReadWrite.All`) — least privilege is `Sites.Selected` plus a per-site
+ * write grant, so the server can reach ONLY the library the operator designated.
+ */
+const GRAPH_SCOPE = "https://graph.microsoft.com/.default";
 
 function readPricing(env: NodeJS.ProcessEnv): ModelPricing | undefined {
   const input = Number(env.SQUAD_MCP_PRICE_INPUT_PER_MTOK);
@@ -91,6 +110,122 @@ export function buildRunStateStack(
   return { runStateStore, approvals };
 }
 
+/** The shared-state memory broker stack (undefined when the feature is off). */
+export interface SquadMemoryStack {
+  memoryStore: SquadMemoryStore;
+}
+
+/**
+ * Build the shared-state memory broker store from operator config. Returns
+ * `undefined` when the feature is disabled (the advisory-only default), so the
+ * bootstrap makes NO storage calls and the resource surface / memory tools are
+ * not served. Mirrors {@link buildRunStateStack}: it selects the backend and,
+ * when an encryption key is configured, encrypts `content` at rest with
+ * AES-256-GCM (MEDIUM-3) — otherwise the identity cipher. The SAME store instance
+ * serves both the resource read surface and the `squad_memory_write` CAS tool
+ * (wired in later phases). Backends:
+ *   * `file`  — single-replica local directory (dev / single-instance).
+ *   * `table` — Azure Table Storage with ETag CAS (multi-replica; production).
+ */
+export function buildSquadMemoryStack(
+  config: OperatorConfig,
+  logger: RedactingLogger,
+): SquadMemoryStack | undefined {
+  if (!config.enableMemory) {
+    return undefined;
+  }
+  const cipher: FieldCipher =
+    config.encryptionKeyBase64.length > 0
+      ? AesGcmFieldCipher.fromBase64Key(config.encryptionKeyBase64)
+      : new NullFieldCipher();
+
+  /** Build one destination from a (global or per-target) backend selection. */
+  const buildBackend = (spec: {
+    backend: OperatorConfig["memoryBackend"];
+    dir?: string;
+    storageAccount?: string;
+    tableName?: string;
+    driveId?: string;
+    rootPath?: string;
+    endpoint?: string;
+    encrypt?: boolean;
+  }): SquadMemoryStore => {
+    if (spec.backend === "table") {
+      return new AzureTableSquadMemoryStore({
+        account: spec.storageAccount || config.storageAccount,
+        tableName: spec.tableName || config.memoryTableName,
+        getAccessToken: createManagedIdentityTokenProvider(STORAGE_SCOPE),
+        cipher,
+        logger,
+      });
+    }
+    if (spec.backend === "graph") {
+      return new GraphSquadMemoryStore({
+        driveId: spec.driveId ?? "",
+        rootPath: spec.rootPath,
+        endpoint: spec.endpoint && spec.endpoint.length > 0 ? spec.endpoint : undefined,
+        getAccessToken: createManagedIdentityTokenProvider(GRAPH_SCOPE),
+        // A SharePoint/OneDrive destination is human-readable BY DESIGN, so it
+        // stays plaintext unless the operator explicitly opts into ciphertext.
+        cipher: spec.encrypt ? cipher : new NullFieldCipher(),
+        logger,
+      });
+    }
+    return new FileSquadMemoryStore({ baseDir: spec.dir || config.memoryDir, cipher });
+  };
+
+  let memoryStore: SquadMemoryStore = buildBackend({
+    backend: config.memoryBackend,
+    dir: config.memoryDir,
+    storageAccount: config.storageAccount,
+    tableName: config.memoryTableName,
+    driveId: config.memoryGraphDriveId,
+    rootPath: config.memoryGraphRootPath,
+    endpoint: config.memoryGraphEndpoint,
+    encrypt: config.memoryGraphEncrypt,
+  });
+
+  // Named destinations: when the operator declared an allow-list, the caller may
+  // select among them by name (never by raw destination — SEC-3). A deployment
+  // that declares none keeps the single store above and ignores `target`.
+  if (config.memoryTargets.length > 0) {
+    const targets = new Map<string, SquadMemoryStore>(
+      config.memoryTargets.map((target) => [target.name, buildBackend(target)] as const),
+    );
+    memoryStore = new TargetedSquadMemoryStore({
+      targets,
+      defaultTarget: config.memoryDefaultTarget,
+    });
+  }
+
+  // WI-03 — when the operator enables the Blob overflow channel, wrap the store so
+  // over-threshold content spills to a tenant-scoped Blob (the same at-rest
+  // envelope; MEDIUM-3) with a tiny pointer entity left in the primary store. Off
+  // by default → the primary store's behavior is unchanged. The SAME `cipher` is
+  // passed so the blob payload is byte-identical to what the primary would persist.
+  if (config.memoryOverflowEnabled) {
+    const blobStore = new AzureBlobArtifactStore({
+      account: config.storageAccount,
+      container: config.memoryOverflowContainer,
+      getAccessToken: createManagedIdentityTokenProvider(STORAGE_SCOPE),
+      logger,
+    });
+    const blob: MemoryBlobWriter = {
+      put: (blobPath, bytes) => blobStore.putObject(blobPath, bytes),
+      get: (blobPath) => blobStore.getObject(blobPath),
+    };
+    return {
+      memoryStore: new OverflowSquadMemoryStore({
+        primary: memoryStore,
+        blob,
+        cipher,
+        thresholdBytes: config.memoryOverflowThresholdBytes,
+      }),
+    };
+  }
+  return { memoryStore };
+}
+
 /**
  * Assemble the {@link HttpMcpHandler} from operator config. Separated from
  * `listen` so the wiring is exercisable; in production this loads the live
@@ -129,6 +264,11 @@ export function buildHttpHandler(
   // Otherwise the surface stays hero-only (the council-gated default).
   const stack = buildRunStateStack(config, logger);
 
+  // The shared-state memory broker is built only when the operator enabled it
+  // (off by default). The SAME store instance serves the resource read surface
+  // and the write-back tool (wired in later phases).
+  const memoryStack = buildSquadMemoryStack(config, logger);
+
   // The deterministic render tool is built only when the operator enabled it. It
   // reuses the Storage managed-identity token (storage.azure.com) for the Blob
   // upload + user-delegation SAS; the interpreter/scripts/brand come from config.
@@ -162,6 +302,17 @@ export function buildHttpHandler(
     // WI-1b4-WORKER: when a worker is enabled, the poll is read-only and the ACA
     // Job drives approved runs off the request path (runs may exceed 240s).
     driveOnPoll: !config.workerEnabled,
+    // Deterministic server-side memory continuity. Built ONLY when the operator
+    // enabled both the memory broker and auto-memory; otherwise the engine keeps
+    // its previous behavior exactly (memory stays a manual tool).
+    autoMemory:
+      config.memoryAutoEnabled && memoryStack
+        ? new AutoMemory({
+            store: memoryStack.memoryStore,
+            defaultProject: config.memoryDefaultProject,
+            logger,
+          })
+        : undefined,
     logger,
   });
 
@@ -174,6 +325,8 @@ export function buildHttpHandler(
     logger,
     pipelineExposed: config.remotePipelineEnabled,
     renderService,
+    memoryStore: memoryStack?.memoryStore,
+    businessToolsExposed: config.enableBusinessTools,
   });
 }
 

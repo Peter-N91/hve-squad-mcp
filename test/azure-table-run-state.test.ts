@@ -24,6 +24,9 @@ import { AesGcmFieldCipher, type FieldCipher } from "../src/engine/field-cipher.
 class FakeTable {
   private readonly rows = new Map<string, { entity: Record<string, unknown>; etag: string }>();
   private seq = 0;
+  /** WI-07 — count of `POST .../Tables` create calls, for auto-create assertions. */
+  tablePosts = 0;
+  private tableCreated = false;
 
   readonly fetch: typeof fetch = async (input, init) => {
     const url = String(input);
@@ -31,6 +34,13 @@ class FakeTable {
     const headers = (init?.headers ?? {}) as Record<string, string>;
 
     if (method === "POST") {
+      // WI-07 — table create (`POST .../Tables`): 204 first, 409 (exists) after.
+      if (/\/Tables$/.test(url)) {
+        this.tablePosts += 1;
+        const created = this.tableCreated;
+        this.tableCreated = true;
+        return new Response(null, { status: created ? 409 : 204 });
+      }
       const entity = JSON.parse(init?.body as string) as Record<string, unknown>;
       this.rows.set(entity.RowKey as string, { entity, etag: this.nextEtag() });
       return new Response(null, { status: 204 });
@@ -172,4 +182,30 @@ test("Azure Table store multi-replica: a verdict written by one instance is visi
   assert.deepEqual(read?.stages, SAMPLE_STAGES);
   assert.equal(read?.councilVerdict?.class, "Go-With-Conditions");
   assert.deepEqual(read?.history, SAMPLE_HISTORY);
+});
+
+test("Azure Table run-state store creates the table on first create, once (WI-07)", async () => {
+  const table = new FakeTable();
+  const store = storeOn(table);
+  assert.equal(table.tablePosts, 0, "no table-create is issued before any write");
+
+  const run = await store.create({ tenantId: "t", toolId: "squad_run" });
+  assert.equal(table.tablePosts, 1, "the first create issues exactly one POST /Tables");
+  assert.ok(await store.get(run.runId), "the run persisted after the table was created");
+
+  await store.create({ tenantId: "t", toolId: "squad_run" });
+  assert.equal(table.tablePosts, 1, "the table-create is memoized — no second POST /Tables");
+});
+
+test("Azure Table run-state store swallows a 409 (table already exists) on first create (WI-07)", async () => {
+  const table = new FakeTable();
+  // A first store creates the table (204).
+  await storeOn(table).create({ tenantId: "t", toolId: "squad_run" });
+  assert.equal(table.tablePosts, 1, "the first store created the table");
+
+  // A fresh store issues its own create and sees a 409 — the run still persists.
+  const store2 = storeOn(table);
+  const run = await store2.create({ tenantId: "t", toolId: "squad_run" });
+  assert.equal(table.tablePosts, 2, "the second store issued its own (409) create");
+  assert.ok(await store2.get(run.runId), "a create that races into a 409 already-exists still persists");
 });

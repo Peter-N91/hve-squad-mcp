@@ -30,6 +30,10 @@ import { readFile, writeFile } from "node:fs/promises";
 
 import { charterForRole, resolvePersonaForRole } from "./embedded-roles.js";
 import { composeEmbeddedPrompt } from "./embedded-prompt.js";
+import { AutoMemory, withMemoryContext } from "./auto-memory.js";
+import type { BusinessToolSpec } from "./business-tools.js";
+import { FEDERATION_ROLE, federationPersona } from "./federation.js";
+import { coordinatorRequestFromRun, encodeRunParams } from "./run-params.js";
 import { runPipeline } from "./dispatch-loop.js";
 import { runAdvisoryPipeline, type AdvisoryStagePlan } from "./advisory-pipeline.js";
 import { StoreAdvisoryPersistence } from "./advisory-run-store.js";
@@ -97,6 +101,14 @@ export interface EmbeddedCoordinatorDeps {
   runTtlMs?: number;
   /** WI-06 — worker/poll claim lease (ms); a running run past its lease is reclaimable. */
   leaseMs?: number;
+  /**
+   * Deterministic server-side squad-memory continuity. When supplied, every
+   * embedded dispatch is preceded by a read of the resolved project's `state` +
+   * `decisions` (injected as DATA) and every completed dispatch is followed by a
+   * `history/<toolId>-<runId>` write plus a `state` digest append. Absent (the
+   * default), the engine behaves exactly as before — memory stays a manual tool.
+   */
+  autoMemory?: AutoMemory;
   logger?: RedactingLogger;
 }
 
@@ -114,6 +126,24 @@ function toMatchedRouting(tool: CatalogTool): MatchedRouting {
 
 /** The spike catch-all pipeline: research then review, run server-side in order. */
 const SPIKE_PIPELINE_ROLES = ["Task Researcher", "Task Reviewer"] as const;
+
+/** The federation meta tool id (catalog tool; gated + catch-all, like squad_run). */
+const FEDERATION_TOOL_ID = "squad_federate";
+
+/**
+ * Routing summary attached to a resolved FEDERATION run. Mirrors the catalog's
+ * `squad_federate` row so a `squad_status` poll reports the federation role rather
+ * than the plain Squad Coordinator (the durable record carries only the run).
+ */
+const FEDERATION_ROUTING: MatchedRouting = {
+  routingIntent: "federation meta layer",
+  role: FEDERATION_ROLE,
+  tier: "confirm",
+  parallelEligible: false,
+  council: [],
+  catchAll: true,
+  gates: true,
+};
 
 /** Default per-tenant cap on outstanding held runs (MEDIUM-2 resource-exhaustion guard). */
 const DEFAULT_MAX_HELD_RUNS_PER_TENANT = 100;
@@ -146,6 +176,7 @@ export class EmbeddedCoordinator {
   private readonly driveOnPoll: boolean;
   private readonly runTtlMs?: number;
   private readonly leaseMs?: number;
+  private readonly autoMemory?: AutoMemory;
   /** Outstanding held runs per tenant, started via startHttpRun (MEDIUM-2). */
   private readonly heldCounts = new Map<string, number>();
 
@@ -160,6 +191,40 @@ export class EmbeddedCoordinator {
     this.driveOnPoll = deps.driveOnPoll ?? true;
     this.runTtlMs = deps.runTtlMs;
     this.leaseMs = deps.leaseMs;
+    this.autoMemory = deps.autoMemory;
+  }
+
+  /**
+   * Auto-memory pre-read: resolve the project partition and merge prior `state` +
+   * `decisions` into the request's `context` as DATA. A no-op when auto-memory is
+   * not wired, so the default posture is byte-identical to before.
+   */
+  private async withMemory(
+    tenantId: string,
+    request: CoordinatorRequest,
+  ): Promise<{ request: CoordinatorRequest; project?: string }> {
+    if (!this.autoMemory) {
+      return { request };
+    }
+    const project = this.autoMemory.resolveProject(request);
+    const memory = await this.autoMemory.loadContext(tenantId, project);
+    return { request: withMemoryContext(request, memory), project };
+  }
+
+  /**
+   * Auto-memory post-write: persist a completed artifact to history and refresh the
+   * project's `state` digest. Never throws (the helper swallows store failures), so
+   * a memory outage can never fail an otherwise-successful run.
+   */
+  private async recordMemory(
+    tenantId: string,
+    project: string | undefined,
+    entry: { toolId: string; runId: string; artifact: string },
+  ): Promise<void> {
+    if (!this.autoMemory || !project) {
+      return;
+    }
+    await this.autoMemory.record(tenantId, project, entry);
   }
 
   private decrementHeld(tenantId: string): void {
@@ -225,11 +290,13 @@ export class EmbeddedCoordinator {
       // SEC-4 — server-allocated, per-tenant, isolated workspace with guaranteed teardown.
       const workspace = await this.workspaceManager.allocate(tenantId);
       try {
+        // Auto-memory: prior state/decisions join the caller's context as DATA.
+        const { request: framed, project } = await this.withMemory(tenantId, request);
         // SEC-5 — caller text becomes delimited DATA; the charter is the only authority.
         const prompt = composeEmbeddedPrompt({
           systemAuthority: charter,
-          request: request.request,
-          context: request.context,
+          request: framed.request,
+          context: framed.context,
         });
 
         // Single server-side dispatch (SEC-7: inference + contained file I/O only).
@@ -247,6 +314,7 @@ export class EmbeddedCoordinator {
           this.quota.recordCostUsd(tenantId, completion.usage.estimatedCostUsd);
         }
         await this.runStateStore.update(run.runId, { status: "complete" });
+        await this.recordMemory(tenantId, project, { toolId: tool.id, runId: run.runId, artifact });
 
         const result: EmbeddedResult = {
           kind: "embedded",
@@ -319,7 +387,8 @@ export class EmbeddedCoordinator {
       try {
         // Single-stage advisory dispatch: one persona stage, no council/backlog.
         const plan: AdvisoryStagePlan[] = [{ kind: "persona", role: persona.role, persona }];
-        const result = await runAdvisoryPipeline(request, { backend: this.backend }, { plan });
+        const { request: framed, project } = await this.withMemory(tenantId, request);
+        const result = await runAdvisoryPipeline(framed, { backend: this.backend }, { plan });
 
         // Write the artifact INSIDE the isolated workspace, then read it back.
         const artifactPath = workspace.resolve("artifact.md");
@@ -332,6 +401,7 @@ export class EmbeddedCoordinator {
           }
         }
         await this.runStateStore.update(run.runId, { status: "complete", artifact });
+        await this.recordMemory(tenantId, project, { toolId: tool.id, runId: run.runId, artifact });
 
         return {
           kind: "embedded",
@@ -352,6 +422,100 @@ export class EmbeddedCoordinator {
       }
     } finally {
       // SEC-9 — always free the concurrency slot.
+      admit.release();
+    }
+  }
+
+  /**
+   * Execute one BUSINESS tool (`squad_business_plan` / `squad_backlog`) as a
+   * single-stage embedded advisory dispatch.
+   *
+   * Persona composition: the deployed cast persona (real `*.agent.md` bytes) is the
+   * DOMAIN authority and the tool spec's charter is appended as the OUTPUT
+   * contract. Appending rather than replacing keeps the single-source invariant
+   * (the cast still defines how the role thinks) while making the result shape
+   * deterministic enough for a Copilot Studio agent to consume — which is the whole
+   * point of the business surface. When the cast is absent, the spec charter alone
+   * is the fallback, exactly like the hero roles.
+   *
+   * Advisory posture is identical to {@link handleAdvisory}: quota admission
+   * (SEC-9 / COST), a per-tenant ephemeral workspace with guaranteed teardown
+   * (SEC-4), caller text as delimited DATA (SEC-5), no gate, and no impactful
+   * action. Auto-memory continuity applies here too when it is wired.
+   */
+  async handleBusiness(
+    spec: BusinessToolSpec,
+    request: CoordinatorRequest,
+    ctx: EmbeddedContext,
+    personaRoots?: string[],
+  ): Promise<EmbeddedResult> {
+    const matchedRouting: MatchedRouting = {
+      routingIntent: spec.toolId,
+      role: spec.role,
+      tier: "auto",
+      parallelEligible: false,
+      council: [],
+      catchAll: false,
+      gates: false,
+    };
+    const tenantId = ctx.auth.tenantId;
+
+    const admit = this.quota.acquire(tenantId);
+    if (!admit.ok) {
+      return { kind: "embedded", outcome: "denied", matchedRouting, reason: admit.reason };
+    }
+
+    try {
+      const deployed = resolvePersonaForRole(spec.role, personaRoots);
+      const persona: PersonaRecord = {
+        role: spec.role,
+        applyTo: deployed?.applyTo ?? [],
+        charter: deployed?.charter ? `${deployed.charter}\n\n${spec.charter}` : spec.charter,
+      };
+
+      const run = await this.runStateStore.create({ tenantId, toolId: spec.toolId });
+      const workspace = await this.workspaceManager.allocate(tenantId);
+      try {
+        const { request: framed, project } = await this.withMemory(tenantId, request);
+        const result = await runAdvisoryPipeline(
+          framed,
+          { backend: this.backend },
+          { plan: [{ kind: "persona", role: persona.role, persona }] },
+        );
+
+        const artifactPath = workspace.resolve("artifact.md");
+        await writeFile(artifactPath, result.artifact, "utf8");
+        const artifact = await readFile(artifactPath, "utf8");
+
+        for (const usage of result.usage) {
+          if (usage.estimatedCostUsd) {
+            this.quota.recordCostUsd(tenantId, usage.estimatedCostUsd);
+          }
+        }
+        await this.runStateStore.update(run.runId, { status: "complete", artifact });
+        await this.recordMemory(tenantId, project, {
+          toolId: spec.toolId,
+          runId: run.runId,
+          artifact,
+        });
+
+        return {
+          kind: "embedded",
+          outcome: "completed",
+          matchedRouting,
+          artifact,
+          workspaceRoot: workspace.root,
+          runId: run.runId,
+          backendId: result.stages.at(-1)?.backendId,
+          usage: result.usage.at(-1),
+        };
+      } catch (error) {
+        await this.runStateStore.update(run.runId, { status: "failed" });
+        throw error;
+      } finally {
+        await workspace.dispose();
+      }
+    } finally {
       admit.release();
     }
   }
@@ -559,6 +723,7 @@ export class EmbeddedCoordinator {
           holdReason: gate.reason,
           request: request.request,
           context: request.context,
+          params: encodeRunParams(request),
         });
         this.heldCounts.set(tenantId, held + 1);
         return {
@@ -576,6 +741,7 @@ export class EmbeddedCoordinator {
         status: "running",
         request: request.request,
         context: request.context,
+        params: encodeRunParams(request),
       });
       return {
         kind: "embedded",
@@ -689,11 +855,10 @@ export class EmbeddedCoordinator {
     if (run.toolId === "squad_run") {
       return this.executeAdvisoryRun(run);
     }
-    const req: CoordinatorRequest = {
-      toolId: run.toolId,
-      request: run.request ?? "",
-      context: run.context,
-    };
+    if (run.toolId === FEDERATION_TOOL_ID) {
+      return this.executeFederationRun(run);
+    }
+    const req: CoordinatorRequest = coordinatorRequestFromRun(run);
     const core = await this.runPipelineCore(run.tenantId, req);
     if (core.outcome === "denied") {
       await this.runStateStore.update(run.runId, { status: "failed" });
@@ -733,18 +898,15 @@ export class EmbeddedCoordinator {
    * inside a server-allocated per-tenant workspace with guaranteed teardown (SEC-4).
    */
   private async executeAdvisoryRun(run: RunState): Promise<EmbeddedResult> {
-    const req: CoordinatorRequest = {
-      toolId: run.toolId,
-      request: run.request ?? "",
-      context: run.context,
-    };
+    const req: CoordinatorRequest = coordinatorRequestFromRun(run);
     const workspace = await this.workspaceManager.allocate(run.tenantId);
     try {
       const persistence = new StoreAdvisoryPersistence(this.runStateStore, run.runId);
+      const { request: framed, project } = await this.withMemory(run.tenantId, req);
       // Autopilot: advance stage-to-stage to a single compiled artifact. The human
       // gate already fired at startHttpRun; no additional finalHold is injected.
       const result = await runAdvisoryPipeline(
-        req,
+        framed,
         { backend: this.backend, persistence },
         { mode: "autopilot" },
       );
@@ -758,11 +920,81 @@ export class EmbeddedCoordinator {
       // `completed` and a council `Stop` `halted` are both terminal-with-artifact;
       // persist the compiled artifact so the status poll returns it directly.
       await this.runStateStore.update(run.runId, { status: "complete", artifact: result.artifact });
+      await this.recordMemory(run.tenantId, project, {
+        toolId: run.toolId,
+        runId: run.runId,
+        artifact: result.artifact,
+      });
       this.decrementHeld(run.tenantId);
       return {
         kind: "embedded",
         outcome: "completed",
         matchedRouting: EMPTY_ROUTING,
+        artifact: result.artifact,
+        workspaceRoot: workspace.root,
+        runId: run.runId,
+        backendId: result.stages.at(-1)?.backendId,
+        usage: result.usage.at(-1),
+      };
+    } catch (error) {
+      await this.runStateStore.update(run.runId, { status: "failed" });
+      this.decrementHeld(run.tenantId);
+      throw error;
+    } finally {
+      // SEC-4 — teardown runs even on error/timeout.
+      await workspace.dispose();
+    }
+  }
+
+  /**
+   * Drive an approved/claimed `squad_federate` run through the FEDERATION meta
+   * layer. This is the embedded counterpart of the delegated federation path: the
+   * run executes as a single Federation Coordinator advisory stage whose charter is
+   * the resolved federation persona PLUS a server-composed directive derived only
+   * from validated inputs (`squad` / `init` / `promote` / `mode`) — see
+   * `federation.ts`. The caller's free text stays delimited DATA (SEC-5).
+   *
+   * The federation inputs are recovered from the run's persisted `params`, so a
+   * pinned sub-squad or an init/promote turn survives the approve → poll cycle
+   * instead of degrading into a plain pipeline run.
+   *
+   * The Human Gate already fired at {@link startHttpRun} (`squad_federate` is
+   * `gates: true`), so no additional hold is injected here — identical to the
+   * `squad_run` path. All work happens inside a per-tenant ephemeral workspace with
+   * guaranteed teardown (SEC-4).
+   */
+  private async executeFederationRun(run: RunState): Promise<EmbeddedResult> {
+    const req: CoordinatorRequest = coordinatorRequestFromRun(run);
+    const workspace = await this.workspaceManager.allocate(run.tenantId);
+    try {
+      // Real on-disk `*.agent.md` bytes when the cast is present; the embedded
+      // paraphrase otherwise (so a minimal image never fails role resolution).
+      const persona = federationPersona(req, resolvePersonaForRole(FEDERATION_ROLE));
+      const persistence = new StoreAdvisoryPersistence(this.runStateStore, run.runId);
+      const { request: framed, project } = await this.withMemory(run.tenantId, req);
+      const result = await runAdvisoryPipeline(
+        framed,
+        { backend: this.backend, persistence },
+        { mode: "autopilot", plan: [{ kind: "persona", role: persona.role, persona }] },
+      );
+
+      for (const usage of result.usage) {
+        if (usage.estimatedCostUsd) {
+          this.quota.recordCostUsd(run.tenantId, usage.estimatedCostUsd);
+        }
+      }
+
+      await this.runStateStore.update(run.runId, { status: "complete", artifact: result.artifact });
+      await this.recordMemory(run.tenantId, project, {
+        toolId: run.toolId,
+        runId: run.runId,
+        artifact: result.artifact,
+      });
+      this.decrementHeld(run.tenantId);
+      return {
+        kind: "embedded",
+        outcome: "completed",
+        matchedRouting: FEDERATION_ROUTING,
         artifact: result.artifact,
         workspaceRoot: workspace.root,
         runId: run.runId,

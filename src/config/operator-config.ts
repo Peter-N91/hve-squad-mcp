@@ -29,6 +29,39 @@ export const DEFAULT_TENANT_CONCURRENCY = 4;
 /** Default idle timeout (ms) after which a session id is forgotten (SEC-8). */
 export const DEFAULT_SESSION_IDLE_MS = 5 * 60 * 1000;
 
+/**
+ * The memory persistence backends. `graph` persists each memory entry as a
+ * markdown file in a SharePoint document library / OneDrive drive via Microsoft
+ * Graph, so a team can keep squad state in the knowledge store they already
+ * govern rather than in Azure Storage.
+ */
+export type MemoryBackendKind = "file" | "table" | "graph";
+
+/**
+ * One operator-declared memory destination a caller may select BY NAME. The
+ * operator owns every credential-bearing field; the caller only ever sees `name`.
+ */
+export interface MemoryTargetConfig {
+  /** The opaque, lower-kebab-case selector a caller passes as `target`. */
+  name: string;
+  /** Which backend realizes this destination. */
+  backend: MemoryBackendKind;
+  /** `file` — the directory backing this destination. */
+  dir?: string;
+  /** `table` — the storage account (falls back to the global `storageAccount`). */
+  storageAccount?: string;
+  /** `table` — the table name (falls back to the global `memoryTableName`). */
+  tableName?: string;
+  /** `graph` — the SharePoint/OneDrive drive id. */
+  driveId?: string;
+  /** `graph` — the folder within the drive that roots squad memory. */
+  rootPath?: string;
+  /** `graph` — override the Graph endpoint (sovereign clouds). */
+  endpoint?: string;
+  /** `graph` — encrypt content at rest for this destination (default false). */
+  encrypt?: boolean;
+}
+
 export interface OperatorConfig {
   /** Expected token audience — this resource server's identifier (SEC-1, RFC 8707). */
   audience: string;
@@ -107,6 +140,95 @@ export interface OperatorConfig {
   renderBrandTemplatePath: string;
   /** SAS lifetime in minutes for a rendered-deck download link. Default 60. */
   renderSasTtlMinutes: number;
+  /**
+   * Whether the shared-state memory broker is exposed (the MCP resource read
+   * surface + the `squad_memory_write` CAS tool). Off by default. When enabled,
+   * the project's own `.copilot-tracking/squad/` memory + history is exposed as
+   * scope-guarded (`Squad.Memory` / `Squad.MemoryWrite`), tenant-isolated MCP
+   * resources keyed on the authenticated `tenantId`. Requires a backing store:
+   * the `table` backend needs `storageAccount`; the `file` backend needs
+   * `memoryDir` (fail-fast, mirroring the HIGH-1 run-state checks).
+   */
+  enableMemory: boolean;
+  /**
+   * Memory-broker backend: `file` (single-replica, local dir), `table` (Azure
+   * Table Storage, cross-replica ETag CAS), or `graph` (a SharePoint document
+   * library / OneDrive drive via Microsoft Graph, `If-Match` CAS). `table` or
+   * `graph` is required for a multi-replica deployment; `file` is the
+   * single-replica default. Independent from `runStateBackend` so memory and
+   * run-state can use different stores.
+   */
+  memoryBackend: MemoryBackendKind;
+  /** Azure Table name holding squad memory entries (default `squadmemory`). */
+  memoryTableName: string;
+  /** Directory backing the file memory store when `memoryBackend === "file"`. */
+  memoryDir: string;
+  /**
+   * WI-03 — whether the Blob overflow channel is enabled. Off by default (the
+   * memory store behaves identically to today). When on, memory `content` whose
+   * ENCRYPTED envelope exceeds {@link memoryOverflowThresholdBytes} spills to a
+   * tenant-scoped Blob while a tiny pointer entity stays in the primary store; the
+   * blob payload is the same at-rest envelope (MEDIUM-3) and the pointer never
+   * carries plaintext. Requires `enableMemory`, `storageAccount`, and
+   * {@link memoryOverflowContainer} (fail-fast, mirroring the memory checks).
+   */
+  memoryOverflowEnabled: boolean;
+  /** WI-03 — Blob container holding the overflow payloads. Required when enabled. */
+  memoryOverflowContainer: string;
+  /**
+   * WI-03 — the encrypted-envelope byte length above which content spills to Blob.
+   * Default 32 KiB (32768) — the Azure Table single-property string cap.
+   */
+  memoryOverflowThresholdBytes: number;
+  /**
+   * Whether squad memory is read and written AUTOMATICALLY around every embedded
+   * dispatch, instead of only when a caller invokes a memory tool. Off by default.
+   * When on, each run is preceded by a read of the resolved project's `state` +
+   * `decisions` (injected as DATA, never authority) and followed by a
+   * `history/<toolId>-<runId>` write plus a `state` digest append. Requires
+   * {@link enableMemory} (there is no store to read/write otherwise).
+   */
+  memoryAutoEnabled: boolean;
+  /**
+   * The memory project partition used when a turn pins no federation sub-squad.
+   * Server-controlled so continuity is reproducible: a caller can never choose
+   * (or accidentally fork) the partition its memory lands in. Lower-kebab-case.
+   */
+  memoryDefaultProject: string;
+  /**
+   * The SharePoint document library / OneDrive drive id backing the `graph`
+   * memory backend. Required when `memoryBackend === "graph"`.
+   */
+  memoryGraphDriveId: string;
+  /** Folder within the drive that roots squad memory (empty = the drive root). */
+  memoryGraphRootPath: string;
+  /** Override the Graph endpoint (sovereign clouds); empty = the public cloud. */
+  memoryGraphEndpoint: string;
+  /**
+   * Whether `graph` memory content is field-encrypted at rest. Default FALSE: a
+   * SharePoint target exists so humans can read the files, and encrypting them
+   * defeats that. An operator who needs ciphertext in SharePoint opts in
+   * explicitly (and must also configure {@link encryptionKeyBase64}).
+   */
+  memoryGraphEncrypt: boolean;
+  /**
+   * Operator-declared, caller-selectable memory destinations. Empty (the default)
+   * means a single destination and the `target` input is ignored. Otherwise a
+   * caller may select a destination BY NAME from this allow-list only — it can
+   * never supply a raw drive id, account, or path (the SEC-3 pattern already used
+   * for `allowedModelEndpoints`).
+   */
+  memoryTargets: MemoryTargetConfig[];
+  /** The target used when a call names none. Must be one of {@link memoryTargets}. */
+  memoryDefaultTarget: string;
+  /**
+   * Whether the business-facing tools (`squad_business_plan`, `squad_backlog`) are
+   * exposed. Off by default. They are advisory: each runs one embedded dispatch
+   * against a real cast persona and returns text / validated JSON. No impactful
+   * action — the ADO/Jira WRITE still happens in the native certified connector on
+   * the end user's own connection (ADR-0001 trust boundary).
+   */
+  enableBusinessTools: boolean;
 }
 
 function splitList(value: string | undefined): string[] {
@@ -125,6 +247,74 @@ function numberOr(value: string | undefined, fallback: number): number {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+/** Parse the memory backend selector; anything unrecognized falls back to `file`. */
+function parseMemoryBackend(value: string | undefined): MemoryBackendKind {
+  const normalized = (value ?? "file").trim().toLowerCase();
+  return normalized === "table" || normalized === "graph" ? normalized : "file";
+}
+
+/** Target-name shape: the opaque selector a caller may pass. */
+const MEMORY_TARGET_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+/**
+ * Parse `SQUAD_MCP_MEMORY_TARGETS` — a JSON array of operator-declared memory
+ * destinations. Empty / unset means "one destination", and the `target` input is
+ * ignored. Every entry is validated here so a malformed deployment fails at BOOT
+ * rather than on the first caller-selected write.
+ */
+function parseMemoryTargets(value: string | undefined): MemoryTargetConfig[] {
+  const raw = (value ?? "").trim();
+  if (raw.length === 0) {
+    return [];
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("SQUAD_MCP_MEMORY_TARGETS must be a JSON array of memory destinations.");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("SQUAD_MCP_MEMORY_TARGETS must be a JSON array of memory destinations.");
+  }
+  const seen = new Set<string>();
+  return parsed.map((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`SQUAD_MCP_MEMORY_TARGETS[${index}] must be an object.`);
+    }
+    const record = entry as Record<string, unknown>;
+    const name = typeof record.name === "string" ? record.name.trim() : "";
+    if (!MEMORY_TARGET_NAME.test(name)) {
+      throw new Error(
+        `SQUAD_MCP_MEMORY_TARGETS[${index}].name must be lower-kebab-case (it is the caller-facing selector).`,
+      );
+    }
+    if (seen.has(name)) {
+      throw new Error(`SQUAD_MCP_MEMORY_TARGETS has a duplicate target name "${name}".`);
+    }
+    seen.add(name);
+    const backend = parseMemoryBackend(
+      typeof record.backend === "string" ? record.backend : undefined,
+    );
+    const target: MemoryTargetConfig = { name, backend };
+    if (typeof record.dir === "string") target.dir = record.dir.trim();
+    if (typeof record.storageAccount === "string") target.storageAccount = record.storageAccount.trim();
+    if (typeof record.tableName === "string") target.tableName = record.tableName.trim();
+    if (typeof record.driveId === "string") target.driveId = record.driveId.trim();
+    if (typeof record.rootPath === "string") target.rootPath = record.rootPath.trim();
+    if (typeof record.endpoint === "string") target.endpoint = record.endpoint.trim();
+    target.encrypt = record.encrypt === true;
+
+    // Per-backend prerequisites, checked at boot (mirrors the HIGH-1 pattern).
+    if (backend === "file" && !target.dir) {
+      throw new Error(`SQUAD_MCP_MEMORY_TARGETS["${name}"] (file) requires "dir".`);
+    }
+    if (backend === "graph" && !target.driveId) {
+      throw new Error(`SQUAD_MCP_MEMORY_TARGETS["${name}"] (graph) requires "driveId".`);
+    }
+    return target;
+  });
 }
 
 /**
@@ -197,6 +387,103 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
     );
   }
 
+  const enableMemory = (env.SQUAD_MCP_ENABLE_MEMORY ?? "").trim().toLowerCase() === "true";
+  const memoryBackend = parseMemoryBackend(env.SQUAD_MCP_MEMORY_BACKEND);
+  const memoryTableName = (env.SQUAD_MCP_MEMORY_TABLE_NAME ?? "squadmemory").trim();
+  const memoryDir = (env.SQUAD_MCP_MEMORY_DIR ?? "").trim();
+  const memoryGraphDriveId = (env.SQUAD_MCP_MEMORY_GRAPH_DRIVE_ID ?? "").trim();
+  const memoryGraphRootPath = (env.SQUAD_MCP_MEMORY_GRAPH_ROOT_PATH ?? "").trim();
+  const memoryGraphEndpoint = (env.SQUAD_MCP_MEMORY_GRAPH_ENDPOINT ?? "").trim();
+  const memoryGraphEncrypt = (env.SQUAD_MCP_MEMORY_GRAPH_ENCRYPT ?? "").trim().toLowerCase() === "true";
+
+  if (enableMemory && memoryBackend === "table" && storageAccount.length === 0) {
+    throw new Error(
+      "SQUAD_MCP_STORAGE_ACCOUNT is required when SQUAD_MCP_ENABLE_MEMORY=true " +
+        "with the table backend (the cross-replica, tenant-isolated memory store).",
+    );
+  }
+  if (enableMemory && memoryBackend === "file" && memoryDir.length === 0) {
+    throw new Error(
+      "SQUAD_MCP_MEMORY_DIR is required when SQUAD_MCP_ENABLE_MEMORY=true " +
+        "with the file backend (the directory backing the local memory store).",
+    );
+  }
+  if (enableMemory && memoryBackend === "graph" && memoryGraphDriveId.length === 0) {
+    throw new Error(
+      "SQUAD_MCP_MEMORY_GRAPH_DRIVE_ID is required when SQUAD_MCP_MEMORY_BACKEND=graph " +
+        "(the SharePoint document library / OneDrive drive that holds squad memory).",
+    );
+  }
+
+  const memoryTargets = parseMemoryTargets(env.SQUAD_MCP_MEMORY_TARGETS);
+  const memoryDefaultTarget = (env.SQUAD_MCP_MEMORY_DEFAULT_TARGET ?? "").trim();
+  if (memoryTargets.length > 0) {
+    if (!enableMemory) {
+      throw new Error(
+        "SQUAD_MCP_MEMORY_TARGETS requires SQUAD_MCP_ENABLE_MEMORY=true " +
+          "(named destinations decorate the shared-state memory store).",
+      );
+    }
+    if (memoryDefaultTarget.length === 0) {
+      throw new Error(
+        "SQUAD_MCP_MEMORY_DEFAULT_TARGET is required when SQUAD_MCP_MEMORY_TARGETS is set " +
+          "(a call that names no target must resolve deterministically).",
+      );
+    }
+    if (!memoryTargets.some((target) => target.name === memoryDefaultTarget)) {
+      throw new Error(
+        "SQUAD_MCP_MEMORY_DEFAULT_TARGET must name one of SQUAD_MCP_MEMORY_TARGETS.",
+      );
+    }
+  }
+
+  const memoryAutoEnabled = (env.SQUAD_MCP_MEMORY_AUTO_ENABLED ?? "").trim().toLowerCase() === "true";
+  if (memoryAutoEnabled && !enableMemory) {
+    throw new Error(
+      "SQUAD_MCP_MEMORY_AUTO_ENABLED=true requires SQUAD_MCP_ENABLE_MEMORY=true " +
+        "(automatic continuity reads and writes through the shared-state memory store).",
+    );
+  }
+  const memoryDefaultProject = (env.SQUAD_MCP_MEMORY_DEFAULT_PROJECT ?? "default").trim();
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(memoryDefaultProject)) {
+    throw new Error(
+      "SQUAD_MCP_MEMORY_DEFAULT_PROJECT must be lower-kebab-case (it is a store partition segment).",
+    );
+  }
+
+  const enableBusinessTools =
+    (env.SQUAD_MCP_ENABLE_BUSINESS_TOOLS ?? "").trim().toLowerCase() === "true";
+  if (enableBusinessTools && modelEndpoint.length === 0) {
+    throw new Error(
+      "SQUAD_MCP_MODEL_ENDPOINT is required when SQUAD_MCP_ENABLE_BUSINESS_TOOLS=true " +
+        "(the business tools run a server-side advisory dispatch).",
+    );
+  }
+
+  const memoryOverflowEnabled =
+    (env.SQUAD_MCP_MEMORY_OVERFLOW_ENABLED ?? "").trim().toLowerCase() === "true";
+  const memoryOverflowContainer = (env.SQUAD_MCP_MEMORY_OVERFLOW_CONTAINER ?? "").trim();
+  const memoryOverflowThresholdBytes = numberOr(env.SQUAD_MCP_MEMORY_OVERFLOW_THRESHOLD_BYTES, 32768);
+
+  if (memoryOverflowEnabled && !enableMemory) {
+    throw new Error(
+      "SQUAD_MCP_MEMORY_OVERFLOW_ENABLED=true requires SQUAD_MCP_ENABLE_MEMORY=true " +
+        "(the overflow channel decorates the shared-state memory store; WI-03).",
+    );
+  }
+  if (memoryOverflowEnabled && storageAccount.length === 0) {
+    throw new Error(
+      "SQUAD_MCP_STORAGE_ACCOUNT is required when SQUAD_MCP_MEMORY_OVERFLOW_ENABLED=true " +
+        "(the over-threshold memory payload is uploaded to a tenant-scoped Blob container; WI-03).",
+    );
+  }
+  if (memoryOverflowEnabled && memoryOverflowContainer.length === 0) {
+    throw new Error(
+      "SQUAD_MCP_MEMORY_OVERFLOW_CONTAINER is required when SQUAD_MCP_MEMORY_OVERFLOW_ENABLED=true " +
+        "(the Blob container holding the overflow payloads; WI-03).",
+    );
+  }
+
   return {
     audience,
     allowedIssuers: splitList(env.SQUAD_MCP_ALLOWED_ISSUERS),
@@ -225,5 +512,21 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
     renderScriptsDir,
     renderBrandTemplatePath: (env.SQUAD_MCP_RENDER_BRAND_TEMPLATE_PATH ?? "").trim(),
     renderSasTtlMinutes: numberOr(env.SQUAD_MCP_RENDER_SAS_TTL_MINUTES, 60),
+    enableMemory,
+    memoryBackend,
+    memoryTableName,
+    memoryDir,
+    memoryOverflowEnabled,
+    memoryOverflowContainer,
+    memoryOverflowThresholdBytes,
+    memoryAutoEnabled,
+    memoryDefaultProject,
+    memoryGraphDriveId,
+    memoryGraphRootPath,
+    memoryGraphEndpoint,
+    memoryGraphEncrypt,
+    memoryTargets,
+    memoryDefaultTarget,
+    enableBusinessTools,
   };
 }

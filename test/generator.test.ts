@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import type { ToolCatalog } from "../src/catalog/catalog.js";
@@ -7,6 +9,8 @@ import {
   loadGeneratorInputs,
   validateCatalog,
 } from "../generators/build-manifests.js";
+import { packageRoot } from "../src/paths.js";
+import { SERVER_VERSION } from "../src/server.js";
 
 function clone(catalog: ToolCatalog): ToolCatalog {
   return JSON.parse(JSON.stringify(catalog)) as ToolCatalog;
@@ -17,6 +21,21 @@ const inputs = loadGeneratorInputs();
 test("the drift check passes on the real catalog and deployed cast", () => {
   const errors = validateCatalog(inputs.catalog, inputs.routingRows, inputs.knownAgents);
   assert.deepEqual(errors, []);
+});
+
+// `serverInfo.version` is what a host reports and an operator quotes in a support
+// thread, so a stale constant is a real (if quiet) defect: it had drifted from the
+// package version for several releases. The runtime image ships no package.json, so
+// the constant cannot be read from disk — this check is the guarantee instead.
+test("SERVER_VERSION matches the package version", () => {
+  const pkg = JSON.parse(readFileSync(join(packageRoot(), "package.json"), "utf8")) as {
+    version: string;
+  };
+  assert.equal(
+    SERVER_VERSION,
+    pkg.version,
+    "bump SERVER_VERSION in src/server.ts whenever package.json version changes",
+  );
 });
 
 test("known agents resolve the mapped roles and council members", () => {

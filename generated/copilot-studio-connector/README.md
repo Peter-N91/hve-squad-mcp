@@ -15,8 +15,13 @@ This connector is a **generated build artifact**. Regenerate it with
 - `squad_review` — Squad Review (scope: `Squad.Review`)
 - `squad_architect` — Squad Architect (scope: `Squad.Architect`)
 - `squad_run` — Squad Run (scope: `Squad.Run`)
+- `squad_federate` — Squad Federate (scope: `Squad.Federate`)
 - `squad_status` — Squad Status (scope: `Squad.Run`)
 - `squad_render_pptx` — Squad Render PPTX (scope: `Squad.Render`)
+- `squad_memory_read` — Squad Memory Read (scope: `Squad.Memory`)
+- `squad_memory_write` — Squad Memory Write (scope: `Squad.MemoryWrite`)
+- `squad_business_plan` — Squad Business Plan (scope: `Squad.Business`)
+- `squad_backlog` — Squad Backlog (scope: `Squad.Backlog`)
 
 > `squad_run` is the gated async pipeline: it returns a run id and pauses at the
 > Human Gate. Poll `squad_status` with that run id to advance the run after an

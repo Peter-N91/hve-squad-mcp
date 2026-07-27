@@ -117,6 +117,52 @@ param renderSasTtlMinutes int = 60
 @description('Optional operator brand template path inside the image for branded renders (empty = the skill default look).')
 param renderBrandTemplatePath string = ''
 
+@description('Enable the shared-state squad-memory broker (the squad-memory:// resource surface + the squad_memory_* tools). Off by default.')
+param enableMemory bool = false
+
+@description('Where squad memory is persisted. "table" = Azure Table Storage (cross-replica ETag CAS). "graph" = a SharePoint document library / OneDrive drive via Microsoft Graph (one readable .md per entry, If-Match CAS).')
+@allowed([
+  'table'
+  'graph'
+])
+param memoryBackend string = 'table'
+
+@description('Azure Table name that holds squad memory entries when memoryBackend is "table".')
+param memoryTableName string = 'squadmemory'
+
+@description('Read and write squad memory AUTOMATICALLY around every embedded dispatch instead of only on an explicit squad_memory_* tool call. Requires enableMemory.')
+param enableMemoryAuto bool = false
+
+@description('Memory project partition used when a turn pins no federation sub-squad. Lower-kebab-case; server-controlled so continuity is reproducible.')
+param memoryDefaultProject string = 'default'
+
+@description('SharePoint document library / OneDrive drive id backing the "graph" memory backend. Required when memoryBackend is "graph".')
+param memoryGraphDriveId string = ''
+
+@description('Folder within the drive that roots squad memory (empty = the drive root).')
+param memoryGraphRootPath string = 'squad-memory'
+
+@description('Override the Microsoft Graph endpoint for a sovereign cloud (empty = the public cloud).')
+param memoryGraphEndpoint string = ''
+
+@description('Field-encrypt memory content at rest on the "graph" backend. Default false: a SharePoint library exists to be read by humans, so ciphertext there is an explicit choice.')
+param memoryGraphEncrypt bool = false
+
+@description('Optional JSON array of operator-declared, caller-selectable memory destinations. Empty = a single destination and the tools\' "target" input is ignored.')
+param memoryTargets string = ''
+
+@description('Destination used when a call names none. Required when memoryTargets is set, and must name one of its entries.')
+param memoryDefaultTarget string = ''
+
+@description('Spill over-threshold memory content to a tenant-scoped Blob with a pointer entity left in the primary store (WI-03). Requires enableMemory.')
+param enableMemoryOverflow bool = false
+
+@description('Blob container that holds memory overflow payloads.')
+param memoryOverflowContainer string = 'squadmemory'
+
+@description('Enable the business-facing tools squad_business_plan and squad_backlog (advisory only; the ADO/Jira write stays in the native certified connector). Off by default.')
+param enableBusinessTools bool = false
+
 var tenantId = subscription().tenantId
 var keyVaultSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
 // Storage Table Data Contributor — the app + worker identity reads/writes run records.
@@ -124,17 +170,27 @@ var storageTableDataContributorRoleId = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
 // Storage Blob Data Contributor — the app identity writes rendered decks + mints
 // user-delegation SAS (grants generateUserDelegationKey/action).
 var storageBlobDataContributorRoleId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
-// The Storage account is provisioned for the async pipeline (Table) OR the render
-// feature (Blob); either one deploys it.
-var enableStorage = enableRemotePipeline || enableRenderPptx
+// Which storage services are needed, and therefore which account/roles deploy.
+// Table: async run state (WI-06) and/or the table-backed memory broker.
+// Blob:  rendered decks and/or the memory overflow channel (WI-03).
+var enableMemoryTable = enableMemory && memoryBackend == 'table'
+var enableTableStorage = enableRemotePipeline || enableMemoryTable
+var enableBlobStorage = enableRenderPptx || enableMemoryOverflow
+var enableStorage = enableTableStorage || enableBlobStorage
 var storageAccountName = toLower(take('${namePrefix}st${uniqueString(resourceGroup().id)}', 24))
+
+// The storage account name is a single env entry shared by the run-state store,
+// the memory broker, the render tool, and the overflow channel — emitted once so
+// the container never receives a duplicate variable.
+var storageEnv = enableStorage
+  ? [ { name: 'SQUAD_MCP_STORAGE_ACCOUNT', value: storageAccountName } ]
+  : []
 
 // Async-pipeline env (WI-06). Appended to the web app and the worker when enabled.
 var pipelineEnv = enableRemotePipeline
   ? [
       { name: 'SQUAD_MCP_REMOTE_PIPELINE_ENABLED', value: 'true' }
       { name: 'SQUAD_MCP_RUN_STATE_BACKEND', value: 'table' }
-      { name: 'SQUAD_MCP_STORAGE_ACCOUNT', value: storageAccountName }
       { name: 'SQUAD_MCP_RUN_TABLE_NAME', value: runTableName }
       { name: 'SQUAD_MCP_WORKER_ENABLED', value: string(enableWorker) }
     ]
@@ -148,19 +204,66 @@ var encryptionEnv = (enableRemotePipeline && !empty(runEncryptionKeyBase64))
   ? [ { name: 'SQUAD_MCP_RUN_ENCRYPTION_KEY_B64', secretRef: 'run-encryption-key' } ]
   : []
 
-// Render env (squad_render_pptx). The storage account name is set by pipelineEnv
-// when the pipeline is on; add it here only when render is the sole storage user
-// (avoids a duplicate env entry).
-var renderStorageEnv = (enableRenderPptx && !enableRemotePipeline)
-  ? [ { name: 'SQUAD_MCP_STORAGE_ACCOUNT', value: storageAccountName } ]
-  : []
+// Render env (squad_render_pptx). The storage account name comes from storageEnv.
 var renderEnv = enableRenderPptx
-  ? concat([
+  ? [
       { name: 'SQUAD_MCP_ENABLE_RENDER_PPTX', value: 'true' }
       { name: 'SQUAD_MCP_RENDER_BLOB_CONTAINER', value: renderBlobContainer }
       { name: 'SQUAD_MCP_RENDER_SAS_TTL_MINUTES', value: string(renderSasTtlMinutes) }
       { name: 'SQUAD_MCP_RENDER_BRAND_TEMPLATE_PATH', value: renderBrandTemplatePath }
-    ], renderStorageEnv)
+    ]
+  : []
+
+// Graph (SharePoint / OneDrive) memory destination. Only emitted for the graph
+// backend; the app's own config validation fails fast on a missing drive id.
+var memoryGraphEnv = (enableMemory && memoryBackend == 'graph')
+  ? [
+      { name: 'SQUAD_MCP_MEMORY_GRAPH_DRIVE_ID', value: memoryGraphDriveId }
+      { name: 'SQUAD_MCP_MEMORY_GRAPH_ROOT_PATH', value: memoryGraphRootPath }
+      { name: 'SQUAD_MCP_MEMORY_GRAPH_ENDPOINT', value: memoryGraphEndpoint }
+      { name: 'SQUAD_MCP_MEMORY_GRAPH_ENCRYPT', value: string(memoryGraphEncrypt) }
+    ]
+  : []
+
+// Operator-declared, caller-selectable destinations. The caller may only select
+// among these BY NAME; it never supplies a drive id, account, or path (SEC-3).
+var memoryTargetsEnv = (enableMemory && !empty(memoryTargets))
+  ? [
+      { name: 'SQUAD_MCP_MEMORY_TARGETS', value: memoryTargets }
+      { name: 'SQUAD_MCP_MEMORY_DEFAULT_TARGET', value: memoryDefaultTarget }
+    ]
+  : []
+
+// Blob overflow channel for over-threshold memory entries (WI-03).
+var memoryOverflowEnv = enableMemoryOverflow
+  ? [
+      { name: 'SQUAD_MCP_MEMORY_OVERFLOW_ENABLED', value: 'true' }
+      { name: 'SQUAD_MCP_MEMORY_OVERFLOW_CONTAINER', value: memoryOverflowContainer }
+    ]
+  : []
+
+// Shared-state memory broker env. Auto-memory makes continuity a SERVER behavior
+// rather than something the calling agent must remember to do.
+var memoryEnv = enableMemory
+  ? concat([
+      { name: 'SQUAD_MCP_ENABLE_MEMORY', value: 'true' }
+      { name: 'SQUAD_MCP_MEMORY_BACKEND', value: memoryBackend }
+      { name: 'SQUAD_MCP_MEMORY_TABLE_NAME', value: memoryTableName }
+      { name: 'SQUAD_MCP_MEMORY_AUTO_ENABLED', value: string(enableMemoryAuto) }
+      { name: 'SQUAD_MCP_MEMORY_DEFAULT_PROJECT', value: memoryDefaultProject }
+    ], memoryGraphEnv, memoryTargetsEnv, memoryOverflowEnv)
+  : []
+
+// The memory broker shares the run-state encryption key: on the table backend it
+// encrypts `content` at rest exactly as the run store protects request/context.
+var memoryEncryptionEnv = (enableMemory && !enableRemotePipeline && !empty(runEncryptionKeyBase64))
+  ? [ { name: 'SQUAD_MCP_RUN_ENCRYPTION_KEY_B64', secretRef: 'run-encryption-key' } ]
+  : []
+
+// Business-facing tools (squad_business_plan, squad_backlog). Advisory only — the
+// ADO/Jira write stays in the native certified connector on the user's connection.
+var businessEnv = enableBusinessTools
+  ? [ { name: 'SQUAD_MCP_ENABLE_BUSINESS_TOOLS', value: 'true' } ]
   : []
 
 // Base web-app env; pipeline + encryption env are concatenated onto it below.
@@ -274,7 +377,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             cpu: json('0.5')
             memory: '1Gi'
           }
-          env: concat(webBaseEnv, pipelineEnv, encryptionEnv, renderEnv)
+          env: concat(webBaseEnv, storageEnv, pipelineEnv, encryptionEnv, memoryEncryptionEnv, renderEnv, memoryEnv, businessEnv)
         }
       ]
       scale: {
@@ -342,7 +445,7 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = if (enableStor
   }
 }
 
-resource tableService 'Microsoft.Storage/storageAccounts/tableServices@2023-05-01' = if (enableRemotePipeline) {
+resource tableService 'Microsoft.Storage/storageAccounts/tableServices@2023-05-01' = if (enableTableStorage) {
   parent: storage
   name: 'default'
 }
@@ -352,8 +455,15 @@ resource runTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-0
   name: runTableName
 }
 
-// Let the app + worker identity read/write run records (WI-06). Account-scoped RBAC.
-resource storageTableRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableRemotePipeline) {
+// Shared-state memory broker table. Separate from the run table: a memory entry is
+// not a run (DR-03), and memory outlives the run that produced it.
+resource memoryTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-05-01' = if (enableMemoryTable) {
+  parent: tableService
+  name: memoryTableName
+}
+
+// Let the app + worker identity read/write run + memory records. Account-scoped RBAC.
+resource storageTableRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableTableStorage) {
   name: guid(storageAccountName, identity.id, storageTableDataContributorRoleId)
   scope: storage
   properties: {
@@ -367,7 +477,7 @@ resource storageTableRole 'Microsoft.Authorization/roleAssignments@2022-04-01' =
 // Contributor role so the app identity can PUT decks and mint user-delegation SAS
 // (that role grants generateUserDelegationKey/action). Public access is disabled;
 // each download link is a short-lived per-blob user-delegation SAS.
-resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = if (enableRenderPptx) {
+resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = if (enableBlobStorage) {
   parent: storage
   name: 'default'
 }
@@ -380,7 +490,18 @@ resource renderContainer 'Microsoft.Storage/storageAccounts/blobServices/contain
   }
 }
 
-resource storageBlobRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableRenderPptx) {
+// WI-03 overflow: a private container for over-threshold memory payloads. The blob
+// carries the same at-rest envelope as the primary store; the pointer entity left
+// behind never holds plaintext.
+resource memoryOverflowBlobContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = if (enableMemoryOverflow) {
+  parent: blobService
+  name: memoryOverflowContainer
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
+resource storageBlobRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableBlobStorage) {
   name: guid(storageAccountName, identity.id, storageBlobDataContributorRoleId)
   scope: storage
   properties: {
@@ -432,7 +553,7 @@ resource workerJob 'Microsoft.App/jobs@2024-03-01' = if (enableWorker) {
             cpu: json('0.5')
             memory: '1Gi'
           }
-          env: concat(webBaseEnv, pipelineEnv, encryptionEnv, [
+          env: concat(webBaseEnv, storageEnv, pipelineEnv, encryptionEnv, memoryEncryptionEnv, memoryEnv, [
             { name: 'SQUAD_MCP_WORKER_ONCE', value: 'true' }
           ])
         }
@@ -488,3 +609,9 @@ output keyVaultName string = keyVault.name
 
 @description('The Azure Storage account backing the async run-state store (empty when the pipeline is disabled).')
 output runStateStorageAccount string = enableRemotePipeline ? storageAccountName : ''
+
+@description('The app managed-identity CLIENT id. Pass it to graph-memory-permissions.bicep, which grants that identity access to the SharePoint library backing the graph memory backend.')
+output appClientId string = identity.properties.clientId
+
+@description('Where squad memory is persisted, or empty when the memory broker is disabled.')
+output memoryBackendInUse string = enableMemory ? memoryBackend : ''
