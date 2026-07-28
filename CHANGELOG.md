@@ -10,6 +10,16 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
+## [0.2.12] - 2026-07-28
+
+> Built against `Peter-N91/hve-squad@0.10.12` (see `host/cast/package-pin.json`).
+
+### Fixed
+
+- **Bumped the package pin to `Peter-N91/hve-squad@0.10.12` and refreshed the bundled cast snapshot** (`host/cast/`, pinned commit `2ee47f58325f460a7106905b7f80a0be85bf0017`), bringing the squad's **required approval-channel capture** on disk. The embedded engine resolves real persona bytes from this bundle, so the Federation Coordinator it ships now asks for the approval channel as a gated Federation Init Phase 1 step instead of silently defaulting `notify` to `in-chat`, the Squad Coordinator accepts an inherited `notify` input, the Scribe carries the object through its init, promotion, and expansion payloads, and `squad-notifications.instructions.md` carries the *Capture in a Federation* (ask once, then inherit) and *Unattended Runs* contracts.
+
+[0.2.12]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.2.12
+
 ## [0.2.11] - 2026-07-28
 
 ### Changed
