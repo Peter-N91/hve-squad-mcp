@@ -10,6 +10,53 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
+## [0.3.0] - 2026-07-31
+
+> Built against `Peter-N91/hve-squad@0.11.8` (see `host/cast/package-pin.json`).
+
+Minor, not patch: this is a cast change. `0.2.12` was pinned to `hve-squad@0.10.12`, a
+release later superseded, and the six releases since rebuilt the squad roster against the
+agents HVE Core actually deploys. Nothing here is a mechanical version bump.
+
+### Fixed
+
+- **Three of the six tools named agents that no longer exist, and the drift was invisible at runtime.** `hve-squad@0.11.0` replaced the roster spine after HVE Core moved research, planning, implementation, review, and documentation from agents into skills. `tools.catalog.yml` still bound `squad_research` to `Task Researcher`, `squad_plan` to `Task Planner`, and `squad_review` to `Task Reviewer`. Those now resolve to `Squad Researcher`, `Squad Lead`, and `Squad Reviewer`. The generator's drift check catches this at build time — it is what surfaced all four defects — but nothing ran it, so the failure would only have appeared in production as a persona that silently fell back to the paraphrase.
+- **The `squad_review` council seated an agent `runSubagent` cannot reach.** The `product-owner` seat named `ADO Backlog Manager`, one of the `disable-model-invocation: true` entry points HVE Core ships for humans to invoke by name. It is now `GitHub Backlog Manager`, the dispatchable Primary the roster assigns that role. The other four seats (architect, security, cost-manager, rai) were already correct.
+- **The embedded engine's hero charters and fallback records keyed off the retired names.** `charterForRole` and `PARAPHRASE_RECORDS` matched `Task Researcher` / `Task Reviewer`, so a deployed cast containing neither returned `undefined` and the pipeline degraded to a paraphrase of an agent that no longer exists. Both are now `Squad Researcher` / `Squad Reviewer`, and the paraphrases are rewritten from the current charters: the researcher paraphrase adds the fact/inference separation and the record-the-gap rule; the reviewer paraphrase adds implementation-versus-plan deviation reporting, the read-only constraint, and the "an unflattering finding is a successful review" rule. `SPIKE_PIPELINE_ROLES` follows.
+- **`SERVER_VERSION` had drifted two releases behind `package.json`** (`0.2.10` against `0.2.12`), because the bump workflow advances `package.json` and the lockfile but not the constant. Its guard test existed and was failing; nothing ran it. All three now read `0.3.0` and `npm run version:set` is the single writer that keeps them in step.
+
+### Changed
+
+- **The cast snapshot is now a resolver, not a file copy, and needs no local package checkout.** `host/snapshot-cast.ts` resolves the tag in `package-pin.json` to a commit, reads that release's `apm.yml` — the deployment manifest, which lists every deployed file as `<owner>/<repo>/<path>[#<ref>]` — and fetches each file from its pinned source over HTTPS. It runs on any machine with network access; a package checkout and an `apm install` are no longer inputs at all.
+  - **The previous implementation could not be run correctly on a clean machine, and its output could not be trusted on any machine.** It copied `<package>/.github/agents` from a sibling `../hve-squad` checkout. That directory is gitignored in the package repo and ships in no release asset, so a `git clone` of the package at its tag does not contain it — it exists only where someone has run `apm install`, holding whatever that install last left behind. The bundle was therefore reproducible on exactly one machine, and a stale install silently produced a bundle mixing current squad charters with retired upstream agents. Every existing check passed on such a bundle.
+- **`manifest.json` is now an integrity record rather than an inventory.** It carries a SHA-256 per bundled file with the pinned source each came from, the resolved package and upstream commits, and the digest of the source `apm.yml`. The previous manifest recorded a file count and a list of persona names — neither of which can detect wrong content, which is precisely the failure that shipped.
+- **The bundle no longer duplicates the 18 squad charters.** APM deploys them flat alongside the upstream cast, and the old snapshot also copied them from `squad-src`, so every squad persona existed twice under two paths and which one the loader returned depended on directory-walk order. The bundle is now 82 agent files (64 upstream flat, 18 charters under `agents/squad/`) and 14 instruction files, each persona exactly once.
+- **Bumped the package pin to `Peter-N91/hve-squad@0.11.8` and rebuilt the bundle** from commit `f4d91898594b3ffc6c245b6bc0119257749c7b45` against `microsoft/hve-core@e166dbc3f00c77e99afdcd5e7be149cfafa0dbe4`. It carries the squad-owned charters `Squad Researcher`, `Squad Lead`, `Squad Implementor`, `Squad Reviewer`, `Squad Challenger`, `Squad Technical Writer`, and `Squad Prompt Engineer`, and no longer carries the retired `Task *` personas.
+- **The intake gate's pressure-test route names `Squad Challenger`** in the delegated coordinator's gate context (`persona.ts`) and in the README; `Task Challenger` was retired in `0.11.2`.
+- Test fixtures and conformance corpora are renamed to the current cast so a fixture can no longer disagree with the roster it stands in for.
+
+### Added
+
+- **`npm run snapshot:cast:check`** — re-resolves the pin and exits non-zero when the committed bundle is not what the pinned tag produces. Writes nothing. This is the online half of the drift contract and the command CI runs.
+- **`npm run generate:check` and `npm run generate:connector:check`** — verify that everything under `generated/` matches the sources it is derived from, without writing and without diffing the working tree afterwards. Comparison is LF-normalized so a CRLF checkout does not read as drift.
+- **Offline integrity checks in `test/cast-bundle.test.ts`** — bundled bytes against the manifest hashes, files present in the bundle but absent from the manifest, manifest counts against recorded files, `package-pin.json` against `manifest.linkedPackageVersion`, and ambiguity when two personas claim one `name:` the roster dispatches. These need no network, so they run in the default suite and catch a hand-edited persona, a partially committed snapshot, and a pin moved without re-snapshotting.
+- **A test that every catalog role and council member resolves to REAL bundle bytes.** The paraphrase fallback in `embedded-roles.ts` exists for a minimal image with no cast on disk; in a built repo it must never be what a dispatchable role resolves to, because a missing persona degrades into a summary *of* an agent instead of the agent — which is how a retired role stayed invisible in the first place.
+- **`npm run version:set -- <version|major|minor|patch>`** — the single writer for the release version across `package.json`, `package-lock.json`, and `SERVER_VERSION`. The accompanying test now asserts all three agree, including the lockfile's root package entry.
+- **`.gitattributes` pinning `host/cast/**` to `eol=lf`.** This repository has `core.autocrlf=true` and carried no attributes file, so identical content hashed differently in a Windows working tree and on a Linux runner. The resolver also normalizes before hashing, which keeps the check correct for a checkout that ignores the attribute.
+
+### Changed
+
+- **`test/cast-bundle.test.ts` validates the roster the bundle SHIPS.** It previously preferred a sibling `../hve-squad` checkout and fell back to the bundled roster only when none was present, so a developer with a checkout and a runner without one asserted different things — and the runner's answer is the one that matters.
+- **The committed bundle now takes precedence in path resolution.** `resolveSquadGithubRoot()` and `resolveSquadAgentsRoots()` list `host/cast/.github` first, so a tree installed into this repository later (an `apm install` for a headless squad run) cannot silently shadow the artifact that ships and that `snapshot:cast --check` verifies. The container is unaffected: the bundle is COPYed to `/app/.github`, which the package-root candidate resolves.
+- **`host/` and `scripts/` are now typechecked deliberately.** `tsconfig.json` covered neither; `host/snapshot-cast.ts` was linted only as a side effect of a test importing it.
+
+### Known gaps
+
+- **There is still no CI workflow.** The intended sequence — `lint`, `test`, `test:conformance`, `generate:check`, `generate:connector:check`, `snapshot:cast:check` — passes on a simulated clean runner with no package checkout, but runs only by hand.
+- Both workflows remain disabled by design until the sync loop is rebuilt on this corrected base.
+
+[0.3.0]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.3.0
+
 ## [0.2.12] - 2026-07-28
 
 > Built against `Peter-N91/hve-squad@0.10.12` (see `host/cast/package-pin.json`).

@@ -32,7 +32,7 @@ export const DEFAULT_LEASE_MS = 10 * 60 * 1000;
  * same {@link FieldCipher} that protects `request`/`context` (MEDIUM-3).
  */
 export interface PersistedStageArtifact {
-  /** The stage section heading / role label (e.g. `Task Researcher`, `Council Verdict`). */
+  /** The stage section heading / role label (e.g. `Squad Researcher`, `Council Verdict`). */
   role: string;
   /** The resolved agent name when it differs from the role label (optional). */
   agentName?: string;

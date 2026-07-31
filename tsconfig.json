@@ -16,6 +16,6 @@
     "noUnusedParameters": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts", "generators/**/*.ts", "test/**/*.ts"],
+  "include": ["src/**/*.ts", "generators/**/*.ts", "host/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"],
   "exclude": ["node_modules", "dist", "spike"]
 }

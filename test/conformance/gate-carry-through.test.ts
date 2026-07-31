@@ -106,7 +106,7 @@ test("a held run survives a cold start and resumes ONLY on explicit operator app
     const resumed = await engine2.resumeRun(runId, { toolId: "squad_run", request: "improve caching" }, { auth: AUTH_A }, []);
     assert.equal(resumed.outcome, "completed");
     assert.equal(backend2.calls, 2);
-    assert.match(resumed.artifact ?? "", /## Task Reviewer/);
+    assert.match(resumed.artifact ?? "", /## Squad Reviewer/);
     assert.equal((await engine2.getRunStatus(runId, { auth: AUTH_A }))?.status, "complete");
   } finally {
     rmSync(dir, { recursive: true, force: true });

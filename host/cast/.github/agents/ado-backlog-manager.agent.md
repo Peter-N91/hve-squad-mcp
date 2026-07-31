@@ -1,6 +1,6 @@
 ---
 name: ADO Backlog Manager
-description: "Orchestrator agent for Azure DevOps backlog management workflows including triage, discovery, sprint planning, PRD-to-work-item conversion, and execution - Brought to you by microsoft/hve-core"
+description: "Azure DevOps backlog orchestrator for triage, discovery, sprint planning, PRD-to-work-item conversion, and execution"
 disable-model-invocation: true
 tools:
   - ado/search_workitem
@@ -57,9 +57,6 @@ handoffs:
   - label: "PR"
     agent: ADO Backlog Manager
     prompt: /ado-create-pull-request
-  - label: "Save"
-    agent: Memory
-    prompt: /checkpoint
 ---
 
 # ADO Backlog Manager
@@ -187,7 +184,7 @@ When resuming an interrupted workflow, check the tracking directory for existing
 
 ## Session Persistence
 
-The Save handoff delegates to the memory agent with the checkpoint prompt, preserving session state for later resumption. When a workflow extends beyond a single session:
+The workflow's planning files preserve session state for later resumption. When a workflow extends beyond a single session:
 
 1. Write a context summary block to *planning-log.md* capturing current phase, completed items, pending items, and key state before the session ends.
 2. On resumption, read *planning-log.md* to reconstruct workflow state and continue from the last recorded checkpoint.
@@ -212,7 +209,3 @@ Approval requests appear as concise summaries showing the proposed action, affec
 * Content sanitization runs before any ADO API call to prevent leaking internal tracking references.
 * The autonomy mode is respected at every gate point.
 * Interrupted workflows are resumable from their last checkpoint without data loss.
-
----
-
-🤖 Brought to you by microsoft/hve-core

@@ -52,17 +52,17 @@ conventions:
 tools:
   - id: squad_research
     title: Squad Research
-    # Seeded from the `researcher` role -> Task Researcher (roster cast catalog).
+    # Seeded from the `researcher` role -> Squad Researcher (roster cast catalog).
     description: >-
       Run the squad's research stage on a question or codebase. Routes to the
-      Task Researcher (squad `researcher` role) at the `auto`, parallel-eligible
+      Squad Researcher (squad `researcher` role) at the `auto`, parallel-eligible
       tier to investigate, explore, and gather evidence before any plan or
       change. Delegated execution: returns the Squad Coordinator persona, the
       matched routing row, and a framed dispatch request; the calling host runs
       the subagent loop. Use for "research", "investigate", "explore", or
       "find out" requests.
     routingIntent: "research, investigate, explore, find out"
-    role: "Task Researcher"
+    role: "Squad Researcher"
     tier: auto
     parallelEligible: true
     catchAll: false
@@ -102,9 +102,9 @@ tools:
 
   - id: squad_plan
     title: Squad Plan
-    # Seeded from the `lead` role -> Task Planner (roster cast catalog).
+    # Seeded from the `lead` role -> Squad Lead (roster cast catalog).
     description: >-
-      Run the squad's planning stage. Routes to the Task Planner (squad `lead`
+      Run the squad's planning stage. Routes to the Squad Lead (squad `lead`
       role) at the `confirm` tier to break a task down, sequence the work, and
       produce an implementation-ready plan. Planning is non-parallel and lands
       no change without confirmation. Delegated execution: returns the
@@ -112,7 +112,7 @@ tools:
       the host to run. Use for "plan", "break down", "sequence", or
       "design plan" requests.
     routingIntent: "plan, break down, sequence, design plan"
-    role: "Task Planner"
+    role: "Squad Lead"
     tier: confirm
     parallelEligible: false
     catchAll: false
@@ -152,10 +152,10 @@ tools:
 
   - id: squad_review
     title: Squad Review
-    # Seeded from the `tester` role -> Task Reviewer; council row adds the
+    # Seeded from the `tester` role -> Squad Reviewer; council row adds the
     # multi-domain go/no-go reviewers (architect, security, cost, product, rai).
     description: >-
-      Run the squad's review stage. Routes to the Task Reviewer (squad `tester`
+      Run the squad's review stage. Routes to the Squad Reviewer (squad `tester`
       role) at the `auto` tier for quality, correctness, and standards review.
       When the request asks for a pre-implementation go/no-go or crosses two or
       more council domains, it engages the council row (architect, security,
@@ -164,18 +164,21 @@ tools:
       a framed dispatch request. Use for "review", "validate", "check quality",
       "council", or "go/no-go" requests.
     routingIntent: "review, validate, check quality"
-    role: "Task Reviewer"
+    role: "Squad Reviewer"
     tier: auto
     parallelEligible: true
     catchAll: false
     gates: false
     councilIntent: "validate, cross-check, pre-implementation review, council, design review, go/no-go, implement-and-cost, implement-and-risk"
     councilTier: confirm
+    # Council members are the dispatchable Primary of each council role. The
+    # `product-owner` seat is GitHub Backlog Manager: the ADO and Jira managers
+    # are user-invocable entry points that `runSubagent` cannot reach.
     council:
       - "System Architecture Reviewer"
       - "Security Planner"
       - "Squad Cost Manager"
-      - "ADO Backlog Manager"
+      - "GitHub Backlog Manager"
       - "RAI Planner"
     input:
       type: object

@@ -12,12 +12,13 @@
  * projection (Copilot Studio, M365, Cowork) is added in Phase 1; Phase 0 emits
  * the runtime descriptor and establishes this drift check.
  */
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { loadCatalog, type CatalogTool, type ToolCatalog } from "../src/catalog/catalog.js";
-import { generatedSchemaPath, resolveSquadGithubRoot } from "../src/paths.js";
+import { generatedSchemaPath, packageRoot, resolveSquadGithubRoot } from "../src/paths.js";
+import { emitOrCheck } from "./emit.js";
 
 const GENERATOR_NAME = "generators/build-manifests.ts";
 const DESCRIPTOR_NAME = "hve-squad-mcp";
@@ -288,7 +289,8 @@ export function buildDescriptor(catalog: ToolCatalog): RuntimeDescriptor {
 }
 
 /** Run the generator as a CLI. Returns the process exit code. */
-export function runCli(): number {
+export function runCli(argv: string[] = []): number {
+  const check = argv.includes("--check");
   let inputs: GeneratorInputs;
   try {
     inputs = loadGeneratorInputs();
@@ -309,8 +311,23 @@ export function runCli(): number {
 
   const descriptor = buildDescriptor(inputs.catalog);
   const outPath = generatedSchemaPath();
-  mkdirSync(dirname(outPath), { recursive: true });
-  writeFileSync(outPath, `${JSON.stringify(descriptor, null, 2)}\n`, "utf8");
+  const outputs = new Map([[outPath, `${JSON.stringify(descriptor, null, 2)}\n`]]);
+  const stale = emitOrCheck(outputs, check, packageRoot());
+
+  if (check) {
+    if (stale.length > 0) {
+      process.stderr.write(
+        `[build-manifests] generated output is stale: ${stale.join(", ")}. ` +
+          "Run `npm run generate` and commit the result.\n",
+      );
+      return 1;
+    }
+    process.stderr.write(
+      `[build-manifests] generated output is current (${descriptor.tools.length} tools; no drift).\n`,
+    );
+    return 0;
+  }
+
   process.stderr.write(
     `[build-manifests] wrote ${outPath} (${descriptor.tools.length} tools; no drift).\n`,
   );
@@ -319,5 +336,5 @@ export function runCli(): number {
 
 // Run only when executed directly.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  process.exit(runCli());
+  process.exit(runCli(process.argv.slice(2)));
 }

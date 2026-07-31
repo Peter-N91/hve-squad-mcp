@@ -1,7 +1,7 @@
 /**
  * Server-side routing engine (advisory stage planning).
  *
- * The dispatch loop shipped a FIXED order (Task Researcher -> Task Reviewer).
+ * The dispatch loop shipped a FIXED order (Squad Researcher -> Squad Reviewer).
  * This module replaces that hard-coded pair with a data-driven `route()` that
  * turns a caller request into an ordered advisory stage plan, reading the
  * deployed squad conventions READ-ONLY:

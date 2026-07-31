@@ -38,12 +38,12 @@ class RecordingBackend implements ModelBackend {
 }
 
 const RESEARCHER: PersonaRecord = {
-  role: "Task Researcher",
+  role: "Squad Researcher",
   charter: "RESEARCHER-CHARTER (authority)",
   applyTo: [],
 };
 const REVIEWER: PersonaRecord = {
-  role: "Task Reviewer",
+  role: "Squad Reviewer",
   charter: "REVIEWER-CHARTER (authority)",
   applyTo: [],
 };
@@ -56,8 +56,8 @@ test("runPipeline calls the backend once per stage, in order", async () => {
   assert.equal(backend.calls[0].system, RESEARCHER.charter);
   assert.equal(backend.calls[1].system, REVIEWER.charter);
   assert.equal(result.stages.length, 2);
-  assert.equal(result.stages[0].role, "Task Researcher");
-  assert.equal(result.stages[1].role, "Task Reviewer");
+  assert.equal(result.stages[0].role, "Squad Researcher");
+  assert.equal(result.stages[1].role, "Squad Reviewer");
 });
 
 test("runPipeline threads the prior-stage artifact into the next stage as DATA", async () => {
@@ -98,8 +98,8 @@ test("runPipeline returns a combined section-per-role artifact", async () => {
   const backend = new RecordingBackend();
   const result = await runPipeline([RESEARCHER, REVIEWER], { toolId: "squad_run", request: "do the thing" }, { backend });
 
-  assert.match(result.artifact, /## Task Researcher/);
-  assert.match(result.artifact, /## Task Reviewer/);
+  assert.match(result.artifact, /## Squad Researcher/);
+  assert.match(result.artifact, /## Squad Reviewer/);
   assert.match(result.artifact, /ARTIFACT-1/);
   assert.match(result.artifact, /ARTIFACT-2/);
   assert.equal(result.usage.length, 2);
@@ -117,17 +117,17 @@ function makePipelineCastFixture(): { root: string; cleanup: () => void } {
   mkdirSync(nested, { recursive: true });
   const persona = (name: string, marker: string): string =>
     ["---", `name: ${name}`, "---", "", marker, ""].join("\n");
-  writeFileSync(join(nested, "task-researcher.agent.md"), persona("Task Researcher", "REAL-RESEARCHER-BODY"), "utf8");
-  writeFileSync(join(nested, "task-planner.agent.md"), persona("Task Planner", "REAL-PLANNER-BODY"), "utf8");
-  writeFileSync(join(nested, "task-reviewer.agent.md"), persona("Task Reviewer", "REAL-REVIEWER-BODY"), "utf8");
+  writeFileSync(join(nested, "squad-researcher.agent.md"), persona("Squad Researcher", "REAL-RESEARCHER-BODY"), "utf8");
+  writeFileSync(join(nested, "squad-lead.agent.md"), persona("Squad Lead", "REAL-PLANNER-BODY"), "utf8");
+  writeFileSync(join(nested, "squad-reviewer.agent.md"), persona("Squad Reviewer", "REAL-REVIEWER-BODY"), "utf8");
   return { root, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
 const ADVISORY_PLAN: RoutePlan = {
   stages: [
-    { role: "researcher", agentName: "Task Researcher", tier: "auto", parallelEligible: true },
-    { role: "lead", agentName: "Task Planner", tier: "confirm", parallelEligible: false },
-    { role: "tester", agentName: "Task Reviewer", tier: "auto", parallelEligible: true },
+    { role: "researcher", agentName: "Squad Researcher", tier: "auto", parallelEligible: true },
+    { role: "lead", agentName: "Squad Lead", tier: "confirm", parallelEligible: false },
+    { role: "tester", agentName: "Squad Reviewer", tier: "auto", parallelEligible: true },
   ],
   council: { engaged: false, members: [] },
 };
@@ -139,7 +139,7 @@ test("resolveRoutedStages resolves a RoutePlan to real personas via the Phase 1 
     assert.equal(personas.length, 3);
     assert.deepEqual(
       personas.map((p) => p.role),
-      ["Task Researcher", "Task Planner", "Task Reviewer"],
+      ["Squad Researcher", "Squad Lead", "Squad Reviewer"],
     );
     // Real on-disk bytes, not paraphrases.
     assert.match(personas[0].charter, /REAL-RESEARCHER-BODY/);
@@ -167,7 +167,7 @@ test("runRoutedPipeline runs one backend call per routed stage, in order", async
     assert.match(backend.calls[2].system, /REAL-REVIEWER-BODY/);
     assert.deepEqual(
       result.stages.map((s) => s.role),
-      ["Task Researcher", "Task Planner", "Task Reviewer"],
+      ["Squad Researcher", "Squad Lead", "Squad Reviewer"],
     );
   } finally {
     cleanup();

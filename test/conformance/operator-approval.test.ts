@@ -83,7 +83,7 @@ test("operator approve releases a held run; a later status poll completes it", a
     // The caller polls: the pipeline now runs and completes.
     const done = await callTool(harness.handler, { token: "caller-a", sessionId: sessionA, name: "squad_status", args: { runId } });
     assert.match(toolText(done), /squad-guided \/ embedded/);
-    assert.match(toolText(done), /## Task Reviewer/);
+    assert.match(toolText(done), /## Squad Reviewer/);
     assert.ok(harness.backend.callCount >= 2, "the two-stage pipeline dispatched after approval");
   });
 });

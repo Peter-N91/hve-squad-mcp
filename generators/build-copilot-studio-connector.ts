@@ -18,11 +18,11 @@
  * Additive: this is a NEW generator beside `build-manifests.ts`; it does not edit
  * the Phase 0 generator.
  */
-import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { loadCatalog, type ToolCatalog } from "../src/catalog/catalog.js";
+import { emitOrCheck } from "./emit.js";
 import {
   isRemotelyExposed,
   requiredScopeFor,
@@ -506,7 +506,8 @@ function buildAgentInstructions(manifest: ConnectorManifest): string {
 }
 
 /** Run the generator as a CLI. Returns the process exit code. */
-export function runCli(): number {
+export function runCli(argv: string[] = []): number {
+  const check = argv.includes("--check");
   let manifest: ConnectorManifest;
   try {
     manifest = buildConnectorManifest(loadCatalog());
@@ -516,20 +517,35 @@ export function runCli(): number {
   }
 
   const outDir = join(packageRoot(), "generated", "copilot-studio-connector");
-  mkdirSync(outDir, { recursive: true });
-  writeFileSync(join(outDir, "connector.manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-  writeFileSync(
-    join(outDir, "apiDefinition.swagger.json"),
-    `${JSON.stringify(buildSwagger(manifest), null, 2)}\n`,
-    "utf8",
-  );
-  writeFileSync(
-    join(outDir, "apiProperties.json"),
-    `${JSON.stringify(buildApiProperties(manifest), null, 2)}\n`,
-    "utf8",
-  );
-  writeFileSync(join(outDir, "README.md"), buildReadme(manifest), "utf8");
-  writeFileSync(join(outDir, "agent-instructions.md"), buildAgentInstructions(manifest), "utf8");
+  const outputs = new Map<string, string>([
+    [join(outDir, "connector.manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`],
+    [
+      join(outDir, "apiDefinition.swagger.json"),
+      `${JSON.stringify(buildSwagger(manifest), null, 2)}\n`,
+    ],
+    [
+      join(outDir, "apiProperties.json"),
+      `${JSON.stringify(buildApiProperties(manifest), null, 2)}\n`,
+    ],
+    [join(outDir, "README.md"), buildReadme(manifest)],
+    [join(outDir, "agent-instructions.md"), buildAgentInstructions(manifest)],
+  ]);
+  const stale = emitOrCheck(outputs, check, packageRoot());
+
+  if (check) {
+    if (stale.length > 0) {
+      process.stderr.write(
+        `[build-copilot-studio-connector] generated output is stale: ${stale.join(", ")}. ` +
+          "Run `npm run generate:connector` and commit the result.\n",
+      );
+      return 1;
+    }
+    process.stderr.write(
+      `[build-copilot-studio-connector] generated output is current (${manifest.tools.length} tools).\n`,
+    );
+    return 0;
+  }
+
   process.stderr.write(
     `[build-copilot-studio-connector] wrote ${outDir} (${manifest.tools.length} tools; target=${manifest.targets.join(",")}).\n`,
   );
@@ -537,5 +553,5 @@ export function runCli(): number {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  process.exit(runCli());
+  process.exit(runCli(process.argv.slice(2)));
 }
