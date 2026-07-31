@@ -1,0 +1,102 @@
+# Verify every claim this repository makes about itself.
+#
+# The checks below exist because each one has already failed silently at least
+# once. Ordering is deliberate: the cheap, deterministic, offline checks run
+# first, and the one network-dependent check runs last so a rate limit or a
+# transient 5xx cannot mask a real defect.
+#
+# After the fast-failing build steps, the verification steps run with
+# `!cancelled()` so a pull request reports EVERY failure in one go rather than
+# one per push.
+#
+# What each step protects
+#   lint / build            — the container build runs `tsc`; a type error here is
+#                             a broken image.
+#   test                    — includes the cast-bundle integrity suite: bundled
+#                             bytes against the SHA-256 in host/cast/manifest.json,
+#                             the pin against the manifest, and the guarantee that
+#                             every catalog role resolves to REAL persona bytes
+#                             rather than the embedded paraphrase. All offline.
+#   test:conformance        — the SEC-* / COST-* corpora.
+#   generate:check          — `generated/mcp-tools.schema.json` is current AND the
+#                             catalog<->cast drift check passes. That drift check is
+#                             what caught three tools bound to agents hve-core had
+#                             retired, plus a council seat that `runSubagent` cannot
+#                             reach.
+#   generate:connector:check— the five Copilot Studio connector artifacts are current.
+#   snapshot:cast:check     — re-resolves host/cast/package-pin.json against the
+#                             hve-squad tag and FAILS when the committed bundle is
+#                             not what that tag produces. This is the check whose
+#                             absence let a bundle ship that mixed current squad
+#                             charters with retired upstream agents while every
+#                             other check stayed green.
+#
+# Node 22 matches host/Containerfile (`node:22-alpine`), so CI compiles against the
+# runtime the image actually ships.
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Lint, test, and verify generated artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        if: ${{ !cancelled() }}
+        run: npm test
+
+      - name: Conformance tests
+        if: ${{ !cancelled() }}
+        run: npm run test:conformance
+
+      - name: Tool schema is current and free of catalog/cast drift
+        if: ${{ !cancelled() }}
+        run: npm run generate:check
+
+      - name: Copilot Studio connector artifacts are current
+        if: ${{ !cancelled() }}
+        run: npm run generate:connector:check
+
+      # Last, and the only step that needs the network. It re-resolves the pinned
+      # hve-squad tag and its apm.yml deployment manifest, then compares every
+      # bundled file against the source it claims to come from. GITHUB_TOKEN is
+      # passed only to raise the API rate limit — both repositories are public and
+      # the resolver works without it.
+      - name: Cast bundle matches the pinned package version
+        if: ${{ !cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npm run snapshot:cast:check
