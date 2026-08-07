@@ -1,5 +1,23 @@
 # HVE Squad agents for Copilot Studio
 
+> **Deprecated — kept as a worked example.**
+>
+> The charters in `parent/` and `child/` are hand-written. They name four
+> advisors that exist nowhere in the hve-squad roster, which puts them at odds
+> with this server's single-source invariant: a persona is the bytes of a
+> deployed `*.agent.md`, never a paraphrase authored here. They also cover four
+> tools where the server exposes twelve, and nothing regenerates or tests them,
+> so they drift the moment `tools.catalog.yml` changes.
+>
+> **`generated/copilot-studio-connector/` is the source of truth.** It is built
+> from `tools.catalog.yml` and the bundled roster by
+> `npm run generate:connector`, covers the full tool and scope surface, and is
+> checked in CI. New connectors and per-profile agent packages are added to the
+> generator, not to this folder.
+>
+> Still useful here, and still maintained: the placeholder connector templates
+> under `connector/`, which carry no tenant-specific values.
+
 This folder contains authoring assets for agents powered by the GitHub Copilot
 harness in Microsoft Copilot Studio. These are not standard-harness topic YAML
 files. Paste each `system-instructions.md` file into the corresponding agent's

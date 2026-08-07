@@ -10,7 +10,7 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
-## [0.3.0] - 2026-08-07
+## [0.4.0] - 2026-08-07
 
 > Built against `Peter-N91/hve-squad@0.12.4` (see `host/cast/package-pin.json`).
 
@@ -24,6 +24,15 @@ the agents HVE Core actually deploys. Nothing here is a mechanical version bump.
 - **The `squad_review` council seated an agent `runSubagent` cannot reach.** The `product-owner` seat named `ADO Backlog Manager`, one of the `disable-model-invocation: true` entry points HVE Core ships for humans to invoke by name. It is now `GitHub Backlog Manager`, the dispatchable Primary the roster assigns that role. The other four seats (architect, security, cost-manager, rai) were already correct.
 - **The embedded engine's hero charters and fallback records keyed off the retired names.** `charterForRole` and `PARAPHRASE_RECORDS` matched `Task Researcher` / `Task Reviewer`, so a deployed cast containing neither returned `undefined` and the pipeline degraded to a paraphrase of an agent that no longer exists. Both are now `Squad Researcher` / `Squad Reviewer`, and the paraphrases are rewritten from the current charters: the researcher paraphrase adds the fact/inference separation and the record-the-gap rule; the reviewer paraphrase adds implementation-versus-plan deviation reporting, the read-only constraint, and the "an unflattering finding is a successful review" rule. `SPIKE_PIPELINE_ROLES` follows.
 - **`SERVER_VERSION` had drifted two releases behind `package.json`** (`0.2.10` against `0.2.12`), because the bump workflow advances `package.json` and the lockfile but not the constant. Its guard test existed and was failing; nothing ran it. All three now read `0.3.0` and `npm run version:set` is the single writer that keeps them in step.
+
+### Added
+
+- **The squad `profile` now decides the roster a run seeds.** It was a pass-through string acted on only where it equalled `full`, so `profile=product` changed nothing. `src/engine/profiles.ts` parses the roster's *Squad Profiles*, *Deliverable Roots*, and *Cast Catalog* tables, and `route()` filters stages and the council to the seeded roles, surfaces the intake gate for `product` and `full`, and fans the Implement stage out across the profile's deliverable specialists. Council quorum is enforced as `squad-council.instructions.md` requires: a roster missing a quorum role **escalates** rather than seating a partial council, because "a verdict assembled without the full quorum's dispatched findings is invalid".
+- **A run's output is persisted as a browsable `.copilot-tracking` tree.** Auto-memory kept three flat keys (`state`, `decisions`, `history/<toolId>-<runId>`), which is continuity between two turns and nothing an operator can audit. `SquadArtifactStore` adds prefix/tree semantics and `SquadLedger` writes `team.md`, `routing.md`, `state.json`, the append-only logs, per-agent history, and each role's deliverable under its own roster root. Seeding is idempotent and an existing `team.md` wins over a later `profile` argument.
+- **Every existing store becomes an artifact backend.** `MemoryBackedArtifactStore` adapts any `SquadMemoryStore`, so the filesystem, Azure Table, SharePoint/Graph, the caller-selectable target allow-list, and the blob-overflow decorator all work — keeping the tenant isolation, the CAS write, the traversal guards, and the at-rest encryption those stores already carry rather than adding a fifth credential path to audit. Switched on with `SQUAD_MCP_ENABLE_ARTIFACTS`, which reuses the `SQUAD_MCP_MEMORY_BACKEND` the operator already chose.
+- **`squad_history` reads a run's own history back.** `list` and `read` browse the tree, and a metadata-only run index is injected as DATA at the start of a run, so a follow-up turn resumes from what the project already holds without the caller naming a key. Scoped under the existing `Squad.Memory` — reading a run's output is a read of that project, not a new capability to grant twice.
+- **The intake gate halts a run it judges unready.** A `Not-Ready` verdict stops the pipeline (`reason: "intake_not_ready"`) instead of letting downstream roles build on inputs the validator just rejected. An unreadable verdict line degrades to `Ready-With-Gaps` rather than to `Ready`.
+- **PR validation, fragment-based changelogs, and an automated release**, ported from hve-squad in TypeScript rather than PowerShell (`tsx` is already a devDependency and the version has to move through `scripts/set-version.ts` regardless). Adds `.changes/unreleased/`, `npm run change`, `npm run release:prep`, plus CodeQL for `javascript-typescript`, Checkov over workflows/secrets/Bicep, zizmor, a pull-request template, and Dependabot for npm and the SHA-pinned actions.
 
 ### Changed
 
@@ -53,11 +62,13 @@ the agents HVE Core actually deploys. Nothing here is a mechanical version bump.
 
 ### Known gaps
 
-- **`profile` is still only a routing hint.** The catalog accepts `default|full|security|design|architecture|azure|product`, but the engine acts on `full` alone; no profile seeds a roster or filters the routing plan the way the squad does under GitHub Copilot.
-- **Produced artifacts are not persisted in `.copilot-tracking` shape.** Auto-memory keeps `state`, `decisions`, and `history/<toolId>-<runId>`; the squad's `team.md`, `routing.md`, `state.json`, per-agent history, consumption ledger, and per-role deliverable roots have no home yet, and history cannot be listed back as a tree.
-- The `bump-on-package-release` workflow remains disabled by design until the sync loop is rebuilt on this corrected base.
+- **The consumption ledger is not written.** `consumption.md` and `consumption-rates.md` have no server-side writer yet, though the model backend already returns the token counts they need.
+- **`squad_history` has no HTTP handler.** The scope and the engine ship; the request handler that exposes them over the remote boundary does not.
+- **The store seam has no create-if-absent.** `write` with no `expectedEtag` is an unconditional upsert, so the *first* two writers to a path cannot be arbitrated by compare-and-swap. Appends are serialized per path in-process and `seed()` pre-creates the shared logs, which closes the window for every later append across every replica; a cross-replica race on the very first write of a per-agent history file remains possible.
+- **`copilot-studio/` is deprecated, not yet replaced.** The generator does not yet emit the agent package, so the hand-written charters stay as a worked example.
+- The `bump-on-package-release` workflow remains disabled by design (it is `disabled_manually` in Actions, which is why the pin sat at `0.10.12`) until it is rebuilt to open a pull request rather than commit to `main`.
 
-[0.3.0]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.3.0
+[0.4.0]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.4.0
 
 ## [0.2.12] - 2026-07-28
 
