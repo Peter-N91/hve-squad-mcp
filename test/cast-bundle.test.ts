@@ -138,9 +138,9 @@ const isSeparator = (line: string): boolean =>
  * table whose header contains "Primary Agent" and stops at that table's end, so
  * the Profiles / Members-schema tables are never mistaken for cast rows.
  */
-function rosterPrimaryAgents(): string[] {
+function rosterPrimaryAgents(): { role: string; primary: string }[] {
   const lines = readFileSync(ROSTER_FILE, "utf8").split(/\r?\n/);
-  const primaries: string[] = [];
+  const primaries: { role: string; primary: string }[] = [];
   let inFence = false;
   for (let i = 0; i < lines.length; i += 1) {
     if (/^\s*```/.test(lines[i])) {
@@ -155,24 +155,97 @@ function rosterPrimaryAgents(): string[] {
     if (primaryIdx < 0) {
       continue; // not the Cast Catalog table
     }
+    const roleIdx = headers.findIndex((h) => /^Role$/i.test(h));
     for (let j = i + 2; j < lines.length && isTableLine(lines[j]); j += 1) {
       const cells = splitRow(lines[j]);
       const value = (cells[primaryIdx] ?? "").replace(/`/g, "").trim();
       if (value && value !== "—") {
-        primaries.push(value);
+        primaries.push({
+          role: roleIdx < 0 ? "" : (cells[roleIdx] ?? "").replace(/`/g, "").trim(),
+          primary: value,
+        });
       }
     }
     break; // only one Cast Catalog table
   }
-  return [...new Set(primaries)];
+  return primaries;
 }
 
-test("cast bundle contains every roster Cast Catalog Primary agent", () => {
+/** Compare an agent display name and an upstream resource id on equal terms. */
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+/**
+ * Agents the roster registers as `opt-in` in its External Cast, keyed both by
+ * resource id and by the role that registered them.
+ *
+ * An opt-in agent ships from a marketplace the consumer installs themselves, so
+ * `apm.yml` never carries it and the bundle cannot contain it. Asserting on those
+ * rows would fail the drift check for a roster that is in fact correct. The role
+ * key is needed because a Primary is a display name (`QA`) while the row records
+ * the upstream resource id (`qa-subagent`).
+ */
+function optInExternalAgents(): { resources: Set<string>; roles: Set<string> } {
+  const lines = readFileSync(ROSTER_FILE, "utf8").split(/\r?\n/);
+  const resources = new Set<string>();
+  const roles = new Set<string>();
+  let inFence = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^\s*```/.test(lines[i])) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence || !isTableLine(lines[i]) || i + 1 >= lines.length || !isSeparator(lines[i + 1])) {
+      continue;
+    }
+    const headers = splitRow(lines[i]);
+    const tierIdx = headers.findIndex((h) => /^Tier$/i.test(h));
+    const resourceIdx = headers.findIndex((h) => /^Resource$/i.test(h));
+    const kindIdx = headers.findIndex((h) => /Resource Kind/i.test(h));
+    const roleIdx = headers.findIndex((h) => /^Role$/i.test(h));
+    if (tierIdx < 0 || resourceIdx < 0 || kindIdx < 0 || roleIdx < 0) {
+      continue; // not the Registered External Cast table
+    }
+    for (let j = i + 2; j < lines.length && isTableLine(lines[j]); j += 1) {
+      const cells = splitRow(lines[j]);
+      const tier = (cells[tierIdx] ?? "").replace(/`/g, "").trim().toLowerCase();
+      const kind = (cells[kindIdx] ?? "").replace(/`/g, "").trim().toLowerCase();
+      const resource = (cells[resourceIdx] ?? "").replace(/`/g, "").trim();
+      const role = (cells[roleIdx] ?? "").replace(/`/g, "").trim();
+      if (tier === "opt-in" && kind === "agent" && resource) {
+        resources.add(slugify(resource));
+        if (role) {
+          roles.add(role);
+        }
+      }
+    }
+  }
+  return { resources, roles };
+}
+
+test("cast bundle contains every bundled roster Cast Catalog Primary agent", () => {
   const bundled = bundledAgentNames();
   assert.ok(bundled.size > 0, "the bundle resolved at least one named persona");
+  const optIn = optInExternalAgents();
+  assert.ok(optIn.resources.size > 0, "the roster registered at least one opt-in external agent");
   const primaries = rosterPrimaryAgents();
   assert.ok(primaries.length > 0, "the roster yielded Cast Catalog Primary agents");
-  const missing = primaries.filter((name) => !bundled.has(name));
+  const missing = [
+    ...new Set(
+      primaries
+        .filter(
+          ({ role, primary }) =>
+            !bundled.has(primary) &&
+            !optIn.resources.has(slugify(primary)) &&
+            !optIn.roles.has(role),
+        )
+        .map(({ primary }) => primary),
+    ),
+  ];
   assert.deepEqual(
     missing,
     [],
@@ -243,7 +316,7 @@ test("the bundled manifest is linked to the pinned package version", () => {
 
 test("no roster Primary agent is ambiguous in the bundle", () => {
   const manifest = readManifest();
-  const primaries = new Set(rosterPrimaryAgents());
+  const primaries = new Set(rosterPrimaryAgents().map(({ primary }) => primary));
   const ambiguous = manifest.duplicateAgentNames.filter((name) => primaries.has(name));
   assert.deepEqual(
     ambiguous,
