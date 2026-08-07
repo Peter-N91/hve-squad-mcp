@@ -187,6 +187,10 @@ export interface AdvisoryLedgerSink {
     roleKey?: string;
     agentName: string;
     artifact: string;
+    /** Measured token counts and realized cost for this dispatch, when reported. */
+    usage?: BackendUsage;
+    /** The backend that produced the completion, used as the model attribution. */
+    backendId?: string;
   }): Promise<void>;
   /** Record a council or intake verdict in the decision log. */
   recordDecision(block: string): Promise<void>;
@@ -503,6 +507,8 @@ export async function runAdvisoryPipeline(
         roleKey: stage.roleKey,
         agentName: stage.role,
         artifact: completion.text,
+        usage: completion.usage,
+        backendId: completion.backendId,
       });
 
       // The intake gate is a PRE-work readiness check: a Not-Ready verdict must

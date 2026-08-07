@@ -13,6 +13,8 @@
  */
 import type { SquadArtifactStore } from "./artifact-store.js";
 import { parseBacklog } from "./backlog-contract.js";
+import { rebuildConsumption, renderConsumptionBlock } from "./consumption.js";
+import type { BackendUsage } from "./model-backend.js";
 import type { CoordinatorRequest } from "./coordinator-engine.js";
 import {
   defaultProfileTables,
@@ -74,6 +76,10 @@ export interface RecordedStage {
   agentName: string;
   /** The stage's finished text. */
   artifact: string;
+  /** Measured token counts and realized cost, when the backend reported them. */
+  usage?: BackendUsage;
+  /** The backend that produced the completion (the model attribution). */
+  backendId?: string;
 }
 
 export class SquadRunRecorder {
@@ -156,6 +162,19 @@ export class SquadRunRecorder {
           "",
           `* Role: ${roleKey ?? "(unmapped)"}`,
           `* Deliverable: ${deliverablePath ?? "(returned findings to the coordinator)"}`,
+          ...(stage.usage
+            ? [
+                "",
+                renderConsumptionBlock({
+                  role: roleKey ?? "unmapped",
+                  agentName: stage.agentName,
+                  model: stage.backendId ?? "unknown",
+                  inputTokens: stage.usage.inputTokens ?? 0,
+                  outputTokens: stage.usage.outputTokens ?? 0,
+                  costUsd: stage.usage.estimatedCostUsd ?? 0,
+                }),
+              ]
+            : []),
         ].join("\n"),
       );
       await this.ledger.appendRunHistory(
@@ -276,6 +295,9 @@ export class SquadRunRecorder {
         currentRun: { id: runId } as never,
         updated: this.today(),
       });
+      // Rebuilt from the recorded history rather than this turn's dispatches, so
+      // the ledger cannot silently drop the roles that ran on earlier turns.
+      await rebuildConsumption(this.store, tenantId, project);
     } catch (error) {
       this.warn("squad ledger state update failed", error);
     }

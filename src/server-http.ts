@@ -338,6 +338,7 @@ export function buildHttpHandler(
     embedded,
     sessions: new SessionStore({ idleMs: config.sessionIdleMs }),
     allowedOrigins: config.allowedOrigins,
+    artifactsEnabled: config.enableArtifacts,
     logger,
     pipelineExposed: config.remotePipelineEnabled,
     renderService,
