@@ -65,6 +65,11 @@ const FIXTURE_PROFILES: ProfileTables = {
     ["researcher", ".copilot-tracking/research/<date>"],
     ["lead", ".copilot-tracking/plans"],
   ]),
+  cast: new Map([
+    ["researcher", { primary: "Squad Researcher", alternates: [] }],
+    ["lead", { primary: "Squad Lead", alternates: ["RPI Planner"] }],
+    ["tester", { primary: "Squad Reviewer", alternates: [] }],
+  ]),
 };
 
 test("a research-type request routes to a single researcher stage", () => {

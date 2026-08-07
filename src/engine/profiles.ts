@@ -69,6 +69,16 @@ export interface ProfileTables {
   profiles: Map<string, string[]>;
   /** Role KEY -> the deliverable root that role writes into. */
   deliverableRoots: Map<string, string>;
+  /** Role KEY -> its Cast Catalog row (Primary + Alternates). */
+  cast: Map<string, CastCatalogRow>;
+}
+
+/** One Cast Catalog row: the agents a role resolves to. */
+export interface CastCatalogRow {
+  /** The exact `name:` of the agent the role resolves to by default. */
+  primary: string;
+  /** `name:` values the role may resolve to instead, per the Selection Cue. */
+  alternates: string[];
 }
 
 /** A resolved profile: the roles seeded and what that implies for the run. */
@@ -176,6 +186,45 @@ export function parseDeliverableRoots(markdown: string): Map<string, string> {
   return roots;
 }
 
+/**
+ * Parse the `## Cast Catalog` table into role KEY -> Primary + Alternates.
+ *
+ * `routing.ts` already parses the Primary column for dispatch; the Scribe needs
+ * the Alternates too, because `team.md` records them so a later turn can swap a
+ * Primary for an Alternate per its Selection Cue without re-reading the catalog.
+ */
+export function parseCastCatalog(markdown: string): Map<string, CastCatalogRow> {
+  const table = parseTables(markdown).find((t) =>
+    t.headers.some((h) => h.toLowerCase().includes("primary agent")),
+  );
+  if (!table) {
+    throw new Error("Could not find the Cast Catalog table in squad-roster.instructions.md.");
+  }
+  const roleIdx = table.headers.findIndex((h) => h.trim().toLowerCase() === "role");
+  const primaryIdx = table.headers.findIndex((h) => h.toLowerCase().includes("primary agent"));
+  const altIdx = table.headers.findIndex((h) => h.toLowerCase().includes("alternate agents"));
+  const cast = new Map<string, CastCatalogRow>();
+  for (const row of table.rows) {
+    const role = normalizeRole(row[roleIdx >= 0 ? roleIdx : 0] ?? "");
+    const primary = (row[primaryIdx] ?? "").replace(/`/g, "").trim();
+    if (!role || !primary || primary === "—" || primary === "-") {
+      continue;
+    }
+    const alternates = (altIdx >= 0 ? (row[altIdx] ?? "") : "")
+      .replace(/`/g, "")
+      .split(",")
+      .map((name) => name.trim())
+      .filter((name) => name.length > 0 && name !== "—" && name !== "-");
+    if (!cast.has(role)) {
+      cast.set(role, { primary, alternates });
+    }
+  }
+  if (cast.size === 0) {
+    throw new Error("The Cast Catalog table yielded no roles.");
+  }
+  return cast;
+}
+
 /** Load + parse the profile and deliverable-root tables from disk (read-only). */
 export function loadProfileTables(githubRoot = resolveSquadGithubRoot()): ProfileTables {
   if (!githubRoot) {
@@ -190,6 +239,7 @@ export function loadProfileTables(githubRoot = resolveSquadGithubRoot()): Profil
   return {
     profiles: parseProfiles(rosterMd),
     deliverableRoots: parseDeliverableRoots(rosterMd),
+    cast: parseCastCatalog(rosterMd),
   };
 }
 
