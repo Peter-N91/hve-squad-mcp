@@ -1,0 +1,45 @@
+{
+  "properties": {
+    "connectionParameters": {
+      "token": {
+        "type": "oauthSetting",
+        "oAuthSettings": {
+          "identityProvider": "aad",
+          "clientId": "<ENTRA_CLIENT_ID>",
+          "redirectMode": "Global",
+          "scopes": [
+            "api://<ENTRA_CLIENT_ID>/Squad.Research",
+            "api://<ENTRA_CLIENT_ID>/Squad.Plan",
+            "api://<ENTRA_CLIENT_ID>/Squad.Review",
+            "api://<ENTRA_CLIENT_ID>/Squad.Architect",
+            "offline_access"
+          ],
+          "properties": {
+            "IsFirstParty": "False",
+            "AzureActiveDirectoryResourceId": "api://<ENTRA_CLIENT_ID>",
+            "IsOnbehalfofLoginSupported": false
+          },
+          "customParameters": {
+            "loginUri": {
+              "value": "https://login.microsoftonline.com"
+            },
+            "tenantId": {
+              "value": "<ENTRA_TENANT_ID>"
+            },
+            "resourceUri": {
+              "value": "api://<ENTRA_CLIENT_ID>"
+            },
+            "enableOnbehalfOfLogin": {
+              "value": "false"
+            }
+          }
+        }
+      }
+    },
+    "iconBrandColor": "#0b5394",
+    "capabilities": [
+      "actions"
+    ],
+    "publisher": "hve-squad"
+  }
+}

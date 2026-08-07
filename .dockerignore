@@ -1,0 +1,13 @@
+# Build context exclusions. The image installs dependencies from
+# package.json/package-lock.json and compiles from source, so local build
+# output and installed modules must never be uploaded.
+node_modules
+dist
+coverage
+.git
+.github
+.vscode
+copilot-studio
+docs
+test
+*.log
