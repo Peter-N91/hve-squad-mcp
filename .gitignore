@@ -14,3 +14,24 @@ spike/
 host/infra/main.json
 
 .copilot-tracking/
+
+# ---------------------------------------------------------------------------
+# Deployment-specific and secret material. THIS REPOSITORY IS PUBLIC — never
+# commit anything below.
+# ---------------------------------------------------------------------------
+
+# The filled-in Copilot Studio connector carries the live endpoint host, the
+# Entra tenant id, and the app registration client id. Only the *.template.json
+# placeholder versions are tracked.
+copilot-studio/connector/apiDefinition.swagger.json
+copilot-studio/connector/apiProperties.json
+
+# Bicep parameter files completed with real tenant/subscription values.
+host/infra/*.local.bicepparam
+
+# Environment files and credential material.
+.env
+.env.*
+*.pem
+*.pfx
+*.p12

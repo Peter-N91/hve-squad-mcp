@@ -300,7 +300,9 @@ resource identity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' 
 }
 
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
-  name: '${namePrefix}-kv-${uniqueString(resourceGroup().id)}'
+  // A vault name is capped at 24 characters, so the prefix + uniqueString pair is
+  // truncated; without this the default namePrefix already overflows the limit.
+  name: take('${namePrefix}-kv-${uniqueString(resourceGroup().id)}', 24)
   location: location
   properties: {
     sku: {
