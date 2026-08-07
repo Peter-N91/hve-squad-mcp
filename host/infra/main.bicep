@@ -206,6 +206,7 @@ var pipelineEnv = enableRemotePipeline
 var encryptionSecrets = !empty(runEncryptionKeyBase64)
   ? [ { name: 'run-encryption-key', value: runEncryptionKeyBase64 } ]
   : []
+// checkov:skip=CKV_SECRET_6:This is the NAME of an environment variable, not a secret. The value is a secretRef into the Container App's secret store, which is the pattern the check exists to encourage; the name merely ends in _B64 because the value it points at is base64.
 var encryptionEnv = (enableRemotePipeline && !empty(runEncryptionKeyBase64))
   ? [ { name: 'SQUAD_MCP_RUN_ENCRYPTION_KEY_B64', secretRef: 'run-encryption-key' } ]
   : []

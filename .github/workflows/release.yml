@@ -14,6 +14,7 @@
 name: Release
 
 on:
+  # checkov:skip=CKV_GHA_7:CKV_GHA_7 targets workflows that BUILD a release artifact, where an input could change the bytes produced. This workflow builds nothing: it reads the version already committed to package.json, extracts that section from CHANGELOG.md, and creates the tag and GitHub Release. The only input marks the release as a draft, which changes its visibility rather than its contents.
   workflow_dispatch:
     inputs:
       draft:
@@ -69,10 +70,15 @@ jobs:
           echo "Release version: v$VERSION"
 
       # ── Guard: skip if the tag already exists (re-run / stale push) ──────
+      # Every expression below is bound through `env` rather than expanded into
+      # the shell: a workflow_dispatch input is attacker-controllable by anyone
+      # with write access, and `${{ }}` inside `run:` is substituted BEFORE the
+      # shell parses the line, so a crafted value becomes code.
       - name: Check if tag already exists
         id: tag_check
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          TAG="${{ steps.version.outputs.tag }}"
           if git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $2}' | grep -qx "refs/tags/$TAG"; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "::notice::Tag $TAG already exists — skipping release."
@@ -83,8 +89,9 @@ jobs:
       # ── Extract the matching CHANGELOG section as release notes ──────────
       - name: Extract CHANGELOG entry
         if: steps.tag_check.outputs.exists == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
           NOTES=$(awk -v ver="$VERSION" \
             'BEGIN{found=0}
              $0 ~ "^## \\[" ver "\\]" {found=1; next}
@@ -100,13 +107,11 @@ jobs:
         if: steps.tag_check.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          TARGET_SHA: ${{ github.sha }}
+          DRAFT: ${{ inputs.draft }}
         run: |
-          ARGS=(
-            "${{ steps.version.outputs.tag }}"
-            --title "${{ steps.version.outputs.tag }}"
-            --notes-file /tmp/release_notes.md
-            --target "${{ github.sha }}"
-          )
-          [ "${{ inputs.draft }}" = "true" ] && ARGS+=(--draft)
+          ARGS=("$TAG" --title "$TAG" --notes-file /tmp/release_notes.md --target "$TARGET_SHA")
+          [ "$DRAFT" = "true" ] && ARGS+=(--draft)
           gh release create "${ARGS[@]}"
-          echo "::notice::Created release ${{ steps.version.outputs.tag }}"
+          echo "::notice::Created release $TAG"

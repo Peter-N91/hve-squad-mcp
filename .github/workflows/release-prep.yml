@@ -14,6 +14,7 @@ on:
     branches: [main]
     paths:
       - '.changes/unreleased/**'
+  # checkov:skip=CKV_GHA_7:CKV_GHA_7 targets workflows that BUILD a release artifact, where an input could change the bytes produced. This workflow builds nothing: it assembles a changelog section from committed fragments and moves the version. The inputs are operator overrides for the bump level and a dry run, and the artifact is built and verified separately by ci.yml from source alone.
   workflow_dispatch:
     inputs:
       bump:
@@ -63,21 +64,31 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Inputs are bound through `env`, never expanded into the shell: `${{ }}`
+      # inside `run:` is substituted before the shell parses the line, so a
+      # crafted dispatch input would become code rather than an argument.
       - name: Assemble the changelog section
         id: prep
+        env:
+          INPUT_BUMP: ${{ inputs.bump }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          ARGS="--github-output"
-          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
-          if [ -n "${{ inputs.version }}" ]; then
-            ARGS="$ARGS --version ${{ inputs.version }}"
-          elif [ -n "${{ inputs.bump }}" ] && [ "${{ inputs.bump }}" != "fragments" ]; then
-            ARGS="$ARGS --bump ${{ inputs.bump }}"
+          set -euo pipefail
+          ARGS=(--github-output)
+          if [ "$INPUT_DRY_RUN" = "true" ]; then ARGS+=(--dry-run); fi
+          if [ -n "$INPUT_VERSION" ]; then
+            ARGS+=(--version "$INPUT_VERSION")
+          elif [ -n "$INPUT_BUMP" ] && [ "$INPUT_BUMP" != "fragments" ]; then
+            ARGS+=(--bump "$INPUT_BUMP")
           fi
-          npm run release:prep -- $ARGS | tee -a "$GITHUB_STEP_SUMMARY"
+          npm run release:prep -- "${ARGS[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Move the version
         if: ${{ steps.prep.outputs.has_changes == 'true' && inputs.dry_run != true }}
-        run: npm run version:set -- "${{ steps.prep.outputs.version }}"
+        env:
+          VERSION: ${{ steps.prep.outputs.version }}
+        run: npm run version:set -- "$VERSION"
 
       - name: Commit and push
         if: ${{ steps.prep.outputs.has_changes == 'true' && inputs.dry_run != true }}

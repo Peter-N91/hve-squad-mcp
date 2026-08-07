@@ -21,6 +21,7 @@ name: Bump on hve-squad release
 on:
   schedule:
     - cron: '0 7 * * *'
+  # checkov:skip=CKV_GHA_7:CKV_GHA_7 targets workflows that BUILD a release artifact. This one opens a pull request; it produces no release and merges nothing. The single input names the hve-squad version to pin, and the snapshot refuses a tag that does not declare that exact version, so the input cannot silently change what the bundle contains.
   workflow_dispatch:
     inputs:
       version:
