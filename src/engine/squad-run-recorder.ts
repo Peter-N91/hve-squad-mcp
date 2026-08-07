@@ -12,9 +12,11 @@
  * coordinator.
  */
 import type { SquadArtifactStore } from "./artifact-store.js";
+import { parseBacklog } from "./backlog-contract.js";
 import type { CoordinatorRequest } from "./coordinator-engine.js";
 import {
   defaultProfileTables,
+  deliverableRootFor,
   resolveProfile,
   type ProfileTables,
   type ResolvedProfile,
@@ -27,9 +29,41 @@ export interface SquadRunRecorderDeps {
   store: SquadArtifactStore;
   /** Roster tables; defaults to the deployed cast. */
   tables?: ProfileTables;
+  /**
+   * Optional deck renderer. When wired, a `presenter` stage that emits the pptx
+   * skill's content YAML is turned into a real `.pptx` with a download link
+   * instead of leaving markdown that describes a deck nobody can open.
+   */
+  renderer?: DeckRenderer;
   logger?: RedactingLogger;
   /** Injectable clock for deterministic tests. */
   today?: () => string;
+}
+
+/** The slice of the render service the recorder needs (kept narrow for tests). */
+export interface DeckRenderer {
+  render(
+    request: { contentYaml: string; styleYaml: string },
+    ctx: { tenantId: string },
+  ): Promise<{ isError?: boolean; content: { type: string; text?: string }[] }>;
+}
+
+/**
+ * Pull the pptx skill's content YAML out of a presenter completion.
+ *
+ * Requires a fenced block carrying a top-level `slides:` key rather than
+ * accepting any YAML, because the presenter also emits YAML-ish fragments in
+ * prose and rendering the wrong one produces a confidently wrong deck.
+ */
+export function extractDeckYaml(text: string): string | undefined {
+  const fences = text.matchAll(/```(?:ya?ml)?\s*\n([\s\S]*?)```/g);
+  for (const fence of fences) {
+    const body = fence[1];
+    if (/^slides\s*:/m.test(body)) {
+      return body.trim();
+    }
+  }
+  return undefined;
 }
 
 /** What a completed stage contributes to the ledger. */
@@ -45,14 +79,18 @@ export interface RecordedStage {
 export class SquadRunRecorder {
   private readonly ledger: SquadLedger;
   private readonly history: SquadHistory;
+  private readonly store: SquadArtifactStore;
   private readonly tables: ProfileTables;
+  private readonly renderer: DeckRenderer | undefined;
   private readonly logger: RedactingLogger | undefined;
   private readonly today: () => string;
 
   constructor(deps: SquadRunRecorderDeps) {
     this.ledger = new SquadLedger(deps.store);
     this.history = new SquadHistory(deps.store);
+    this.store = deps.store;
     this.tables = deps.tables ?? defaultProfileTables();
+    this.renderer = deps.renderer;
     this.logger = deps.logger;
     this.today = deps.today ?? (() => new Date().toISOString().slice(0, 10));
   }
@@ -126,8 +164,80 @@ export class SquadRunRecorder {
         runId,
         `* ${stage.agentName} — ${deliverablePath ?? "findings only"}`,
       );
+      await this.finishDeliverable(tenantId, project, roleKey, runId, stage, opts);
     } catch (error) {
       this.warn("squad ledger stage record failed", error);
+    }
+  }
+
+  /**
+   * Turn a specialist's prose into the artifact the role actually owes.
+   *
+   * `presenter` owes a deck, not a description of one; `product-owner` owes work
+   * items a connector can create, not a bulleted list a human must retype. Both
+   * degrade to "the markdown is still there" rather than failing the run, because
+   * a model that did not follow the output contract is a quality problem, not an
+   * outage.
+   */
+  private async finishDeliverable(
+    tenantId: string,
+    project: string,
+    roleKey: string | undefined,
+    runId: string,
+    stage: RecordedStage,
+    opts: SeedSquadOptions,
+  ): Promise<void> {
+    if (roleKey === "presenter" && this.renderer) {
+      const contentYaml = extractDeckYaml(stage.artifact);
+      if (!contentYaml) {
+        return;
+      }
+      const rendered = await this.renderer.render(
+        { contentYaml, styleYaml: "" },
+        { tenantId },
+      );
+      const note = rendered.content.map((part) => part.text ?? "").join("\n");
+      const root = deliverableRootFor("presenter", this.tables, {
+        squad: opts.squad,
+        date: opts.date,
+      });
+      if (!root) {
+        return;
+      }
+      // The .pptx itself lives in the render container behind a short-lived SAS;
+      // the tracking tree carries the pointer and the source YAML so the deck is
+      // reproducible after the link expires.
+      await this.store.put(tenantId, project, `${root}/deck-${runId}.yaml`, contentYaml);
+      await this.store.put(
+        tenantId,
+        project,
+        `${root}/deck-${runId}.md`,
+        rendered.isError ? `# Deck render failed\n\n${note}` : `# Deck\n\n${note}`,
+      );
+      return;
+    }
+
+    if (roleKey === "product-owner") {
+      const backlog = parseBacklog(stage.artifact);
+      if (backlog.workItems.length === 0) {
+        return;
+      }
+      const root = deliverableRootFor("product-owner", this.tables, {
+        squad: opts.squad,
+        date: opts.date,
+      });
+      if (!root) {
+        return;
+      }
+      // The flat `workItems[]` is what a Copilot Studio agent loops one item per
+      // call into the native ADO or Jira connector; this server writes nothing
+      // to either (ADR-0001).
+      await this.store.put(
+        tenantId,
+        project,
+        `${root}/backlog-${runId}.json`,
+        `${JSON.stringify(backlog, null, 2)}\n`,
+      );
     }
   }
 

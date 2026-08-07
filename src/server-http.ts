@@ -323,6 +323,9 @@ export function buildHttpHandler(
       config.enableArtifacts && config.memoryAutoEnabled && memoryStack
         ? new SquadRunRecorder({
             store: new MemoryBackedArtifactStore(memoryStack.memoryStore),
+            // Only when the operator enabled rendering; otherwise the presenter's
+            // markdown stands on its own rather than half-producing a deck.
+            renderer: renderService,
             logger,
           })
         : undefined,
