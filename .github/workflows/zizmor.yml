@@ -1,0 +1,62 @@
+# Scan the workflows themselves for insecure patterns.
+#
+# The workflows here hold `contents: write` and a release token, so a template
+# injection or an unpinned action in this directory is a supply-chain hole rather
+# than a lint nit. Findings are reported, not blocking: zizmor flags patterns
+# that are sometimes correct, and a hard fail would train reviewers to bypass it.
+name: Zizmor
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/**']
+  pull_request:
+    branches: [main]
+    paths: ['.github/workflows/**']
+  schedule:
+    - cron: '30 4 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: zizmor-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  zizmor:
+    name: GitHub Actions security scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: false
+
+      - name: Run zizmor
+        run: uvx zizmor --format sarif .github/workflows/ > zizmor.sarif || true
+
+      - name: Upload SARIF to code scanning
+        if: ${{ !cancelled() }}
+        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          sarif_file: zizmor.sarif
+          category: zizmor
+
+      - name: Retain the full SARIF
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zizmor-sarif
+          path: zizmor.sarif
+          retention-days: 30

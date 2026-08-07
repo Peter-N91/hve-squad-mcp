@@ -79,8 +79,8 @@ test("DR-05(2): status returns running, then the finished artifact after complet
 
     const status = await engine.getRunStatus(runId, { auth: AUTH_A });
     assert.equal(status?.status, "complete");
-    assert.match(status?.artifact ?? "", /## Task Researcher/);
-    assert.match(status?.artifact ?? "", /## Task Reviewer/);
+    assert.match(status?.artifact ?? "", /## Squad Researcher/);
+    assert.match(status?.artifact ?? "", /## Squad Reviewer/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -121,7 +121,7 @@ test("DR-05(4): a run started on one instance resolves + completes on a fresh in
     // Instance 3 (another fresh process) reads the completed artifact.
     const engine3 = engineWith(dir, new FakeBackend());
     assert.equal((await engine3.getRunStatus(runId, { auth: AUTH_A }))?.status, "complete");
-    assert.match((await engine3.getRunStatus(runId, { auth: AUTH_A }))?.artifact ?? "", /## Task Reviewer/);
+    assert.match((await engine3.getRunStatus(runId, { auth: AUTH_A }))?.artifact ?? "", /## Squad Reviewer/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -31,11 +31,14 @@ import { readFile, writeFile } from "node:fs/promises";
 import { charterForRole, resolvePersonaForRole } from "./embedded-roles.js";
 import { composeEmbeddedPrompt } from "./embedded-prompt.js";
 import { AutoMemory, withMemoryContext } from "./auto-memory.js";
+import type { SquadRunRecorder } from "./squad-run-recorder.js";
+import { isAdvisoryOnly } from "./gates.js";
+import { defaultProfileTables, resolveProfile } from "./profiles.js";
 import type { BusinessToolSpec } from "./business-tools.js";
 import { FEDERATION_ROLE, federationPersona } from "./federation.js";
 import { coordinatorRequestFromRun, encodeRunParams } from "./run-params.js";
 import { runPipeline } from "./dispatch-loop.js";
-import { runAdvisoryPipeline, type AdvisoryStagePlan } from "./advisory-pipeline.js";
+import { runAdvisoryPipeline, type AdvisoryLedgerSink, type AdvisoryStagePlan } from "./advisory-pipeline.js";
 import { StoreAdvisoryPersistence } from "./advisory-run-store.js";
 import type { PersonaRecord } from "./persona-loader.js";
 import { EphemeralRunStateStore, type RunState, type RunStateStore, type RunStatus } from "./run-state.js";
@@ -109,6 +112,12 @@ export interface EmbeddedCoordinatorDeps {
    * default), the engine behaves exactly as before — memory stays a manual tool.
    */
   autoMemory?: AutoMemory;
+  /**
+   * Optional squad-ledger recorder. When wired, each run seeds the roster on
+   * first use, reads its own history index back as DATA, and persists stage
+   * deliverables plus the append-only logs. Absent, behaviour is unchanged.
+   */
+  runRecorder?: SquadRunRecorder;
   logger?: RedactingLogger;
 }
 
@@ -125,7 +134,7 @@ function toMatchedRouting(tool: CatalogTool): MatchedRouting {
 }
 
 /** The spike catch-all pipeline: research then review, run server-side in order. */
-const SPIKE_PIPELINE_ROLES = ["Task Researcher", "Task Reviewer"] as const;
+const SPIKE_PIPELINE_ROLES = ["Squad Researcher", "Squad Reviewer"] as const;
 
 /** The federation meta tool id (catalog tool; gated + catch-all, like squad_run). */
 const FEDERATION_TOOL_ID = "squad_federate";
@@ -177,6 +186,7 @@ export class EmbeddedCoordinator {
   private readonly runTtlMs?: number;
   private readonly leaseMs?: number;
   private readonly autoMemory?: AutoMemory;
+  private readonly runRecorder?: SquadRunRecorder;
   /** Outstanding held runs per tenant, started via startHttpRun (MEDIUM-2). */
   private readonly heldCounts = new Map<string, number>();
 
@@ -192,6 +202,7 @@ export class EmbeddedCoordinator {
     this.runTtlMs = deps.runTtlMs;
     this.leaseMs = deps.leaseMs;
     this.autoMemory = deps.autoMemory;
+    this.runRecorder = deps.runRecorder;
   }
 
   /**
@@ -208,7 +219,16 @@ export class EmbeddedCoordinator {
     }
     const project = this.autoMemory.resolveProject(request);
     const memory = await this.autoMemory.loadContext(tenantId, project);
-    return { request: withMemoryContext(request, memory), project };
+    let carried = withMemoryContext(request, memory);
+    if (this.runRecorder) {
+      // Seeding the roster and reading the run index back are the artifact-shaped
+      // twin of the digest read above, so they share this one moment.
+      const opened = await this.runRecorder.open(tenantId, project, carried);
+      carried = withMemoryContext(carried, opened.historyBlock);
+      // The seeded roster wins over the caller's hint for the rest of the run.
+      carried = { ...carried, profile: opened.profile.name };
+    }
+    return { request: carried, project };
   }
 
   /**
@@ -225,6 +245,43 @@ export class EmbeddedCoordinator {
       return;
     }
     await this.autoMemory.record(tenantId, project, entry);
+    await this.runRecorder?.closeRun(tenantId, project, entry.runId, []);
+  }
+
+  /**
+   * The ledger sink for one run, or `undefined` when the ledger is not wired.
+   *
+   * `project` is only defined when auto-memory resolved a partition, and there is
+   * no ledger destination without one — the project IS the partition the tree is
+   * written under.
+   */
+  private ledgerSink(
+    tenantId: string,
+    project: string | undefined,
+    request: CoordinatorRequest,
+    runId: string,
+  ): AdvisoryLedgerSink | undefined {
+    if (!this.runRecorder || !project) {
+      return undefined;
+    }
+    return this.runRecorder.sinkFor(tenantId, project, request, runId);
+  }
+
+  /**
+   * Whether this run's roster reaches only the tracking tree.
+   *
+   * Resolved from the roster the SERVER seeds for the requested profile, so the
+   * only caller influence is the profile NAME, which selects among rosters the
+   * operator's own deployed cast defines — a caller cannot name a roster into
+   * existence, and an unknown name falls back to `default`. A resolution failure
+   * returns `false`, which holds.
+   */
+  private resolveAdvisoryOnly(request: CoordinatorRequest): boolean {
+    try {
+      return isAdvisoryOnly(resolveProfile(request.profile, defaultProfileTables()).roles);
+    } catch {
+      return false;
+    }
   }
 
   private decrementHeld(tenantId: string): void {
@@ -261,7 +318,11 @@ export class EmbeddedCoordinator {
 
     try {
       // SEC-6 / SEC-7 / PROD-5 — a gated/destructive tool holds; never auto-releases.
-      const gate = this.gates.classify({ tool, mode: request.mode });
+      const gate = this.gates.classify({
+        tool,
+        mode: request.mode,
+        advisoryOnly: this.resolveAdvisoryOnly(request),
+      });
       if (gate.kind === "hold") {
         const run = await this.runStateStore.create({ tenantId, toolId: tool.id });
         await this.runStateStore.update(run.runId, { status: "held", holdReason: gate.reason });
@@ -388,7 +449,14 @@ export class EmbeddedCoordinator {
         // Single-stage advisory dispatch: one persona stage, no council/backlog.
         const plan: AdvisoryStagePlan[] = [{ kind: "persona", role: persona.role, persona }];
         const { request: framed, project } = await this.withMemory(tenantId, request);
-        const result = await runAdvisoryPipeline(framed, { backend: this.backend }, { plan });
+        const result = await runAdvisoryPipeline(
+          framed,
+          {
+            backend: this.backend,
+            ledger: this.ledgerSink(tenantId, project, framed, run.runId),
+          },
+          { plan },
+        );
 
         // Write the artifact INSIDE the isolated workspace, then read it back.
         const artifactPath = workspace.resolve("artifact.md");
@@ -479,7 +547,10 @@ export class EmbeddedCoordinator {
         const { request: framed, project } = await this.withMemory(tenantId, request);
         const result = await runAdvisoryPipeline(
           framed,
-          { backend: this.backend },
+          {
+            backend: this.backend,
+            ledger: this.ledgerSink(tenantId, project, framed, run.runId),
+          },
           { plan: [{ kind: "persona", role: persona.role, persona }] },
         );
 
@@ -521,7 +592,7 @@ export class EmbeddedCoordinator {
   }
 
   /**
-   * Execute the spike catch-all pipeline (Task Researcher -> Task Reviewer) as a
+   * Execute the spike catch-all pipeline (Squad Researcher -> Squad Reviewer) as a
    * sequential in-process dispatch loop, inside one server-allocated ephemeral
    * workspace with guaranteed teardown (SEC-4). Personas are resolved from disk
    * (single-source invariant) with the paraphrase fallback. This is the pipeline
@@ -709,7 +780,11 @@ export class EmbeddedCoordinator {
       return { kind: "embedded", outcome: "denied", matchedRouting, reason: admit.reason };
     }
     try {
-      const gate = this.gates.classify({ tool, mode: request.mode });
+      const gate = this.gates.classify({
+        tool,
+        mode: request.mode,
+        advisoryOnly: this.resolveAdvisoryOnly(request),
+      });
       if (gate.kind === "hold") {
         // MEDIUM-2: cap outstanding held runs per tenant (held runs release the
         // concurrency slot, so neither SEC-9 nor COST-2 throttles their creation).
@@ -907,7 +982,11 @@ export class EmbeddedCoordinator {
       // gate already fired at startHttpRun; no additional finalHold is injected.
       const result = await runAdvisoryPipeline(
         framed,
-        { backend: this.backend, persistence },
+        {
+          backend: this.backend,
+          persistence,
+          ledger: this.ledgerSink(run.tenantId, project, framed, run.runId),
+        },
         { mode: "autopilot" },
       );
 
@@ -974,7 +1053,11 @@ export class EmbeddedCoordinator {
       const { request: framed, project } = await this.withMemory(run.tenantId, req);
       const result = await runAdvisoryPipeline(
         framed,
-        { backend: this.backend, persistence },
+        {
+          backend: this.backend,
+          persistence,
+          ledger: this.ledgerSink(run.tenantId, project, framed, run.runId),
+        },
         { mode: "autopilot", plan: [{ kind: "persona", role: persona.role, persona }] },
       );
 

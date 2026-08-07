@@ -92,13 +92,13 @@ test("squad_status is tenant-scoped and drives the run to completion only after 
     await approvals.approve(runId, "operator@example.com");
     const afterApproval = await callTool(harness.handler, { token: "run-a", sessionId: sessionA, name: "squad_status", args: { runId } });
     assert.match(toolText(afterApproval), /squad-guided \/ embedded/);
-    assert.match(toolText(afterApproval), /## Task Reviewer/);
+    assert.match(toolText(afterApproval), /## Squad Reviewer/);
     assert.ok(harness.backend.callCount >= 2, "the two-stage pipeline dispatched");
 
     // A subsequent poll returns the stored artifact without re-running.
     const callsAfter = harness.backend.callCount;
     const repoll = await callTool(harness.handler, { token: "run-a", sessionId: sessionA, name: "squad_status", args: { runId } });
-    assert.match(toolText(repoll), /## Task Reviewer/);
+    assert.match(toolText(repoll), /## Squad Reviewer/);
     assert.equal(harness.backend.callCount, callsAfter, "a completed run is not re-executed on re-poll");
   } finally {
     rmSync(dir, { recursive: true, force: true });

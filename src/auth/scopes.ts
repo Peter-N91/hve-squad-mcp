@@ -48,6 +48,11 @@ export const TOOL_SCOPES: Readonly<Record<string, string>> = {
   // the SAME Squad.MemoryWrite scope as squad_memory_write (a batch write is still
   // a write — no new scope), so a caller that may write one entry may flush many.
   squad_memory_sync: "Squad.MemoryWrite",
+  // squad_history browses the persisted `.copilot-tracking` tree a run produced
+  // — the artifact side of the same project the memory tools expose. Reading a
+  // run's own output is a READ of that project, so it reuses Squad.Memory rather
+  // than minting a scope an operator would have to grant twice for one capability.
+  squad_history: "Squad.Memory",
   // squad_business_plan is the business-facing advisory tool (a single embedded
   // dispatch producing a sectioned business plan). Least-privilege: a business
   // grant never implies research/plan/run.
@@ -166,6 +171,13 @@ export const SQUAD_RENDER_PPTX_TOOL = "squad_render_pptx";
 export const SQUAD_MEMORY_READ_TOOL = "squad_memory_read";
 
 /**
+ * The synthetic HISTORY tool id — list and read the `.copilot-tracking` tree a
+ * run wrote. Same synthetic posture as the memory tools above: it is not a squad
+ * routing intent, so it is not in the catalog and is exempt from the drift check.
+ */
+export const SQUAD_HISTORY_TOOL = "squad_history";
+
+/**
  * The synthetic memory WRITE tool id — the compare-and-swap write-back tool for
  * the shared-state broker. Same synthetic posture as the read tool above; exposed
  * only when the operator enables the memory feature.
@@ -195,6 +207,7 @@ export const MEMORY_EXPOSED_TOOLS: ReadonlySet<string> = new Set([
   SQUAD_MEMORY_READ_TOOL,
   SQUAD_MEMORY_WRITE_TOOL,
   SQUAD_MEMORY_SYNC_TOOL,
+  SQUAD_HISTORY_TOOL,
 ]);
 
 /**

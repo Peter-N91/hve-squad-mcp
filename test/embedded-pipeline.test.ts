@@ -34,8 +34,8 @@ function makeCastFixture(): { root: string; cleanup: () => void } {
   mkdirSync(root, { recursive: true });
   const persona = (name: string, body: string): string =>
     ["---", `name: ${name}`, "---", "", body, ""].join("\n");
-  writeFileSync(join(root, "task-researcher.agent.md"), persona("Task Researcher", "Researcher body."), "utf8");
-  writeFileSync(join(root, "task-reviewer.agent.md"), persona("Task Reviewer", "Reviewer body."), "utf8");
+  writeFileSync(join(root, "squad-researcher.agent.md"), persona("Squad Researcher", "Researcher body."), "utf8");
+  writeFileSync(join(root, "squad-reviewer.agent.md"), persona("Squad Reviewer", "Reviewer body."), "utf8");
   return { root, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
@@ -66,8 +66,8 @@ test("executePipeline runs the two-stage pipeline to completion in an isolated w
     assert.equal(result.outcome, "completed");
     assert.equal(backend.calls, 2); // two stages dispatched
     assert.ok(result.artifact);
-    assert.match(result.artifact, /## Task Researcher/);
-    assert.match(result.artifact, /## Task Reviewer/);
+    assert.match(result.artifact, /## Squad Researcher/);
+    assert.match(result.artifact, /## Squad Reviewer/);
     assert.match(result.artifact, /STAGE-1 OUTPUT/);
     assert.match(result.artifact, /STAGE-2 OUTPUT/);
     assert.ok(result.runId, "a run id is allocated");

@@ -67,7 +67,7 @@ test("in worker mode the poll is read-only; the worker drives the approved run",
 
   const done = await engine.pollRun(runId, { auth: AUTH });
   assert.equal(done.outcome, "completed");
-  assert.match(done.artifact ?? "", /## Task Reviewer/);
+  assert.match(done.artifact ?? "", /## Squad Reviewer/);
 });
 
 test("the worker ignores an unapproved held run (gate still non-bypassable)", async () => {

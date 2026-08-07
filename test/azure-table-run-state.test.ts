@@ -107,8 +107,8 @@ function storeOn(table: FakeTable, cipher?: FieldCipher): AzureTableRunStateStor
 }
 
 const SAMPLE_STAGES = [
-  { role: "Task Researcher", artifact: "## Task Researcher\n\nresearch findings" },
-  { role: "Task Planner", agentName: "lead", artifact: "## Task Planner\n\nthe plan" },
+  { role: "Squad Researcher", artifact: "## Squad Researcher\n\nresearch findings" },
+  { role: "Squad Lead", agentName: "lead", artifact: "## Squad Lead\n\nthe plan" },
   { role: "Council Verdict", artifact: "## Council Verdict\n\n* Verdict: Go-With-Conditions" },
 ];
 const SAMPLE_VERDICT = {
@@ -117,8 +117,8 @@ const SAMPLE_VERDICT = {
   rendered: "## Council Verdict\n\n* Verdict: Go-With-Conditions",
 };
 const SAMPLE_HISTORY = [
-  { stage: "Task Researcher", at: "2026-07-06T00:00:00.000Z" },
-  { stage: "Task Planner", at: "2026-07-06T00:00:01.000Z" },
+  { stage: "Squad Researcher", at: "2026-07-06T00:00:00.000Z" },
+  { stage: "Squad Lead", at: "2026-07-06T00:00:01.000Z" },
   { stage: "Council Verdict", at: "2026-07-06T00:00:02.000Z" },
 ];
 
@@ -152,7 +152,7 @@ test("Azure Table store encrypts advisory stages + verdict at rest", async () =>
   const store = storeOn(table, new AesGcmFieldCipher(randomBytes(32)));
   const run = await store.create({ tenantId: "t", toolId: "squad_run" });
   await store.update(run.runId, {
-    stages: [{ role: "Task Researcher", artifact: "SECRET-TABLE-ARTIFACT" }],
+    stages: [{ role: "Squad Researcher", artifact: "SECRET-TABLE-ARTIFACT" }],
     councilVerdict: { class: "Stop", conditions: ["SECRET-TABLE-CONDITION"], rendered: "SECRET-TABLE-RENDERED" },
   });
   const raw = table.raw(run.runId) as Record<string, unknown>;

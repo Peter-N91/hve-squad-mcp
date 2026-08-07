@@ -1,30 +1,31 @@
-# Bump this MCP server whenever the hve-squad APM package cuts a newer release.
+# Track hve-squad releases by opening a pull request, not by pushing to main.
 #
-# Scope (deliberately narrow): this workflow ONLY
-#   1. updates the package pin (host/cast/package-pin.json) to the new hve-squad
-#      version, and
-#   2. bumps this repo's release number (package.json + package-lock.json),
-# then commits straight to main and dispatches release.yml to cut the tag +
-# GitHub Release. It does NOT regenerate the bundled cast under
-# host/cast/.github — that needs the deployed package cast (agents), which this
-# lightweight job does not build. A maintainer runs `npm run snapshot:cast` when
-# the squad roster actually changed; the cast-bundle CI check on main fails until
-# the bundle matches the pinned package, so a stale cast never goes unnoticed.
+# The previous version committed a pin bump, a version bump, and a CHANGELOG
+# entry straight to `main`. That is three violations of the release contract in
+# one job: the version and the changelog move only in release-prep, and nothing
+# reaches `main` without PR validation and CI.
 #
-# Triggers:
-#   * schedule  — daily poll, shortly after the package's 06:00 UTC sync.
-#   * manual    — workflow_dispatch with an optional explicit version.
-#   * push      — repository_dispatch (type hve-squad-released) if the package
-#                 repo is later wired to notify this repo on release.
+# It also did NOT refresh the bundled cast, on the grounds that doing so needed a
+# local `apm install`. That is no longer true — `snapshot:cast` resolves every
+# bundled file from the release's own `apm.yml` over HTTPS — so this workflow now
+# refreshes the bundle and lets CI verify it.
+#
+# WHY A HUMAN STILL MERGES
+# A hve-squad release can rename or retire roster roles. `0.11.0` did exactly
+# that, which is how `tools.catalog.yml` came to bind three tools to agents HVE
+# Core no longer ships. Auto-merging such a release would replace a stale bundle
+# with a broken one. The pull request runs the drift checks that catch it, and a
+# maintainer decides.
 name: Bump on hve-squad release
 
 on:
   schedule:
     - cron: '0 7 * * *'
+  # checkov:skip=CKV_GHA_7:CKV_GHA_7 targets workflows that BUILD a release artifact. This one opens a pull request; it produces no release and merges nothing. The single input names the hve-squad version to pin, and the snapshot refuses a tag that does not declare that exact version, so the input cannot silently change what the bundle contains.
   workflow_dispatch:
     inputs:
       version:
-        description: 'hve-squad version to pin (e.g. 0.8.18). Empty = latest release.'
+        description: 'hve-squad version to pin (e.g. 0.12.4). Empty = latest release.'
         required: false
         type: string
   repository_dispatch:
@@ -38,152 +39,127 @@ permissions:
   contents: read
 
 env:
-  # The hve-squad APM package this server tracks.
   PACKAGE_REPO: Peter-N91/hve-squad
 
 jobs:
   bump:
-    name: Update package pin + bump release
+    name: Open a pin-bump pull request
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      actions: write
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
 
-      # ── Resolve the target hve-squad version ─────────────────────────────
-      #    Priority: manual input > repository_dispatch payload > latest release.
-      #    Cross-repo release reads use PACKAGE_SYNC_TOKEN when set (required if
-      #    the package repo is private); otherwise the job token (public repos).
-      - name: Resolve target version
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Reading a private package repo needs a PAT; the job token cannot see it.
+      - name: Resolve the target version
         id: target
         env:
           GH_TOKEN: ${{ secrets.PACKAGE_SYNC_TOKEN || github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
+          DISPATCH_VERSION: ${{ github.event.client_payload.version }}
         run: |
-          V="${{ inputs.version }}"
-          [ -z "$V" ] && V="${{ github.event.client_payload.version }}"
+          set -euo pipefail
+          V="$INPUT_VERSION"
+          [ -z "$V" ] && V="$DISPATCH_VERSION"
           if [ -z "$V" ]; then
-            TAG=$(gh release view --repo "$PACKAGE_REPO" --json tagName -q .tagName)
-            V="$TAG"
+            V=$(gh release view --repo "$PACKAGE_REPO" --json tagName -q .tagName)
           fi
           V="${V#v}"
           if [ -z "$V" ]; then
             echo "::error::Could not resolve a target hve-squad version."
             exit 1
           fi
-          echo "version=$V" >> "$GITHUB_OUTPUT"
-          echo "Target hve-squad version: $V"
-
-      - name: Read current pin
-        id: pin
-        run: |
           CUR=$(jq -r '.version' host/cast/package-pin.json)
-          echo "version=$CUR" >> "$GITHUB_OUTPUT"
-          echo "Current pin: $CUR"
-
-      # ── Only act when the target is strictly newer than the current pin ──
-      - name: Decide
-        id: decide
-        run: |
-          CUR="${{ steps.pin.outputs.version }}"
-          NEW="${{ steps.target.outputs.version }}"
-          if [ "$CUR" = "$NEW" ]; then
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "current=$CUR" >> "$GITHUB_OUTPUT"
+          if [ "$CUR" = "$V" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Already pinned to $NEW — nothing to do."
+            echo "Already pinned to $V."
             exit 0
           fi
-          HIGH=$(printf '%s\n%s\n' "$CUR" "$NEW" | sort -V | tail -n1)
-          if [ "$HIGH" != "$NEW" ]; then
+          HIGH=$(printf '%s\n%s\n' "$CUR" "$V" | sort -V | tail -n1)
+          if [ "$HIGH" != "$V" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Target $NEW is not newer than the current pin $CUR — skipping."
+            echo "$V is not newer than the current pin $CUR."
             exit 0
           fi
           echo "skip=false" >> "$GITHUB_OUTPUT"
-          echo "Update needed: $CUR -> $NEW"
 
-      # ── Update the pin, bump this repo's release number, prepend CHANGELOG ─
-      - name: Update pin + bump release + changelog
-        if: steps.decide.outputs.skip != 'true'
-        id: bump
-        run: |
-          set -euo pipefail
-          NEW_PKG="${{ steps.target.outputs.version }}"
-
-          # 1) Update the package pin.
-          tmp=$(mktemp)
-          jq --arg v "$NEW_PKG" '.version = $v' host/cast/package-pin.json > "$tmp"
-          mv "$tmp" host/cast/package-pin.json
-
-          # 2) Bump this repo's release number (patch) in package.json + lock.
-          CUR_MCP=$(jq -r '.version' package.json)
-          IFS='.' read -r MA MI PA <<< "$CUR_MCP"
-          NEW_MCP="$MA.$MI.$((PA + 1))"
-          tmp=$(mktemp); jq --arg v "$NEW_MCP" '.version = $v' package.json > "$tmp"; mv "$tmp" package.json
-          if [ -f package-lock.json ]; then
-            tmp=$(mktemp)
-            jq --arg v "$NEW_MCP" '.version = $v | (.packages[""].version) = $v' package-lock.json > "$tmp"
-            mv "$tmp" package-lock.json
-          fi
-          echo "mcp_version=$NEW_MCP" >> "$GITHUB_OUTPUT"
-          echo "Pinned $PACKAGE_REPO@$NEW_PKG; bumped MCP $CUR_MCP -> $NEW_MCP"
-
-          # 3) Prepend a CHANGELOG entry (inserted above the first existing entry).
-          TODAY=$(date -u +%Y-%m-%d)
-          cat > /tmp/entry.md <<EOF
-          ## [$NEW_MCP] - $TODAY
-
-          ### Changed
-
-          - Bumped the package pin to \`$PACKAGE_REPO@$NEW_PKG\` and cut this release to track it.
-            Run \`npm run snapshot:cast\` on this branch if the bundled cast changed (the cast-bundle CI check enforces it).
-
-          [$NEW_MCP]: https://github.com/${{ github.repository }}/releases/tag/v$NEW_MCP
-
-          EOF
-          awk 'BEGIN{done=0}
-               /^## \[/ {
-                 if (!done) {
-                   while ((getline line < "/tmp/entry.md") > 0) print line;
-                   done=1
-                 }
-               }
-               { print }' CHANGELOG.md > CHANGELOG.tmp
-          mv CHANGELOG.tmp CHANGELOG.md
-
-      # ── Commit the bump straight to main ─────────────────────────────────
-      #    Push with PACKAGE_SYNC_TOKEN (a PAT). GITHUB_TOKEN-authored pushes do
-      #    not trigger other workflows, so we also dispatch release.yml
-      #    explicitly below to cut the tag + GitHub Release.
-      - name: Commit and push
-        if: steps.decide.outputs.skip != 'true'
+      - name: Bump the pin and refresh the bundled cast
+        if: steps.target.outputs.skip != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.PACKAGE_SYNC_TOKEN || github.token }}
+          TARGET: ${{ steps.target.outputs.version }}
         run: |
           set -euo pipefail
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin \
-            "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
-          git add host/cast/package-pin.json package.json package-lock.json CHANGELOG.md
-          if ! git diff --cached --quiet; then
-            git commit -m "chore(release): pin ${PACKAGE_REPO}@${{ steps.target.outputs.version }}; bump to v${{ steps.bump.outputs.mcp_version }}"
-            git push origin main
-            echo "::notice::Pushed release bump to v${{ steps.bump.outputs.mcp_version }} (pinned ${PACKAGE_REPO}@${{ steps.target.outputs.version }})"
-          else
-            echo "::notice::No changes after regeneration — nothing to commit."
-          fi
+          tmp=$(mktemp)
+          jq --arg v "$TARGET" '.version = $v' host/cast/package-pin.json > "$tmp"
+          mv "$tmp" host/cast/package-pin.json
+          # The snapshot fails when the tag does not declare this version, so a
+          # mistyped or moved tag stops here rather than producing a bundle
+          # labelled as something it is not.
+          npm run snapshot:cast
+          npm run generate
+          npm run generate:connector
 
-      # ── Dispatch the release workflow ────────────────────────────────────
-      #    GITHUB_TOKEN/PAT-authored pushes may not trigger release.yml's push
-      #    event, so dispatch it explicitly. It reads the new version from
-      #    package.json and cuts the tag + GitHub Release.
-      - name: Trigger release
-        if: steps.decide.outputs.skip != 'true'
+      # A fragment, not a CHANGELOG edit: the version moves on main, in release-prep.
+      - name: Write the change fragment
+        if: steps.target.outputs.skip != 'true'
+        env:
+          TARGET: ${{ steps.target.outputs.version }}
+          CURRENT: ${{ steps.target.outputs.current }}
+        run: |
+          set -euo pipefail
+          npm run change -- \
+            --type Changed \
+            --bump minor \
+            --force \
+            --title "pin hve-squad $TARGET" \
+            --body "- **Bumped the bundled cast pin from \`$CURRENT\` to \`$PACKAGE_REPO@$TARGET\`** and refreshed \`host/cast/\` from that release's \`apm.yml\`. A cast change is a minor: the squad a consumer gets is different."
+
+      - name: Open the pull request
+        if: steps.target.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.PACKAGE_SYNC_TOKEN || github.token }}
+          TARGET: ${{ steps.target.outputs.version }}
+          CURRENT: ${{ steps.target.outputs.current }}
         run: |
-          gh workflow run release.yml --ref main
-          echo "::notice::Triggered release.yml for v${{ steps.bump.outputs.mcp_version }}"
+          set -euo pipefail
+          BRANCH="chore/pin-hve-squad-$TARGET"
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "::notice::$BRANCH already exists — a pull request is already open for $TARGET."
+            exit 0
+          fi
+          git checkout -b "$BRANCH"
+          git add host/cast .changes/unreleased generated
+          git commit -m "chore(cast): pin ${PACKAGE_REPO}@${TARGET}"
+          git push origin "$BRANCH"
+          {
+            echo "Tracks \`$PACKAGE_REPO\` \`$CURRENT\` -> \`$TARGET\`."
+            echo
+            echo "The bundled cast under \`host/cast/\` was regenerated from that release's \`apm.yml\`, and the generated artifacts were rebuilt."
+            echo
+            echo "**Review before merging.** A hve-squad release can rename or retire roster roles; the CI drift checks (\`generate:check\`, \`snapshot:cast:check\`, and the cast-bundle suite) are what catch a catalog left bound to an agent that no longer exists."
+            echo
+            echo "The version and \`CHANGELOG.md\` are deliberately untouched — release-prep moves them on \`main\` from the fragment in this branch."
+          } > /tmp/pr-body.md
+          gh pr create \
+            --title "chore(cast): pin ${PACKAGE_REPO}@${TARGET}" \
+            --body-file /tmp/pr-body.md \
+            --base main \
+            --head "$BRANCH"

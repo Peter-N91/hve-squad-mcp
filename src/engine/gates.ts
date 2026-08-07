@@ -293,6 +293,54 @@ export interface GateClassifyInput {
    * that could remove a hold.
    */
   destructive?: boolean;
+  /**
+   * True when the SERVER has determined this run's resolved plan contains only
+   * advisory roles — roles that produce text into the tracking tree and touch
+   * nothing outside it.
+   *
+   * Derived from the resolved route plan, never from `request`, `context`, or
+   * model output, because a value a caller could influence would let a caller
+   * release its own gate. It is honoured ONLY when the operator has separately
+   * enabled {@link GateKeeperOptions.advisoryAutopilotEnabled}.
+   */
+  advisoryOnly?: boolean;
+}
+
+/**
+ * Roles that reach OUTSIDE the tracking tree, so a plan containing one is never
+ * advisory regardless of the operator's setting.
+ *
+ * `backlog-executor` writes into a live Azure DevOps or Jira backlog, where a
+ * create is announced to a whole team by notifications and webhooks the moment it
+ * lands; `deployer` changes running infrastructure. No profile seeds
+ * `backlog-executor` at all, so this is belt-and-braces against a custom roster.
+ */
+export const IMPACTFUL_ROLES: ReadonlySet<string> = new Set([
+  "backlog-executor",
+  "deployer",
+  "iac-author",
+  "azure-diagnose",
+]);
+
+/** True when every seeded role only produces text into the tracking tree. */
+export function isAdvisoryOnly(seededRoles: readonly string[]): boolean {
+  return seededRoles.every((role) => !IMPACTFUL_ROLES.has(role.trim().toLowerCase()));
+}
+
+export interface GateKeeperOptions {
+  /**
+   * Allow a run the server has proven advisory-only to proceed without an
+   * out-of-band operator approval. Default FALSE — the posture is unchanged
+   * unless an operator opts in.
+   *
+   * This exists because the remote boundary is otherwise unusable for its main
+   * case: a Copilot Studio agent cannot reach `/admin/approve`, so every `product`
+   * run would hold forever waiting for a human who is not in that loop. The
+   * advisory pipeline performs no code execution and no impactful action — it
+   * produces finished TEXT — so holding it protects nothing while blocking
+   * everything. A plan containing any {@link IMPACTFUL_ROLES} member still holds.
+   */
+  advisoryAutopilotEnabled?: boolean;
 }
 
 /**
@@ -301,6 +349,12 @@ export interface GateClassifyInput {
  * proceed.
  */
 export class GateKeeper {
+  private readonly advisoryAutopilotEnabled: boolean;
+
+  constructor(options: GateKeeperOptions = {}) {
+    this.advisoryAutopilotEnabled = options.advisoryAutopilotEnabled === true;
+  }
+
   /**
    * SEC-7 / PROD-5: a tool that carries gates, runs at a non-`auto` tier, drives
    * the full pipeline, or is flagged destructive HOLDS for human approval. The
@@ -311,6 +365,15 @@ export class GateKeeper {
     const { tool } = input;
     const gated = tool.gates || tool.catchAll || tool.tier === "confirm" || tool.tier === "escalate";
     if (gated || input.destructive === true) {
+      // A destructive run always holds: the advisory release is a narrowing of the
+      // gate, never an override of the fail-safe hint.
+      if (
+        this.advisoryAutopilotEnabled &&
+        input.advisoryOnly === true &&
+        input.destructive !== true
+      ) {
+        return { kind: "proceed" };
+      }
       const why = input.destructive
         ? "destructive operation requires explicit human approval"
         : `tool "${tool.id}" carries a Human Gate (tier=${tool.tier}${tool.gates ? ", gated" : ""})`;

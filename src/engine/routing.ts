@@ -1,7 +1,7 @@
 /**
  * Server-side routing engine (advisory stage planning).
  *
- * The dispatch loop shipped a FIXED order (Task Researcher -> Task Reviewer).
+ * The dispatch loop shipped a FIXED order (Squad Researcher -> Squad Reviewer).
  * This module replaces that hard-coded pair with a data-driven `route()` that
  * turns a caller request into an ordered advisory stage plan, reading the
  * deployed squad conventions READ-ONLY:
@@ -46,64 +46,21 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { resolveSquadGithubRoot } from "../paths.js";
+import {
+  defaultProfileTables,
+  INTAKE_VALIDATOR_ROLE,
+  resolveProfile,
+  type ProfileTables,
+} from "./profiles.js";
 
 // ---------------------------------------------------------------------------
-// Markdown table parsing — mirrored from generators/build-manifests.ts so the
-// router reads the routing/roster instructions the same way the drift generator
-// does (skips fenced code blocks so example tables inside ``` are ignored).
+// Markdown table parsing lives in `markdown-table.ts` so the router, the profile
+// resolver, and the drift generator all read these instruction files the same
+// way — no parser is invented per consumer.
 // ---------------------------------------------------------------------------
 
-interface MarkdownTable {
-  headers: string[];
-  rows: string[][];
-}
-
-function splitRow(line: string): string[] {
-  return line
-    .trim()
-    .replace(/^\|/, "")
-    .replace(/\|$/, "")
-    .split("|")
-    .map((cell) => cell.trim());
-}
-
-function isTableLine(line: string): boolean {
-  return /^\s*\|.*\|\s*$/.test(line);
-}
-
-function isSeparatorLine(line: string): boolean {
-  return /^\s*\|?[\s:|-]+\|?\s*$/.test(line) && line.includes("-");
-}
-
-function parseTables(markdown: string): MarkdownTable[] {
-  const lines = markdown.split(/\r?\n/);
-  const tables: MarkdownTable[] = [];
-  let inFence = false;
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (/^\s*```/.test(line)) {
-      inFence = !inFence;
-      continue;
-    }
-    if (inFence) {
-      continue;
-    }
-    if (isTableLine(line) && i + 1 < lines.length && isSeparatorLine(lines[i + 1])) {
-      const headers = splitRow(line);
-      const rows: string[][] = [];
-      let j = i + 2;
-      for (; j < lines.length; j += 1) {
-        if (/^\s*```/.test(lines[j]) || !isTableLine(lines[j])) {
-          break;
-        }
-        rows.push(splitRow(lines[j]));
-      }
-      tables.push({ headers, rows });
-      i = j - 1;
-    }
-  }
-  return tables;
-}
+export { parseTables } from "./markdown-table.js";
+import { parseTables } from "./markdown-table.js";
 
 function splitKeywords(cell: string): string[] {
   return cell
@@ -241,10 +198,20 @@ export interface RouteStage {
 
 /** The council decision for a route. */
 export interface RouteCouncil {
-  /** True when the request crosses two or more council domains. */
+  /** True when the request crosses two or more council domains AND quorum is seated. */
   engaged: boolean;
   /** The council member agent `name:` values (resolved via the roster). */
   members: string[];
+  /**
+   * Quorum roles the seeded profile does not carry.
+   *
+   * `squad-council.instructions.md` makes quorum the FULL default membership and
+   * forbids dispatching a partial council or synthesizing a verdict to cover a
+   * missing role: "a verdict assembled without the full quorum's dispatched
+   * findings is invalid and must not gate implementation". A non-empty list is
+   * therefore an escalation, not a smaller council.
+   */
+  missingQuorum: string[];
 }
 
 /** The ordered advisory stage plan produced by {@link route}. */
@@ -253,11 +220,21 @@ export interface RoutePlan {
   stages: RouteStage[];
   /** The council decision; Phase 3 interleaves an engaged council between plan and review. */
   council: RouteCouncil;
+  /** The profile actually seeded for this run (`default` when none was named). */
+  profile: string;
+  /** The readiness gate, present only when the seeded roster carries `intake-validator`. */
+  intake?: RouteStage;
+  /**
+   * The deliverable specialists the Implement stage fans out across. Non-empty
+   * only for a profile carrying two or more of them (`product`, `full`); every
+   * other profile keeps the unchanged single build.
+   */
+  fanOut: RouteStage[];
 }
 
 /** Options mirroring the `/squad` prompt arguments that influence routing. */
 export interface RouteOptions {
-  /** Optional squad profile hint (`full` forces the full advisory pipeline). */
+  /** Optional squad profile hint; decides which roles are seeded and dispatchable. */
   profile?: string;
   /** Optional autonomy mode (`autonomous` | `autopilot`) — forces the full advisory pipeline. */
   mode?: string;
@@ -275,7 +252,6 @@ const REVIEW_ROLE = "tester";
 /** Council member role KEYS (base four + optional `rai`). */
 const COUNCIL_BASE_ROLES = ["architect", "security", "cost-manager", "product-owner"] as const;
 const RAI_ROLE = "rai";
-
 /**
  * Council DOMAINS and their trigger keywords. The router engages the council
  * when a request crosses two or more of these domains (mirrors the routing
@@ -358,8 +334,10 @@ export function computeRoutePlan(
   request: string,
   opts: RouteOptions = {},
   tables: RoutingTables,
+  profileTables?: ProfileTables,
 ): RoutePlan {
   const lower = request.toLowerCase();
+  const profile = resolveProfile(opts.profile, profileTables ?? defaultProfileTables());
 
   const researchMatched = RESEARCH_KEYWORDS.some((keyword) => keywordPresent(lower, keyword));
   const councilDomains = crossedCouncilDomains(lower);
@@ -371,15 +349,31 @@ export function computeRoutePlan(
       row.patterns.some((pattern) => keywordPresent(lower, pattern)),
   );
 
-  const advisoryOverride =
-    Boolean(opts.mode) || (opts.profile ?? "").toLowerCase() === "full";
+  // A profile whose Implement stage fans out is never a single-stage run: the
+  // deliverables it seeds are the point of choosing it.
+  const advisoryOverride = Boolean(opts.mode) || profile.fansOut;
   const otherMatched = nonResearchRowMatched || councilDomains.length > 0 || advisoryOverride;
+
+  // A role the profile did not seed cannot be dispatched this run.
+  const seeded = (stage: RouteStage): boolean => profile.seeded.has(stage.role);
+  const intake = profile.hasIntakeGate
+    ? buildStage(tables, INTAKE_VALIDATOR_ROLE, "intake", "confirm", false)
+    : undefined;
+  const fanOut = profile.fansOut
+    ? profile.deliverableRoles.map((role) => buildStage(tables, role, role, "confirm", true))
+    : [];
 
   const researchStage = buildStage(tables, RESEARCH_ROLE, "research", "auto", true);
 
   // Research-only: a single research intent, nothing broader.
   if (researchMatched && !otherMatched) {
-    return { stages: [researchStage], council: { engaged: false, members: [] } };
+    return {
+      stages: [researchStage].filter(seeded),
+      council: { engaged: false, members: [], missingQuorum: [] },
+      profile: profile.name,
+      intake,
+      fanOut,
+    };
   }
 
   // Full advisory pipeline: research -> plan -> review (council interleaved by Phase 3).
@@ -387,15 +381,28 @@ export function computeRoutePlan(
     researchStage,
     buildStage(tables, PLAN_ROLE, "plan", "confirm", false),
     buildStage(tables, REVIEW_ROLE, "review", "auto", true),
-  ];
+  ].filter(seeded);
 
-  const councilEngaged = councilDomains.length >= 2;
-  const memberRoles = councilEngaged
-    ? [...COUNCIL_BASE_ROLES, ...(councilDomains.includes("rai") ? [RAI_ROLE] : [])]
+  const councilCrossed = councilDomains.length >= 2;
+  const missingQuorum = councilCrossed
+    ? COUNCIL_BASE_ROLES.filter((role) => !profile.seeded.has(role))
     : [];
+  const memberRoles =
+    councilCrossed && missingQuorum.length === 0
+      ? [
+          ...COUNCIL_BASE_ROLES,
+          ...(councilDomains.includes(RAI_ROLE) && profile.seeded.has(RAI_ROLE) ? [RAI_ROLE] : []),
+        ]
+      : [];
   const members = memberRoles.map((roleKey) => resolveAgent(tables, roleKey));
 
-  return { stages, council: { engaged: councilEngaged, members } };
+  return {
+    stages,
+    council: { engaged: members.length > 0, members, missingQuorum: [...missingQuorum] },
+    profile: profile.name,
+    intake,
+    fanOut,
+  };
 }
 
 let cachedTables: RoutingTables | undefined;
@@ -418,5 +425,5 @@ function defaultTables(): RoutingTables {
  * {@link loadRosterMap}, to `resolvePersonaForRosterRole`.
  */
 export function route(request: string, opts: RouteOptions = {}): RoutePlan {
-  return computeRoutePlan(request, opts, defaultTables());
+  return computeRoutePlan(request, opts, defaultTables(), defaultProfileTables());
 }

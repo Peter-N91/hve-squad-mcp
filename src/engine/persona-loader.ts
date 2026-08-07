@@ -25,7 +25,7 @@ import { resolveSquadAgentsRoots } from "../paths.js";
 
 /** A role persona resolved from a deployed `*.agent.md` file. */
 export interface PersonaRecord {
-  /** The squad role label, e.g. "Task Researcher" (matches the agent `name:`). */
+  /** The squad role label, e.g. "Squad Researcher" (matches the agent `name:`). */
   role: string;
   /** The persona body (everything after the frontmatter) — the AUTHORITY charter. */
   charter: string;

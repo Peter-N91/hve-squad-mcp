@@ -144,8 +144,8 @@ test("encryption at rest: request/context are opaque on disk but decrypt on read
 // ---------------------------------------------------------------------------
 
 const SAMPLE_STAGES = [
-  { role: "Task Researcher", artifact: "## Task Researcher\n\nresearch findings" },
-  { role: "Task Planner", agentName: "lead", artifact: "## Task Planner\n\nthe plan" },
+  { role: "Squad Researcher", artifact: "## Squad Researcher\n\nresearch findings" },
+  { role: "Squad Lead", agentName: "lead", artifact: "## Squad Lead\n\nthe plan" },
   { role: "Council Verdict", artifact: "## Council Verdict\n\n* Verdict: Go-With-Conditions" },
 ];
 const SAMPLE_VERDICT = {
@@ -154,8 +154,8 @@ const SAMPLE_VERDICT = {
   rendered: "## Council Verdict\n\n* Verdict: Go-With-Conditions",
 };
 const SAMPLE_HISTORY = [
-  { stage: "Task Researcher", at: "2026-07-06T00:00:00.000Z" },
-  { stage: "Task Planner", at: "2026-07-06T00:00:01.000Z" },
+  { stage: "Squad Researcher", at: "2026-07-06T00:00:00.000Z" },
+  { stage: "Squad Lead", at: "2026-07-06T00:00:01.000Z" },
   { stage: "Council Verdict", at: "2026-07-06T00:00:02.000Z" },
 ];
 
@@ -192,14 +192,14 @@ test("advisory stage artifacts + verdict text are encrypted at rest on the file 
     const store = new DurableRunStateStore({ baseDir: dir, cipher: new AesGcmFieldCipher(randomBytes(32)) });
     const run = await store.create({ tenantId: "t", toolId: "squad_run" });
     await store.update(run.runId, {
-      stages: [{ role: "Task Researcher", artifact: "SECRET-STAGE-ARTIFACT-7" }],
+      stages: [{ role: "Squad Researcher", artifact: "SECRET-STAGE-ARTIFACT-7" }],
       councilVerdict: {
         class: "Go-With-Conditions",
         conditions: ["SECRET-CONDITION-7"],
         rendered: "SECRET-RENDERED-7",
       },
       // History is metadata (role + timestamp), left in the clear for audit.
-      history: [{ stage: "Task Researcher", at: "2026-07-06T00:00:00.000Z" }],
+      history: [{ stage: "Squad Researcher", at: "2026-07-06T00:00:00.000Z" }],
     });
     const file = readdirSync(dir).find((f) => f.startsWith(run.runId));
     const raw = readFileSync(join(dir, file as string), "utf8");
@@ -211,7 +211,7 @@ test("advisory stage artifacts + verdict text are encrypted at rest on the file 
     assert.equal(read?.stages?.[0].artifact, "SECRET-STAGE-ARTIFACT-7");
     assert.equal(read?.councilVerdict?.rendered, "SECRET-RENDERED-7");
     assert.deepEqual(read?.councilVerdict?.conditions, ["SECRET-CONDITION-7"]);
-    assert.equal(read?.history?.[0].stage, "Task Researcher");
+    assert.equal(read?.history?.[0].stage, "Squad Researcher");
   } finally {
     cleanup();
   }

@@ -83,6 +83,8 @@ Identify the architecturally significant decisions in the HLD and the diagrams t
 1. For each significant decision, name what the decision is and why it is significant. Common triggers include multi-region posture, identity model, data placement, network egress posture, and encryption boundary.
 2. Pair each trigger with a downstream agent the Coordinator can dispatch (see *Handoffs* below) and the payload that agent needs.
 
+When the request is to review an existing workload against the Well-Architected Framework rather than to author a new design, read the registered opt-in `azure-well-architected-review` skill and follow it. It is opt-in, so when it is absent, review against the WAF pillars from this charter's own knowledge and say in the response that the structured review workflow was unavailable. Its issue-creation step is an impactful action that belongs to `backlog-executor` behind the Impactful-Action Gate, never to this read-only role.
+
 ## Required Protocol
 
 1. Author the HLD before the LLD. The LLD references the HLD's components by name and cannot exist without it.
@@ -109,5 +111,5 @@ Return a structured payload to the Coordinator containing:
 
 Handoffs are advisory. The Squad Coordinator decides whether to dispatch any of these on the next turn, and only the Coordinator initiates dispatch.
 
-* `Arch Diagram Builder` (apm package `microsoft/hve-core-arch-diagram-builder`) consumes the `lld_table` and the `avm_modules_used` list to render an ASCII block diagram of the Azure architecture. Pass the LLD table verbatim plus the chosen `alz_pattern` so the rendered diagram preserves subscription and network boundaries.
+* Diagram rendering is owned by this charter through the `architecture-diagrams` skill (Mermaid or ASCII) or the `python-diagrams` skill (committed Azure-icon PNG and SVG). Render from the `lld_table` and the `avm_modules_used` list, preserving the chosen `alz_pattern` so subscription and network boundaries survive the rendering.
 * `ADR Creator` (apm package `microsoft/hve-core-adr-creation`) consumes the `asr_triggers` list and the relevant HLD slices to draft Architecture Decision Records via the `adr-author` skill. Pass each ASR trigger as a separate ADR seed with its decision context, the alternatives considered, and the chosen direction.

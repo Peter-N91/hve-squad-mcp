@@ -25,7 +25,7 @@ import { DelegatedCoordinator } from "../../src/engine/delegated.js";
 import { EmbeddedCoordinator } from "../../src/engine/embedded.js";
 import { EphemeralWorkspaceManager } from "../../src/engine/workspace.js";
 import { GateKeeper, TenantQuotaTracker } from "../../src/engine/gates.js";
-import { TASK_RESEARCHER_CHARTER } from "../../src/engine/embedded-roles.js";
+import { SQUAD_RESEARCHER_CHARTER } from "../../src/engine/embedded-roles.js";
 import type { AuthContext } from "../../src/auth/entra.js";
 import { MockModelBackend } from "./support/mock-backend.js";
 import {
@@ -51,8 +51,8 @@ const AUTH: AuthContext = {
 
 /** The structural sections the delegated charter intends for each dispatched role. */
 const EXPECTED_SECTIONS: Record<string, string[]> = {
-  "Task Researcher": ["## Summary", "## Key Findings", "## Open Questions"],
-  "Task Reviewer": ["## Verdict", "## Findings"],
+  "Squad Researcher": ["## Summary", "## Key Findings", "## Open Questions"],
+  "Squad Reviewer": ["## Verdict", "## Findings"],
 };
 
 const DRIFT_TOLERANCE = 0.05;
@@ -142,8 +142,8 @@ test("COST-4: the embedded system authority is the dispatched role's charter (no
   assert.equal(backend.callCount, 1);
   const system = backend.lastCall?.system ?? "";
   // The embedded system authority is EXACTLY the dispatched role's charter...
-  assert.equal(system, TASK_RESEARCHER_CHARTER);
-  assert.match(system, /Task Researcher/);
+  assert.equal(system, SQUAD_RESEARCHER_CHARTER);
+  assert.match(system, /Squad Researcher/);
   // ...and NOT the catch-all coordinator persona: the delegated path injects the
   // coordinator-only "Dispatch Discipline" block (see delegated.test.ts), which
   // the role charter never carries. (The charter naming the Squad Coordinator as

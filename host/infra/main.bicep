@@ -136,6 +136,12 @@ param enableMemoryAuto bool = false
 @description('Memory project partition used when a turn pins no federation sub-squad. Lower-kebab-case; server-controlled so continuity is reproducible.')
 param memoryDefaultProject string = 'default'
 
+@description('Persist the squad ledger (team.md, routing.md, state.json, the append-only logs, and each role\'s deliverable) as a browsable .copilot-tracking tree, and expose squad_history to read it back. Writes through the memory backend selected above, so the destination is chosen once. Requires enableMemory and enableMemoryAuto.')
+param enableArtifacts bool = false
+
+@description('Let a run the SERVER has proven advisory-only proceed without an out-of-band operator approval. Needed for Copilot Studio, which cannot reach /admin/approve. A destructive run, and any roster seeding backlog-executor, deployer, iac-author or azure-diagnose, still holds. Requires enableRemotePipeline.')
+param enableAdvisoryAutopilot bool = false
+
 @description('SharePoint document library / OneDrive drive id backing the "graph" memory backend. Required when memoryBackend is "graph".')
 param memoryGraphDriveId string = ''
 
@@ -201,6 +207,7 @@ var encryptionSecrets = !empty(runEncryptionKeyBase64)
   ? [ { name: 'run-encryption-key', value: runEncryptionKeyBase64 } ]
   : []
 var encryptionEnv = (enableRemotePipeline && !empty(runEncryptionKeyBase64))
+  // checkov:skip=CKV_SECRET_6:The high-entropy match is the NAME of an environment variable, not a secret. Its value is a secretRef into the Container App secret store, which is the pattern this check exists to encourage.
   ? [ { name: 'SQUAD_MCP_RUN_ENCRYPTION_KEY_B64', secretRef: 'run-encryption-key' } ]
   : []
 
@@ -252,6 +259,18 @@ var memoryEnv = enableMemory
       { name: 'SQUAD_MCP_MEMORY_AUTO_ENABLED', value: string(enableMemoryAuto) }
       { name: 'SQUAD_MCP_MEMORY_DEFAULT_PROJECT', value: memoryDefaultProject }
     ], memoryGraphEnv, memoryTargetsEnv, memoryOverflowEnv)
+  : []
+
+// The squad ledger writes through the memory store selected above, so it needs no
+// destination of its own; squad_history reads the same tree back.
+var artifactsEnv = (enableMemory && enableMemoryAuto && enableArtifacts)
+  ? [ { name: 'SQUAD_MCP_ENABLE_ARTIFACTS', value: 'true' } ]
+  : []
+
+// Releases the human gate for advisory-only runs. Narrowing, not an override:
+// the server still holds every destructive run and every impactful roster.
+var advisoryAutopilotEnv = (enableRemotePipeline && enableAdvisoryAutopilot)
+  ? [ { name: 'SQUAD_MCP_ADVISORY_AUTOPILOT_ENABLED', value: 'true' } ]
   : []
 
 // The memory broker shares the run-state encryption key: on the table backend it
@@ -379,7 +398,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             cpu: json('0.5')
             memory: '1Gi'
           }
-          env: concat(webBaseEnv, storageEnv, pipelineEnv, encryptionEnv, memoryEncryptionEnv, renderEnv, memoryEnv, businessEnv)
+          env: concat(webBaseEnv, storageEnv, pipelineEnv, encryptionEnv, memoryEncryptionEnv, renderEnv, memoryEnv, businessEnv, artifactsEnv, advisoryAutopilotEnv)
         }
       ]
       scale: {
@@ -555,7 +574,7 @@ resource workerJob 'Microsoft.App/jobs@2024-03-01' = if (enableWorker) {
             cpu: json('0.5')
             memory: '1Gi'
           }
-          env: concat(webBaseEnv, storageEnv, pipelineEnv, encryptionEnv, memoryEncryptionEnv, memoryEnv, [
+          env: concat(webBaseEnv, storageEnv, pipelineEnv, encryptionEnv, memoryEncryptionEnv, memoryEnv, artifactsEnv, advisoryAutopilotEnv, [
             { name: 'SQUAD_MCP_WORKER_ONCE', value: 'true' }
           ])
         }

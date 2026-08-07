@@ -28,6 +28,7 @@ import {
   SQUAD_STATUS_TOOL,
   SQUAD_RENDER_PPTX_TOOL,
   SQUAD_MEMORY_READ_TOOL,
+  SQUAD_HISTORY_TOOL,
   SQUAD_MEMORY_WRITE_TOOL,
   SQUAD_MEMORY_SYNC_TOOL,
   SQUAD_FEDERATE_TOOL,
@@ -44,6 +45,8 @@ import type { EmbeddedCoordinator } from "../engine/embedded.js";
 import type { PptxRenderService } from "../engine/render/pptx-render-service.js";
 import { SquadMemoryResourceProvider } from "../engine/squad-memory-resources.js";
 import { isSafeMemoryPath, type SquadMemoryStore } from "../engine/squad-memory-state.js";
+import { MemoryBackedArtifactStore } from "../engine/artifact-store.js";
+import { SquadHistory } from "../engine/squad-history.js";
 import {
   asTargetedStore,
   UnknownMemoryTargetError,
@@ -224,6 +227,49 @@ const SQUAD_MEMORY_READ_DESCRIPTOR = {
         description: "The logical memory path (e.g. 'state', 'decisions', 'history/<agent>').",
       },
       target: MEMORY_TARGET_PROPERTY,
+    },
+  },
+};
+
+/**
+ * Synthetic `tools/list` descriptor for reading a run's own history back.
+ *
+ * The memory tools read KEYS a caller must already know. This reads the TREE a
+ * run wrote — the plans, the PRD, the deck pointer, the backlog, the per-agent
+ * history — which is what makes a run auditable after the fact rather than only
+ * resumable. Deterministic: no model call, no impactful action.
+ */
+const SQUAD_HISTORY_DESCRIPTOR = {
+  name: SQUAD_HISTORY_TOOL,
+  title: "Squad History",
+  description:
+    "Browse and open what previous squad runs produced for a project: the squad " +
+    "state, each role's deliverables, and the per-agent history. Use op='index' for " +
+    "a compact picture of what exists, op='list' to enumerate a directory, and " +
+    "op='read' to open one artifact. Deterministic: no model call, no impactful action.",
+  inputSchema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["project"],
+    properties: {
+      project: {
+        type: "string",
+        pattern: MEMORY_PROJECT_PATTERN.source,
+        description: "The project namespace within your tenant (lowercase dns-ish label).",
+      },
+      op: {
+        type: "string",
+        enum: ["index", "list", "read"],
+        description: "index (default) summarizes; list enumerates a prefix; read opens one path.",
+      },
+      prefix: {
+        type: "string",
+        description: "For op='list': a directory such as '.copilot-tracking/plans'.",
+      },
+      path: {
+        type: "string",
+        description: "For op='read': the artifact path from a list result.",
+      },
     },
   },
 };
@@ -440,6 +486,8 @@ export interface HttpMcpHandlerDeps {
    * surface + memory tools are wired in later phases).
    */
   memoryStore?: SquadMemoryStore;
+  /** Whether the squad ledger is enabled, which is what `squad_history` reads. */
+  artifactsEnabled?: boolean;
   /**
    * Whether the business-facing tools (`squad_business_plan`, `squad_backlog`) are
    * served. Default FALSE. They are advisory (one embedded dispatch, no impactful
@@ -473,6 +521,12 @@ export class HttpMcpHandler {
    * transport uses in `server.ts`).
    */
   private readonly memoryResources?: SquadMemoryResourceProvider;
+  /**
+   * Read-only browsing over the `.copilot-tracking` tree a run wrote. Present
+   * only when the operator enabled the artifact ledger — without it there is no
+   * tree to browse, and advertising the tool would promise an empty answer.
+   */
+  private readonly history?: SquadHistory;
 
   constructor(deps: HttpMcpHandlerDeps) {
     this.router = deps.router;
@@ -489,6 +543,10 @@ export class HttpMcpHandler {
     this.memoryResources = deps.memoryStore
       ? new SquadMemoryResourceProvider(deps.memoryStore)
       : undefined;
+    this.history =
+      deps.artifactsEnabled && deps.memoryStore
+        ? new SquadHistory(new MemoryBackedArtifactStore(deps.memoryStore))
+        : undefined;
   }
 
   /**
@@ -648,9 +706,12 @@ export class HttpMcpHandler {
               // projection to the classified memory tools (advisory-only default
               // is byte-identical to before).
               ...(this.memoryBrokerEnabled
-                ? [SQUAD_MEMORY_READ_DESCRIPTOR, SQUAD_MEMORY_WRITE_DESCRIPTOR, SQUAD_MEMORY_SYNC_DESCRIPTOR].filter(
-                    (descriptor) => isMemoryExposed(descriptor.name),
-                  )
+                ? [
+                    SQUAD_MEMORY_READ_DESCRIPTOR,
+                    SQUAD_MEMORY_WRITE_DESCRIPTOR,
+                    SQUAD_MEMORY_SYNC_DESCRIPTOR,
+                    ...(this.history ? [SQUAD_HISTORY_DESCRIPTOR] : []),
+                  ].filter((descriptor) => isMemoryExposed(descriptor.name))
                 : []),
               // The business-facing tools appear ONLY when the operator enabled
               // them; the default remote surface is unchanged.
@@ -972,6 +1033,50 @@ export class HttpMcpHandler {
         };
       }
 
+      // squad_history reads the TREE rather than a key, so it is handled before
+      // the single-path guard below: `index` and `list` carry no `path` at all.
+      if (name === SQUAD_HISTORY_TOOL) {
+        if (!this.history) {
+          return {
+            status: 200,
+            headers: baseHeaders,
+            body: rpcError(message.id, -32601, `Unknown or unavailable tool: ${name}`),
+          };
+        }
+        const op = typeof record.op === "string" ? record.op : "index";
+        try {
+          if (op === "read") {
+            const artifact = await this.history.read(auth.tenantId, project, path);
+            return {
+              status: 200,
+              headers: baseHeaders,
+              body: artifact
+                ? rpcResult(message.id, { project, ...artifact })
+                : rpcError(message.id, -32602, `No artifact at '${path}' in project '${project}'.`),
+            };
+          }
+          if (op === "list") {
+            const prefix = typeof record.prefix === "string" ? record.prefix : undefined;
+            const entries = await this.history.list(auth.tenantId, project, prefix);
+            return {
+              status: 200,
+              headers: baseHeaders,
+              body: rpcResult(message.id, { project, prefix: prefix ?? null, entries }),
+            };
+          }
+          const index = await this.history.index(auth.tenantId, project);
+          return { status: 200, headers: baseHeaders, body: rpcResult(message.id, { project, ...index }) };
+        } catch (error) {
+          // An unsafe path is rejected by the store; never echo raw error text.
+          this.logger.error("squad history failed", { tool: name, op, error: String(error) });
+          return {
+            status: 200,
+            headers: baseHeaders,
+            body: rpcError(message.id, -32602, `${name} rejected the request (check 'path'/'prefix').`),
+          };
+        }
+      }
+
       if (!isSafeMemoryPath(path)) {
         return {
           status: 200,
@@ -979,7 +1084,6 @@ export class HttpMcpHandler {
           body: rpcError(message.id, -32602, `${name} requires a safe 'path' (no traversal).`),
         };
       }
-
       if (name === SQUAD_MEMORY_WRITE_TOOL) {
         const content = typeof record.content === "string" ? record.content : undefined;
         if (content === undefined) {

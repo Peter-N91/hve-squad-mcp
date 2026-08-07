@@ -438,6 +438,52 @@ taken from caller free text. Requires `SQUAD_MCP_ENABLE_MEMORY=true`; boot fails
 otherwise. When this is on, tell your Copilot Studio agent **not** to call the memory
 tools (remove the memory section from the generated agent instructions).
 
+### Optional: persist the squad ledger (`SQUAD_MCP_ENABLE_ARTIFACTS`)
+
+Auto-memory keeps three flat keys. That is continuity between two turns and nothing
+an operator can audit — you cannot open the PRD a run produced, or see which agent
+wrote what.
+
+Set `enableArtifacts=true` in `main.bicepparam` (requires `enableMemory` and
+`enableMemoryAuto`) and a run additionally writes a browsable `.copilot-tracking`
+tree:
+
+- `squad/team.md`, `squad/routing.md`, `squad/state.json` seeded on first use;
+- `squad/decisions.md` and `squad/notifications.md`, append-only;
+- `squad/history/<agent>.md` per agent and `squad/history/autopilot-run-<id>.md`
+  per run, each carrying a measured `#### Consumption` block;
+- `squad/consumption.md`, rebuilt from those blocks so earlier turns are never
+  dropped;
+- each role's deliverable under its roster Deliverable Root — `research/<date>/`,
+  `plans/`, `reviews/`, `ppt/<date>/<slug>/`, `docs/`, `outputs/`.
+
+It writes through the store `memoryBackend` already selected, so the destination is
+chosen once: `table` for Azure Table, `graph` for a SharePoint library your users can
+open directly, `file` for a single replica. The `squad_history` tool reads the tree
+back (`op=index` to summarize, `op=list` to enumerate, `op=read` to open one file),
+and the run index is injected into each new run as DATA so a follow-up turn resumes
+from what the project already holds.
+
+### Optional: let advisory runs proceed unattended (`SQUAD_MCP_ADVISORY_AUTOPILOT_ENABLED`)
+
+`squad_run` holds for an out-of-band approval at `/admin/approve`. A Copilot Studio
+agent cannot reach that endpoint, so without this setting every `product` run holds
+forever waiting for a human who is not in that loop.
+
+Set `enableAdvisoryAutopilot=true` (requires `enableRemotePipeline`) and the server
+releases the hold **only** for a run it has itself determined to be advisory-only —
+one whose seeded roster produces text into the tracking tree and touches nothing
+else. It is a narrowing of the gate, not an override:
+
+- a run flagged destructive still holds;
+- any roster seeding `backlog-executor`, `deployer`, `iac-author` or
+  `azure-diagnose` still holds, so `azure`, `operations` and `full` are unaffected;
+- `mode=autopilot` alone still releases nothing;
+- the determination comes from the server-resolved roster, never from `request`,
+  `context`, or model output.
+
+Leave it off if you want every pipeline run reviewed by an operator first.
+
 ### Optional: persist memory to SharePoint or OneDrive (`SQUAD_MCP_MEMORY_BACKEND=graph`)
 
 Set `enableMemory=true` and `memoryBackend='graph'` in `main.bicepparam`, plus

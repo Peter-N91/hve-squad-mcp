@@ -67,14 +67,17 @@ export function resolveSquadGithubRoot(fromPackageRoot = packageRoot()): string 
     "squad-routing.instructions.md",
   );
   const candidates = [
+    // The committed cast snapshot FIRST: it is the artifact this server ships and
+    // the one `snapshot:cast --check` verifies. Anything installed into this repo
+    // later (an `apm install` for a headless squad run, say) must not shadow it,
+    // or tests and the generator would validate the install instead of the bundle.
+    // It is absent in the container, where the bundle is COPYed to /app/.github and
+    // the package-root candidate below resolves it.
+    join(fromPackageRoot, "host", "cast", ".github"),
     join(repoRoot, "squad-src", ".github"),
     join(repoRoot, ".github"),
-    // Also allow the package root itself to host a `.github` (defensive).
+    // Also allow the package root itself to host a `.github` (the container layout).
     join(fromPackageRoot, ".github"),
-    // The committed cast snapshot bundled in this standalone repo (and COPYed to
-    // /app/.github in the container). Lets local dev/test/generate resolve the
-    // routing/roster instructions from the bundle without a squad-src checkout.
-    join(fromPackageRoot, "host", "cast", ".github"),
   ];
   for (const candidate of candidates) {
     if (existsSync(join(candidate, probe))) {
@@ -89,22 +92,20 @@ export function resolveSquadGithubRoot(fromPackageRoot = packageRoot()): string 
  * personas, in priority order, filtered to those that exist.
  *
  * Unlike {@link resolveSquadGithubRoot} (which keys off the routing-probe file),
- * this returns EVERY existing candidate because the two layouts differ in what
- * they contain: the authoring repo's `squad-src/.github/agents` holds only the
- * squad subfolder, while the deployed FLAT cast at `.github/agents` holds the
- * hero personas (Task Researcher / Task Reviewer). The from-disk persona loader
- * scans all candidates so it resolves real persona bytes in either layout and in
- * the bundled container path (`<packageRoot>/.github/agents`).
+ * this returns EVERY existing candidate because the layouts differ in what they
+ * contain. The persona loader scans them in order and takes the first `name:`
+ * match, so ORDER IS PRECEDENCE: the committed bundle comes first for the same
+ * reason as above — it is what ships, and nothing installed into this repo later
+ * should silently take its place.
  */
 export function resolveSquadAgentsRoots(fromPackageRoot = packageRoot()): string[] {
   const repoRoot = dirname(fromPackageRoot);
   const candidates = [
+    join(fromPackageRoot, "host", "cast", ".github", "agents"),
     join(repoRoot, "squad-src", ".github", "agents"),
     join(repoRoot, ".github", "agents"),
+    // The container layout: the bundle is COPYed to /app/.github/agents.
     join(fromPackageRoot, ".github", "agents"),
-    // The committed cast snapshot bundled in this standalone repo (and COPYed to
-    // /app/.github/agents in the container).
-    join(fromPackageRoot, "host", "cast", ".github", "agents"),
   ];
   const seen = new Set<string>();
   const roots: string[] = [];

@@ -37,7 +37,7 @@ export interface MockBackendOptions {
 
 /** Produce a deterministic, role-structured artifact from the system authority. */
 function roleArtifact(system: string): string {
-  if (system.includes("Task Researcher")) {
+  if (system.includes("Squad Researcher")) {
     return [
       "## Summary",
       "A concise, evidence-grounded research summary produced server-side.",
@@ -53,7 +53,7 @@ function roleArtifact(system: string): string {
       "- The explicit unknowns that remain.",
     ].join("\n");
   }
-  if (system.includes("Task Reviewer")) {
+  if (system.includes("Squad Reviewer")) {
     return [
       "## Verdict",
       "Approve-with-nits (deterministic mock verdict).",
