@@ -134,7 +134,7 @@ export const GATE_INSTRUCTIONS = [
   "referenced input file) and will lead to a plan, a build, or a deliverable,",
   "validate those inputs FIRST via the `intake-validator` role (resolved by",
   "input type: PRD -> PRD Quality Reviewer, BRD -> BRD Quality Reviewer,",
-  "assumption/scope pressure-test -> Task Challenger, else Product Manager",
+  "assumption/scope pressure-test -> Squad Challenger, else Product Manager",
   "Advisor). Record an `## Intake Readiness Verdict` (Ready / Ready-With-Gaps /",
   "Not-Ready) in `.copilot-tracking/squad/decisions.md`. On `Not-Ready`, run the",
   "bounded auto-remediation loop (dispatch `analyst`/`product-owner` to fill the",

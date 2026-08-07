@@ -4,7 +4,7 @@
  * The thin slice ran ONE server-side model dispatch per hero tool. This loop is
  * the next increment: it runs an ORDERED list of role personas as sequential
  * `ModelBackend.complete()` calls, threading each stage's output into the next as
- * DATA. For the spike the order is fixed (Task Researcher -> Task Reviewer); the
+ * DATA. For the spike the order is fixed (Squad Researcher -> Squad Reviewer); the
  * full routing/fan-out is a later increment (WI-04).
  *
  * It deliberately sequences plain completions rather than a native tool-calling

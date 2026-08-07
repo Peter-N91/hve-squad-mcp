@@ -33,9 +33,9 @@ Each per-role tool maps 1:1 to a routing-table intent row in `squad-routing.inst
 
 | Tool | Routing intent | Primary role | Tier |
 | --- | --- | --- | --- |
-| `squad_research` | research, investigate, explore | Task Researcher | auto |
-| `squad_plan` | plan, break down, sequence | Task Planner | confirm |
-| `squad_review` | review, validate, check quality (+ council go/no-go) | Task Reviewer (+ council) | auto / confirm |
+| `squad_research` | research, investigate, explore | Squad Researcher | auto |
+| `squad_plan` | plan, break down, sequence | Squad Lead | confirm |
+| `squad_review` | review, validate, check quality (+ council go/no-go) | Squad Reviewer (+ council) | auto / confirm |
 | `squad_architect` | architecture, system design, components | System Architecture Reviewer | auto |
 | `squad_run` | full classify-and-dispatch pipeline (catch-all) | Squad Coordinator | confirm + gates |
 | `squad_federate` | federation meta layer: route across named sub-squads (catch-all) | Squad Federation Coordinator | confirm + gates |
@@ -69,7 +69,7 @@ Federation is additive: on a plain repository (no `federation.md`) the `squad` i
 
 `hve-squad@0.10.3` added a conditional **intake gate**: when a run is grounded in requirement or input artifacts (a PRD, BRD, spec, user story, design doc, transcript, or a referenced file), the coordinator validates those inputs for completeness, clarity, testability, consistency, and scope **before** it plans or builds, recording an `## Intake Readiness Verdict` (`Ready`, `Ready-With-Gaps`, `Not-Ready`) in `decisions.md`. On `Not-Ready` it runs a bounded auto-remediation loop (dispatch the analyst/product-owner to fill the blocking gaps, then re-validate; capped at two cycles) and escalates when a gap needs a human decision.
 
-The server surfaces the gate in the **delegated (local VS Code)** path: the coordinator persona's gate context now instructs the host to run the intake gate ahead of the Implementation Gate whenever a request is requirements-driven. The gate maps to a new `intake-validator` role that reuses existing agents by input type (Product Manager Advisor by default; PRD/BRD Quality Reviewer; Task Challenger), shipped with the `product` and `full` profiles. The gate is conditional and additive &mdash; with no input artifacts in scope it is a silent no-op.
+The server surfaces the gate in the **delegated (local VS Code)** path: the coordinator persona's gate context now instructs the host to run the intake gate ahead of the Implementation Gate whenever a request is requirements-driven. The gate maps to a new `intake-validator` role that reuses existing agents by input type (Product Manager Advisor by default; PRD/BRD Quality Reviewer; Squad Challenger), shipped with the `product` and `full` profiles. The gate is conditional and additive &mdash; with no input artifacts in scope it is a silent no-op.
 
 Surfacing the intake gate as an explicit stage of the **embedded/advisory pipeline** (`squad_run`) is deferred to a later release, mirroring how the embedded federation pipeline was staged; the delegated path carries the full behavior today.
 

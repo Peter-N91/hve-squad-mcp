@@ -8,13 +8,13 @@ import { loadPersonaForRole, loadPersonaForRosterRole } from "../src/engine/pers
 import {
   resolvePersonaForRole,
   resolvePersonaForRosterRole,
-  TASK_RESEARCHER_CHARTER,
+  SQUAD_RESEARCHER_CHARTER,
 } from "../src/engine/embedded-roles.js";
 
-const REAL_BODY_MARKER = "REAL-PERSONA-BODY-MARKER: task researcher from disk.";
+const REAL_BODY_MARKER = "REAL-PERSONA-BODY-MARKER: squad researcher from disk.";
 const NON_HERO_MARKER = "REAL-PERSONA-BODY-MARKER: system architecture reviewer from disk.";
 
-/** Build a temp agents root containing a nested Task Researcher persona file. */
+/** Build a temp agents root containing a nested Squad Researcher persona file. */
 function makeCastFixture(): { root: string; cleanup: () => void } {
   const root = mkdtempSync(join(tmpdir(), "squad-cast-"));
   // Nested subdir proves recursive scanning (mirrors squad-src/.github/agents/squad).
@@ -22,11 +22,11 @@ function makeCastFixture(): { root: string; cleanup: () => void } {
   mkdirSync(nested, { recursive: true });
   const persona = [
     "---",
-    "name: Task Researcher",
+    "name: Squad Researcher",
     "applyTo:",
     "  - '**/*.ts'",
     "tools:",
-    "  - Researcher Subagent",
+    "  - RPI Researcher",
     "---",
     "",
     REAL_BODY_MARKER,
@@ -34,7 +34,7 @@ function makeCastFixture(): { root: string; cleanup: () => void } {
     "You investigate and frame findings.",
     "",
   ].join("\n");
-  writeFileSync(join(nested, "task-researcher.agent.md"), persona, "utf8");
+  writeFileSync(join(nested, "squad-researcher.agent.md"), persona, "utf8");
   // A NON-hero persona (no paraphrase fallback record) proves the loader is
   // general across the full cast, not limited to the two hero roles.
   const architect = [
@@ -60,13 +60,13 @@ function makeEmptyRoot(): { root: string; cleanup: () => void } {
 test("loadPersonaForRole returns the real body + parsed frontmatter when present", () => {
   const { root, cleanup } = makeCastFixture();
   try {
-    const record = loadPersonaForRole("Task Researcher", [root]);
-    assert.ok(record, "a record is resolved for Task Researcher");
-    assert.equal(record.role, "Task Researcher");
+    const record = loadPersonaForRole("Squad Researcher", [root]);
+    assert.ok(record, "a record is resolved for Squad Researcher");
+    assert.equal(record.role, "Squad Researcher");
     assert.match(record.charter, /REAL-PERSONA-BODY-MARKER/);
-    assert.notEqual(record.charter, TASK_RESEARCHER_CHARTER); // real bytes, not the paraphrase
+    assert.notEqual(record.charter, SQUAD_RESEARCHER_CHARTER); // real bytes, not the paraphrase
     assert.deepEqual(record.applyTo, ["**/*.ts"]);
-    assert.deepEqual(record.tools, ["Researcher Subagent"]);
+    assert.deepEqual(record.tools, ["RPI Researcher"]);
   } finally {
     cleanup();
   }
@@ -75,7 +75,7 @@ test("loadPersonaForRole returns the real body + parsed frontmatter when present
 test("loadPersonaForRole returns undefined when the cast is absent (no throw)", () => {
   const { root, cleanup } = makeEmptyRoot();
   try {
-    assert.equal(loadPersonaForRole("Task Researcher", [root]), undefined);
+    assert.equal(loadPersonaForRole("Squad Researcher", [root]), undefined);
   } finally {
     cleanup();
   }
@@ -93,7 +93,7 @@ test("loadPersonaForRole returns undefined for a role with no matching persona",
 test("resolvePersonaForRole prefers real bytes when present", () => {
   const { root, cleanup } = makeCastFixture();
   try {
-    const record = resolvePersonaForRole("Task Researcher", [root]);
+    const record = resolvePersonaForRole("Squad Researcher", [root]);
     assert.ok(record);
     assert.match(record.charter, /REAL-PERSONA-BODY-MARKER/);
   } finally {
@@ -104,9 +104,9 @@ test("resolvePersonaForRole prefers real bytes when present", () => {
 test("resolvePersonaForRole falls back to the paraphrase record when the cast is absent", () => {
   const { root, cleanup } = makeEmptyRoot();
   try {
-    const record = resolvePersonaForRole("Task Researcher", [root]);
+    const record = resolvePersonaForRole("Squad Researcher", [root]);
     assert.ok(record);
-    assert.equal(record.charter, TASK_RESEARCHER_CHARTER);
+    assert.equal(record.charter, SQUAD_RESEARCHER_CHARTER);
     assert.deepEqual(record.applyTo, []);
   } finally {
     cleanup();
@@ -150,7 +150,7 @@ test("loadPersonaForRosterRole maps a role KEY to an agent name then loads bytes
   const { root, cleanup } = makeCastFixture();
   const rosterMap = new Map<string, string>([
     ["architect", "System Architecture Reviewer"],
-    ["researcher", "Task Researcher"],
+    ["researcher", "Squad Researcher"],
   ]);
   try {
     const record = loadPersonaForRosterRole("architect", rosterMap, [root]);
@@ -167,7 +167,7 @@ test("resolvePersonaForRosterRole maps a role KEY and keeps the hero fallback", 
   const { root: emptyRoot, cleanup } = makeEmptyRoot();
   const rosterMap = new Map<string, string>([
     ["architect", "System Architecture Reviewer"],
-    ["researcher", "Task Researcher"],
+    ["researcher", "Squad Researcher"],
   ]);
   try {
     // Cast absent: a non-hero role key resolves to undefined...
@@ -175,7 +175,7 @@ test("resolvePersonaForRosterRole maps a role KEY and keeps the hero fallback", 
     // ...but a hero role key still resolves via the paraphrase fallback.
     const hero = resolvePersonaForRosterRole("researcher", rosterMap, [emptyRoot]);
     assert.ok(hero, "the hero role key resolves via the paraphrase fallback");
-    assert.equal(hero.charter, TASK_RESEARCHER_CHARTER);
+    assert.equal(hero.charter, SQUAD_RESEARCHER_CHARTER);
     // An unmapped role key returns undefined.
     assert.equal(resolvePersonaForRosterRole("unmapped-key", rosterMap, [emptyRoot]), undefined);
   } finally {

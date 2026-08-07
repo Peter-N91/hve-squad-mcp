@@ -125,7 +125,7 @@ function toMatchedRouting(tool: CatalogTool): MatchedRouting {
 }
 
 /** The spike catch-all pipeline: research then review, run server-side in order. */
-const SPIKE_PIPELINE_ROLES = ["Task Researcher", "Task Reviewer"] as const;
+const SPIKE_PIPELINE_ROLES = ["Squad Researcher", "Squad Reviewer"] as const;
 
 /** The federation meta tool id (catalog tool; gated + catch-all, like squad_run). */
 const FEDERATION_TOOL_ID = "squad_federate";
@@ -521,7 +521,7 @@ export class EmbeddedCoordinator {
   }
 
   /**
-   * Execute the spike catch-all pipeline (Task Researcher -> Task Reviewer) as a
+   * Execute the spike catch-all pipeline (Squad Researcher -> Squad Reviewer) as a
    * sequential in-process dispatch loop, inside one server-allocated ephemeral
    * workspace with guaranteed teardown (SEC-4). Personas are resolved from disk
    * (single-source invariant) with the paraphrase fallback. This is the pipeline

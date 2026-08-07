@@ -25,23 +25,39 @@ test("the drift check passes on the real catalog and deployed cast", () => {
 
 // `serverInfo.version` is what a host reports and an operator quotes in a support
 // thread, so a stale constant is a real (if quiet) defect: it had drifted from the
-// package version for several releases. The runtime image ships no package.json, so
-// the constant cannot be read from disk — this check is the guarantee instead.
-test("SERVER_VERSION matches the package version", () => {
+// package version for several releases because the bump workflow moved two of the
+// three files that carry it. The runtime image ships no package.json, so the
+// constant cannot be read from disk — this check is the guarantee instead, and
+// `npm run version:set` is the one writer that keeps all three in step.
+test("the release version is identical in package.json, the lockfile, and SERVER_VERSION", () => {
   const pkg = JSON.parse(readFileSync(join(packageRoot(), "package.json"), "utf8")) as {
     version: string;
+  };
+  const lock = JSON.parse(readFileSync(join(packageRoot(), "package-lock.json"), "utf8")) as {
+    version: string;
+    packages: Record<string, { version?: string }>;
   };
   assert.equal(
     SERVER_VERSION,
     pkg.version,
-    "bump SERVER_VERSION in src/server.ts whenever package.json version changes",
+    "src/server.ts SERVER_VERSION disagrees with package.json — run `npm run version:set`",
+  );
+  assert.equal(
+    lock.version,
+    pkg.version,
+    "package-lock.json disagrees with package.json — run `npm run version:set`",
+  );
+  assert.equal(
+    lock.packages[""].version,
+    pkg.version,
+    "the lockfile root package entry disagrees with package.json — run `npm run version:set`",
   );
 });
 
 test("known agents resolve the mapped roles and council members", () => {
-  assert.ok(inputs.knownAgents.has("Task Researcher"));
-  assert.ok(inputs.knownAgents.has("Task Planner"));
-  assert.ok(inputs.knownAgents.has("Task Reviewer"));
+  assert.ok(inputs.knownAgents.has("Squad Researcher"));
+  assert.ok(inputs.knownAgents.has("Squad Lead"));
+  assert.ok(inputs.knownAgents.has("Squad Reviewer"));
   assert.ok(inputs.knownAgents.has("System Architecture Reviewer"));
   assert.ok(inputs.knownAgents.has("Squad Coordinator"));
   assert.ok(inputs.knownAgents.has("Security Planner"));

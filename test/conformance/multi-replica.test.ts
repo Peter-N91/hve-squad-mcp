@@ -84,7 +84,7 @@ test("an approval on replica B releases a held run polled on replica A", async (
     // Replica A now observes the shared approval and drives the run to completion.
     const done = await a.engine.pollRun(runId, { auth: AUTH_A });
     assert.equal(done.outcome, "completed");
-    assert.match(done.artifact ?? "", /## Task Reviewer/);
+    assert.match(done.artifact ?? "", /## Squad Reviewer/);
     assert.ok(a.backend.calls >= 2, "the pipeline ran on replica A after the cross-replica approval");
   } finally {
     rmSync(dir, { recursive: true, force: true });

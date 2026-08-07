@@ -30,12 +30,12 @@ test("squad_research returns the persona + routing + framedRequest contract", as
   assert.match(result.systemPrompt, /Squad Coordinator/);
   assert.match(result.systemPrompt, /Dispatch Discipline/);
   // matchedRouting reflects the catalog row.
-  assert.equal(result.matchedRouting.role, "Task Researcher");
+  assert.equal(result.matchedRouting.role, "Squad Researcher");
   assert.equal(result.matchedRouting.routingIntent, "research, investigate, explore, find out");
   assert.equal(result.matchedRouting.tier, "auto");
   assert.equal(result.matchedRouting.parallelEligible, true);
   // framedRequest names the role and carries the request verbatim.
-  assert.match(result.framedRequest, /Task Researcher/);
+  assert.match(result.framedRequest, /Squad Researcher/);
   assert.match(result.framedRequest, /Research caching options for our API/);
   // stateContext points at the squad state root.
   assert.match(result.stateContext, /\.copilot-tracking\/squad\//);

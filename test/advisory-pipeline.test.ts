@@ -57,15 +57,15 @@ const personaStage = (role: string, marker: string, backlog = false): AdvisorySt
 /** The five-stage full advisory plan: research -> plan -> council -> review -> backlog. */
 function fullAdvisoryPlan(): AdvisoryStagePlan[] {
   return [
-    personaStage("Task Researcher", "RESEARCH"),
-    personaStage("Task Planner", "PLAN"),
+    personaStage("Squad Researcher", "RESEARCH"),
+    personaStage("Squad Lead", "PLAN"),
     {
       kind: "council",
       role: "Council Verdict",
       members: [persona("architect", "ARCH"), persona("security", "SEC"), persona("cost-manager", "COST"), persona("product-owner", "PO")],
     },
-    personaStage("Task Reviewer", "REVIEW"),
-    personaStage("ADO Backlog Manager", "BACKLOG", true),
+    personaStage("Squad Reviewer", "REVIEW"),
+    personaStage("GitHub Backlog Manager", "BACKLOG", true),
   ];
 }
 
@@ -105,12 +105,12 @@ test("mode=autopilot runs the full routed advisory sequence to one compiled arti
 
   // All stage sections are present, in order.
   const a = result.artifact;
-  assert.match(a, /## Task Researcher/);
-  assert.match(a, /## Task Planner/);
+  assert.match(a, /## Squad Researcher/);
+  assert.match(a, /## Squad Lead/);
   assert.match(a, /## Council Verdict/);
-  assert.match(a, /## Task Reviewer/);
-  assert.match(a, /## ADO Backlog Manager/);
-  const order = ["## Task Researcher", "## Task Planner", "## Council Verdict", "## Task Reviewer", "## ADO Backlog Manager"].map(
+  assert.match(a, /## Squad Reviewer/);
+  assert.match(a, /## GitHub Backlog Manager/);
+  const order = ["## Squad Researcher", "## Squad Lead", "## Council Verdict", "## Squad Reviewer", "## GitHub Backlog Manager"].map(
     (h) => a.indexOf(h),
   );
   assert.deepEqual(order, [...order].sort((x, y) => x - y));
@@ -141,8 +141,8 @@ test("a Stop council verdict halts the advisory pipeline before review/backlog r
   // research + plan + 4 council members = 6; review + backlog NEVER dispatched.
   assert.equal(backend.calls, 6);
   assert.equal(result.stages.length, 3);
-  assert.doesNotMatch(result.artifact, /## Task Reviewer/);
-  assert.doesNotMatch(result.artifact, /## ADO Backlog Manager/);
+  assert.doesNotMatch(result.artifact, /## Squad Reviewer/);
+  assert.doesNotMatch(result.artifact, /## GitHub Backlog Manager/);
   // The compiled artifact ends with the council verdict.
   assert.ok(result.artifact.trimEnd().endsWith("Permits Implementation Dispatch: no (Stop)"));
 });
@@ -152,7 +152,7 @@ test("interactive mode returns after each stage and resumes to completion", asyn
     { match: "RESEARCH-CHARTER", text: "research findings" },
     { match: "PLAN-CHARTER", text: "the plan" },
   ]);
-  const plan = [personaStage("Task Researcher", "RESEARCH"), personaStage("Task Planner", "PLAN")];
+  const plan = [personaStage("Squad Researcher", "RESEARCH"), personaStage("Squad Lead", "PLAN")];
 
   const first = await runAdvisoryPipeline({ toolId: "squad_run", request: "look into caching" }, { backend }, { plan, mode: "interactive" });
   assert.equal(first.outcome, "paused");
@@ -169,8 +169,8 @@ test("interactive mode returns after each stage and resumes to completion", asyn
   assert.equal(second.outcome, "completed");
   assert.equal(backend.calls, 2);
   assert.equal(second.stages.length, 2);
-  assert.match(second.artifact, /## Task Researcher/);
-  assert.match(second.artifact, /## Task Planner/);
+  assert.match(second.artifact, /## Squad Researcher/);
+  assert.match(second.artifact, /## Squad Lead/);
 });
 
 test("SEC-5: injected 'ignore instructions / auto-approve' never enters a stage system authority", async () => {
@@ -204,14 +204,14 @@ test("the final hold withholds the compiled artifact for human approval", async 
       backend,
       finalHold: { shouldHold: () => true, reason: "final_advisory_hold", approvalRequest: "operator must release" },
     },
-    { plan: [personaStage("Task Researcher", "RESEARCH")], mode: "autopilot" },
+    { plan: [personaStage("Squad Researcher", "RESEARCH")], mode: "autopilot" },
   );
 
   assert.equal(result.outcome, "held");
   assert.equal(result.reason, "final_advisory_hold");
   assert.equal(result.approvalRequest, "operator must release");
   // The artifact is still compiled (it is withheld, not lost).
-  assert.match(result.artifact, /## Task Researcher/);
+  assert.match(result.artifact, /## Squad Researcher/);
 });
 
 // ---------------------------------------------------------------------------
@@ -224,12 +224,12 @@ function makeAdvisoryCastFixture(): { root: string; cleanup: () => void } {
   mkdirSync(root, { recursive: true });
   const write = (file: string, name: string): void =>
     writeFileSync(join(root, file), ["---", `name: ${name}`, "---", "", `${name} body.`, ""].join("\n"), "utf8");
-  write("task-researcher.agent.md", "Task Researcher");
-  write("task-planner.agent.md", "Task Planner");
-  write("task-reviewer.agent.md", "Task Reviewer");
+  write("squad-researcher.agent.md", "Squad Researcher");
+  write("squad-lead.agent.md", "Squad Lead");
+  write("squad-reviewer.agent.md", "Squad Reviewer");
   write("council-a.agent.md", "Council Member A");
   write("council-b.agent.md", "Council Member B");
-  write("ado-backlog-manager.agent.md", "ADO Backlog Manager");
+  write("github-backlog-manager.agent.md", "GitHub Backlog Manager");
   return { root, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
@@ -238,23 +238,23 @@ test("planAdvisoryStages interleaves the council and appends backlog-handoff for
   try {
     const routePlan: RoutePlan = {
       stages: [
-        { role: "researcher", agentName: "Task Researcher", tier: "auto", parallelEligible: true },
-        { role: "lead", agentName: "Task Planner", tier: "confirm", parallelEligible: false },
-        { role: "tester", agentName: "Task Reviewer", tier: "auto", parallelEligible: true },
+        { role: "researcher", agentName: "Squad Researcher", tier: "auto", parallelEligible: true },
+        { role: "lead", agentName: "Squad Lead", tier: "confirm", parallelEligible: false },
+        { role: "tester", agentName: "Squad Reviewer", tier: "auto", parallelEligible: true },
       ],
       council: { engaged: true, members: ["Council Member A", "Council Member B"] },
     };
-    const rosterMap = new Map([["product-owner", "ADO Backlog Manager"]]);
+    const rosterMap = new Map([["product-owner", "GitHub Backlog Manager"]]);
     const ordered = planAdvisoryStages(routePlan, [root], rosterMap);
 
     assert.deepEqual(
       ordered.map((s) => `${s.kind}:${s.role}`),
       [
-        "persona:Task Researcher",
-        "persona:Task Planner",
+        "persona:Squad Researcher",
+        "persona:Squad Lead",
         "council:Council Verdict",
-        "persona:Task Reviewer",
-        "persona:ADO Backlog Manager",
+        "persona:Squad Reviewer",
+        "persona:GitHub Backlog Manager",
       ],
     );
     assert.equal(ordered[2].members?.length, 2);
@@ -268,11 +268,11 @@ test("planAdvisoryStages keeps a research-only route to a single research stage"
   const { root, cleanup } = makeAdvisoryCastFixture();
   try {
     const routePlan: RoutePlan = {
-      stages: [{ role: "researcher", agentName: "Task Researcher", tier: "auto", parallelEligible: true }],
+      stages: [{ role: "researcher", agentName: "Squad Researcher", tier: "auto", parallelEligible: true }],
       council: { engaged: false, members: [] },
     };
     const ordered = planAdvisoryStages(routePlan, [root], new Map());
-    assert.deepEqual(ordered.map((s) => `${s.kind}:${s.role}`), ["persona:Task Researcher"]);
+    assert.deepEqual(ordered.map((s) => `${s.kind}:${s.role}`), ["persona:Squad Researcher"]);
   } finally {
     cleanup();
   }
@@ -328,7 +328,7 @@ test("an async advisory run persists each stage as it completes; a status read r
     assert.equal(final?.councilVerdict?.class, "Go");
     assert.match(final?.councilVerdict?.rendered ?? "", /## Council Verdict/);
     const compiled = compilePersistedStages(final!.stages!);
-    for (const heading of ["## Task Researcher", "## Task Planner", "## Council Verdict", "## Task Reviewer", "## ADO Backlog Manager"]) {
+    for (const heading of ["## Squad Researcher", "## Squad Lead", "## Council Verdict", "## Squad Reviewer", "## GitHub Backlog Manager"]) {
       assert.ok(compiled.includes(heading), `compiled artifact includes ${heading}`);
     }
   } finally {

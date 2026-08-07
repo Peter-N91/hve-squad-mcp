@@ -18,23 +18,23 @@ import {
 // ---------------------------------------------------------------------------
 const FIXTURE_TABLES: RoutingTables = {
   intents: [
-    { patterns: ["research", "investigate", "explore", "find out"], roles: ["task researcher"], tier: "auto", parallelEligible: true },
-    { patterns: ["plan", "break down", "sequence", "design plan"], roles: ["task planner"], tier: "confirm", parallelEligible: false },
-    { patterns: ["implement", "build", "code", "fix"], roles: ["task implementor"], tier: "confirm", parallelEligible: false },
-    { patterns: ["review", "validate", "check quality"], roles: ["task reviewer"], tier: "auto", parallelEligible: true },
+    { patterns: ["research", "investigate", "explore", "find out"], roles: ["squad researcher"], tier: "auto", parallelEligible: true },
+    { patterns: ["plan", "break down", "sequence", "design plan"], roles: ["squad lead"], tier: "confirm", parallelEligible: false },
+    { patterns: ["implement", "build", "code", "fix"], roles: ["squad implementor"], tier: "confirm", parallelEligible: false },
+    { patterns: ["review", "validate", "check quality"], roles: ["squad reviewer"], tier: "auto", parallelEligible: true },
     { patterns: ["security", "threat", "vulnerability", "stride"], roles: ["security planner"], tier: "confirm", parallelEligible: true },
     { patterns: ["architecture", "system design", "components"], roles: ["system architecture reviewer"], tier: "auto", parallelEligible: true },
     { patterns: ["responsible ai", "rai", "fairness", "harm"], roles: ["rai planner"], tier: "confirm", parallelEligible: true },
   ],
   rosterMap: new Map<string, string>([
-    ["researcher", "Task Researcher"],
-    ["lead", "Task Planner"],
-    ["developer", "Task Implementor"],
-    ["tester", "Task Reviewer"],
+    ["researcher", "Squad Researcher"],
+    ["lead", "Squad Lead"],
+    ["developer", "Squad Implementor"],
+    ["tester", "Squad Reviewer"],
     ["architect", "System Architecture Reviewer"],
     ["security", "Security Planner"],
     ["cost-manager", "Squad Cost Manager"],
-    ["product-owner", "ADO Backlog Manager"],
+    ["product-owner", "GitHub Backlog Manager"],
     ["rai", "RAI Planner"],
   ]),
 };
@@ -43,7 +43,7 @@ test("a research-type request routes to a single researcher stage", () => {
   const plan = computeRoutePlan("research caching options for the API", {}, FIXTURE_TABLES);
   assert.equal(plan.stages.length, 1);
   assert.equal(plan.stages[0].role, "researcher");
-  assert.equal(plan.stages[0].agentName, "Task Researcher");
+  assert.equal(plan.stages[0].agentName, "Squad Researcher");
   assert.equal(plan.stages[0].tier, "auto");
   assert.equal(plan.stages[0].parallelEligible, true);
   assert.equal(plan.council.engaged, false);
@@ -58,7 +58,7 @@ test("a full advisory request routes research -> plan -> review", () => {
   );
   assert.deepEqual(
     plan.stages.map((s) => s.agentName),
-    ["Task Researcher", "Task Planner", "Task Reviewer"],
+    ["Squad Researcher", "Squad Lead", "Squad Reviewer"],
   );
   // Per-stage tier/parallel come from the routing rows.
   assert.deepEqual(
@@ -84,7 +84,7 @@ test("council engages when the request crosses two or more council domains", () 
     "System Architecture Reviewer",
     "Security Planner",
     "Squad Cost Manager",
-    "ADO Backlog Manager",
+    "GitHub Backlog Manager",
   ]);
 });
 
@@ -143,8 +143,8 @@ test("parse helpers accept raw markdown directly (mirrors the generator parser)"
   const routingMd = [
     "| Pattern / Keyword | Role(s) | Autonomy Tier | Parallel-Eligible |",
     "|---|---|---|---|",
-    "| research, investigate | Task Researcher | auto | yes |",
-    "| plan, sequence | Task Planner | confirm | no |",
+    "| research, investigate | Squad Researcher | auto | yes |",
+    "| plan, sequence | Squad Lead | confirm | no |",
   ].join("\n");
   const intents = parseRoutingIntents(routingMd);
   assert.equal(intents.length, 2);
@@ -154,27 +154,27 @@ test("parse helpers accept raw markdown directly (mirrors the generator parser)"
   const rosterMd = [
     "| Role | Primary Agent (`name:`) | Alternate Agents (`name:`) | Selection Cue |",
     "|---|---|---|---|",
-    "| lead | Task Planner | RPI Agent | plan |",
+    "| lead | Squad Lead | RPI Planner | plan |",
     "| devrel | — | — | Thin charter needed |",
   ].join("\n");
   const map = parseRosterMap(rosterMd);
-  assert.equal(map.get("lead"), "Task Planner");
+  assert.equal(map.get("lead"), "Squad Lead");
   assert.equal(map.has("devrel"), false, "thin-charter roles are skipped");
 });
 
 test("loadRosterMap resolves role keys to roster Primary agents", () => {
   const map = loadRosterMap();
   assert.equal(map.get("architect"), "System Architecture Reviewer");
-  assert.equal(map.get("tester"), "Task Reviewer");
-  assert.equal(map.get("lead"), "Task Planner");
-  assert.equal(map.get("researcher"), "Task Researcher");
+  assert.equal(map.get("tester"), "Squad Reviewer");
+  assert.equal(map.get("lead"), "Squad Lead");
+  assert.equal(map.get("researcher"), "Squad Researcher");
 });
 
 test("route() over the real instructions classifies a research request to one stage", () => {
   const plan = route("investigate the current caching layer");
   assert.equal(plan.stages.length, 1);
   assert.equal(plan.stages[0].role, "researcher");
-  assert.equal(plan.stages[0].agentName, "Task Researcher");
+  assert.equal(plan.stages[0].agentName, "Squad Researcher");
 });
 
 test("route() over the real instructions classifies a multi-domain request with council", () => {

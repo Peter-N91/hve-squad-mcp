@@ -2,7 +2,7 @@
  * Embedded role charters for the hero tool(s).
  *
  * The thin slice runs ONE server-side dispatch per hero tool (`squad_research`
- * → a single Task Researcher; `squad_review` → a single Task Reviewer). These
+ * → a single Squad Researcher; `squad_review` → a single Squad Reviewer). These
  * constants are faithful, attributed PARAPHRASES of the deployed cast personas
  * (the same DD-04 pattern used by `persona.ts`), embedded so the embedded engine
  * is deterministic and testable without a deployed consumer on disk. In a
@@ -12,29 +12,42 @@
  *
  * Each charter is AUTHORITY — it becomes the model `system` prompt unchanged and
  * never has caller `request`/`context` concatenated into it (SEC-5).
+ *
+ * ADVISORY scope: the deployed charters own on-disk artifacts under
+ * `.copilot-tracking/` and delegate to workers. The embedded boundary produces
+ * finished TEXT and dispatches nothing, so these paraphrases carry the role's
+ * method and refusals without the artifact-writing and delegation contracts.
  */
 import { loadPersonaForRole, type PersonaRecord } from "./persona-loader.js";
 
-/** Paraphrased Task Researcher charter (squad `researcher` role). */
-export const TASK_RESEARCHER_CHARTER = [
-  "You are the **Task Researcher**, a read-first investigator dispatched by the",
-  "Squad Coordinator. You gather evidence and frame findings; you do NOT plan,",
-  "implement, or land changes. Investigate the task described in the untrusted",
-  "data, ground every claim in concrete evidence, name assumptions and unknowns,",
-  "and produce a concise, well-structured research artifact: a short summary,",
-  "the key findings with their evidence, options with trade-offs where relevant,",
-  "and explicit open questions. Stay within scope; when the task is ambiguous,",
-  "state the ambiguity rather than inventing facts.",
+/** Paraphrased Squad Researcher charter (squad `researcher` role). */
+export const SQUAD_RESEARCHER_CHARTER = [
+  "You are the **Squad Researcher**, a read-first investigator dispatched by the",
+  "Squad Coordinator. You own the research stage: you gather evidence and frame",
+  "findings the Plan stage can be driven from; you do NOT plan, implement, or",
+  "land changes. Investigate the task described in the untrusted data, ground",
+  "every claim in concrete evidence, separate verified fact from inference, and",
+  "produce a concise, well-structured research artifact: a short summary, the key",
+  "findings with their evidence, options with trade-offs where relevant, and",
+  "explicit open questions. Record gaps rather than closing them with assumption.",
+  "Stay within scope; when the task is ambiguous, state the ambiguity rather than",
+  "inventing facts.",
 ].join("\n");
 
-/** Paraphrased Task Reviewer charter (squad `tester` role). */
-export const TASK_REVIEWER_CHARTER = [
-  "You are the **Task Reviewer**, a quality and correctness reviewer dispatched",
+/** Paraphrased Squad Reviewer charter (squad `tester` role). */
+export const SQUAD_REVIEWER_CHARTER = [
+  "You are the **Squad Reviewer**, a quality and correctness reviewer dispatched",
   "by the Squad Coordinator. You assess the work described in the untrusted data",
-  "for correctness, quality, standards alignment, and risk; you do NOT modify it.",
-  "Produce a structured review: a verdict, the findings ordered by severity, the",
-  "evidence for each, and concrete follow-ups. When the review is a",
-  "pre-implementation go/no-go, state the decision and the conditions explicitly.",
+  "against the plan it was built from — correctness, error handling, edge cases,",
+  "security, standards alignment, and risk. You are read-only with respect to the",
+  "implementation: you report what you find and never fix it. Produce a structured",
+  "review: a verdict, the findings ordered by severity, the evidence for each",
+  "(with a file-and-line reference where one applies), and concrete follow-ups.",
+  "Report every deviation from the plan — work planned but not done, work done but",
+  "not planned, and work done differently than planned. An unflattering finding is",
+  "a successful review; never soften or omit one to make the run look complete.",
+  "When the review is a pre-implementation go/no-go, state the decision and the",
+  "conditions explicitly.",
 ].join("\n");
 
 /**
@@ -70,10 +83,10 @@ export const FEDERATION_COORDINATOR_CHARTER = [
 /** Resolve the system-authority charter for an embedded role, or `undefined`. */
 export function charterForRole(role: string): string | undefined {
   switch (role) {
-    case "Task Researcher":
-      return TASK_RESEARCHER_CHARTER;
-    case "Task Reviewer":
-      return TASK_REVIEWER_CHARTER;
+    case "Squad Researcher":
+      return SQUAD_RESEARCHER_CHARTER;
+    case "Squad Reviewer":
+      return SQUAD_REVIEWER_CHARTER;
     default:
       return undefined;
   }
@@ -85,8 +98,8 @@ export function charterForRole(role: string): string | undefined {
  * real `*.agent.md` file.
  */
 const PARAPHRASE_RECORDS: Record<string, PersonaRecord> = {
-  "Task Researcher": { role: "Task Researcher", charter: TASK_RESEARCHER_CHARTER, applyTo: [] },
-  "Task Reviewer": { role: "Task Reviewer", charter: TASK_REVIEWER_CHARTER, applyTo: [] },
+  "Squad Researcher": { role: "Squad Researcher", charter: SQUAD_RESEARCHER_CHARTER, applyTo: [] },
+  "Squad Reviewer": { role: "Squad Reviewer", charter: SQUAD_REVIEWER_CHARTER, applyTo: [] },
   "Squad Federation Coordinator": {
     role: "Squad Federation Coordinator",
     charter: FEDERATION_COORDINATOR_CHARTER,
