@@ -75,6 +75,10 @@ export interface AdvisoryStagePlan {
   members?: PersonaRecord[];
   /** True when this persona stage is the appended backlog-handoff. */
   backlog?: boolean;
+  /** True when this is the pre-work intake readiness gate. */
+  intake?: boolean;
+  /** The roster role KEY, for a stage that owns a deliverable root. */
+  roleKey?: string;
 }
 
 /** The result of one executed advisory stage. */
@@ -227,11 +231,15 @@ function resolveBacklogPersona(
 
 /**
  * Resolve a routed {@link RoutePlan} into the ordered advisory execution plan:
- * research -> plan -> [council] -> review -> backlog-handoff. The council is
- * interleaved between plan and review only when engaged; the backlog-handoff is
- * appended only for a full advisory route (a research-only route stays a single
- * research stage). Stages whose persona cannot be resolved are dropped (never a
- * silent wrong persona).
+ * [intake] -> research -> plan -> [council] -> [deliverable fan-out] -> review
+ * -> backlog-handoff.
+ *
+ * The intake gate is prepended only for a profile that seeds `intake-validator`
+ * (`product`, `full`); the council is interleaved between plan and review only
+ * when engaged; the fan-out replaces the single Implement stage for a profile
+ * carrying two or more deliverable-producing roles. A research-only route stays
+ * a single research stage. Stages whose persona cannot be resolved are dropped
+ * (never a silent wrong persona).
  */
 export function planAdvisoryStages(
   plan: RoutePlan,
@@ -240,27 +248,39 @@ export function planAdvisoryStages(
 ): AdvisoryStagePlan[] {
   const ordered: AdvisoryStagePlan[] = [];
 
+  // The readiness gate runs BEFORE any downstream role is dispatched.
+  if (plan.intake) {
+    const intakePersona = resolvePersonaForRole(plan.intake.agentName, roots);
+    if (intakePersona) {
+      ordered.push({
+        ...personaStage(intakePersona),
+        intake: true,
+        roleKey: plan.intake.role,
+      });
+    }
+  }
+
   // Research-only route: a single research stage, no council, no backlog.
   if (plan.stages.length <= 1) {
     const first = plan.stages[0];
     const persona = first ? resolvePersonaForRole(first.agentName, roots) : undefined;
     if (persona) {
-      ordered.push(personaStage(persona));
+      ordered.push({ ...personaStage(persona), roleKey: first.role });
     }
     return ordered;
   }
 
-  // Full advisory route: research -> plan -> [council] -> review -> backlog.
+  // Full advisory route: research -> plan -> [council] -> [fan-out] -> review -> backlog.
   const [research, planStage, review] = plan.stages;
 
   const researchPersona = resolvePersonaForRole(research.agentName, roots);
   if (researchPersona) {
-    ordered.push(personaStage(researchPersona));
+    ordered.push({ ...personaStage(researchPersona), roleKey: research.role });
   }
 
   const planPersona = resolvePersonaForRole(planStage.agentName, roots);
   if (planPersona) {
-    ordered.push(personaStage(planPersona));
+    ordered.push({ ...personaStage(planPersona), roleKey: planStage.role });
   }
 
   if (plan.council.engaged) {
@@ -270,14 +290,27 @@ export function planAdvisoryStages(
     }
   }
 
-  const reviewPersona = resolvePersonaForRole(review.agentName, roots);
-  if (reviewPersona) {
-    ordered.push(personaStage(reviewPersona));
+  // Deliverable fan-out: the profile's specialists each own a distinct artifact.
+  const fannedOutRoles = new Set<string>();
+  for (const stage of plan.fanOut) {
+    const persona = resolvePersonaForRole(stage.agentName, roots);
+    if (persona) {
+      ordered.push({ ...personaStage(persona), roleKey: stage.role });
+      fannedOutRoles.add(stage.role);
+    }
   }
 
-  const backlogPersona = resolveBacklogPersona(roots, rosterMap);
-  if (backlogPersona) {
-    ordered.push(personaStage(backlogPersona, true));
+  const reviewPersona = resolvePersonaForRole(review.agentName, roots);
+  if (reviewPersona) {
+    ordered.push({ ...personaStage(reviewPersona), roleKey: review.role });
+  }
+
+  // The fan-out already dispatched product-owner; a second pass would duplicate it.
+  if (!fannedOutRoles.has(BACKLOG_ROLE_KEY)) {
+    const backlogPersona = resolveBacklogPersona(roots, rosterMap);
+    if (backlogPersona) {
+      ordered.push({ ...personaStage(backlogPersona, true), roleKey: BACKLOG_ROLE_KEY });
+    }
   }
 
   return ordered;
@@ -286,6 +319,30 @@ export function planAdvisoryStages(
 /** Compile the accumulated stage sections into one artifact. */
 function compileArtifact(stages: AdvisoryStageResult[]): string {
   return stages.map((stage) => stage.section).join("\n\n");
+}
+
+/** The three verdicts the intake gate may return. */
+export type IntakeVerdict = "Ready" | "Ready-With-Gaps" | "Not-Ready";
+
+/**
+ * Read the intake validator's verdict out of its completion.
+ *
+ * `squad-intake-gate.instructions.md` fixes the line as `Verdict: <value>`, so
+ * this looks for exactly that rather than pattern-matching prose. An unreadable
+ * verdict is treated as `Ready-With-Gaps`: a malformed line is a reporting fault,
+ * and halting a run on it would make the gate less reliable than no gate, while
+ * silently reading it as `Ready` would defeat the check.
+ */
+export function intakeVerdictOf(text: string): IntakeVerdict {
+  const raw = text.match(/^\s*[*-]?\s*verdict\s*:\s*(ready-with-gaps|not-ready|ready)\b/im)?.[1];
+  switch (raw?.toLowerCase()) {
+    case "not-ready":
+      return "Not-Ready";
+    case "ready":
+      return "Ready";
+    default:
+      return "Ready-With-Gaps";
+  }
 }
 
 /** Collect the per-stage usage list from accumulated results. */
@@ -413,6 +470,21 @@ export async function runAdvisoryPipeline(
 
       // Phase 4 — persist the completed stage section (durable/async run only).
       await deps.persistence?.recordStage({ role: stage.role, artifact: result.section });
+
+      // The intake gate is a PRE-work readiness check: a Not-Ready verdict must
+      // stop the run rather than let downstream roles build on inputs the
+      // validator just judged unusable (`squad-intake-gate.instructions.md`).
+      if (stage.intake && intakeVerdictOf(completion.text) === "Not-Ready") {
+        return {
+          outcome: "halted",
+          artifact: compileArtifact(stages),
+          stages,
+          councilVerdict,
+          usage: collectUsage(stages),
+          costUsd: deps.costLedger?.spentUsd() ?? 0,
+          reason: "intake_not_ready",
+        };
+      }
     }
 
     // Interactive mode returns after each stage with a resume token.

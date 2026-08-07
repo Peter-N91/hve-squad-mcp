@@ -196,6 +196,18 @@ export interface OperatorConfig {
    */
   memoryDefaultProject: string;
   /**
+   * Whether a run PERSISTS the squad ledger — `team.md`, `routing.md`,
+   * `state.json`, the append-only logs, and each role's deliverable — as a
+   * browsable `.copilot-tracking` tree, and exposes `squad_history` to read it
+   * back. Off by default.
+   *
+   * It writes through whichever store {@link memoryBackend} already selected, so
+   * an operator chooses the destination once: `file` for a single replica,
+   * `table` for multi-replica, `graph` for a SharePoint library humans can open
+   * directly. Requires {@link enableMemory} — there is no store otherwise.
+   */
+  enableArtifacts: boolean;
+  /**
    * The SharePoint document library / OneDrive drive id backing the `graph`
    * memory backend. Required when `memoryBackend === "graph"`.
    */
@@ -451,6 +463,14 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
     );
   }
 
+  const enableArtifacts = (env.SQUAD_MCP_ENABLE_ARTIFACTS ?? "").trim().toLowerCase() === "true";
+  if (enableArtifacts && !enableMemory) {
+    throw new Error(
+      "SQUAD_MCP_ENABLE_ARTIFACTS=true requires SQUAD_MCP_ENABLE_MEMORY=true " +
+        "(the squad ledger is written through the configured memory store).",
+    );
+  }
+
   const enableBusinessTools =
     (env.SQUAD_MCP_ENABLE_BUSINESS_TOOLS ?? "").trim().toLowerCase() === "true";
   if (enableBusinessTools && modelEndpoint.length === 0) {
@@ -521,6 +541,7 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
     memoryOverflowThresholdBytes,
     memoryAutoEnabled,
     memoryDefaultProject,
+    enableArtifacts,
     memoryGraphDriveId,
     memoryGraphRootPath,
     memoryGraphEndpoint,
