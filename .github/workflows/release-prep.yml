@@ -1,0 +1,99 @@
+# Assemble the changelog and bump the version, on `main` only.
+#
+# Triggered when a pull request lands a fragment. It consumes every pending
+# fragment, writes the CHANGELOG section, moves the version through
+# `scripts/set-version.ts` (so package.json, package-lock.json, and
+# SERVER_VERSION cannot drift apart), commits, and dispatches release.yml.
+#
+# The dispatch is explicit because a push authored with GITHUB_TOKEN does not
+# trigger another workflow — without it the release would simply never run.
+name: Release prep
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.changes/unreleased/**'
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Override the level the fragments request.'
+        required: false
+        type: choice
+        options: [fragments, patch, minor, major]
+        default: fragments
+      version:
+        description: 'Exact version to release (overrides bump).'
+        required: false
+        type: string
+      dry_run:
+        description: 'Print the section without committing.'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prep:
+    name: Assemble the release
+    runs-on: ubuntu-latest
+    # Never re-trigger on the commit this workflow itself pushes.
+    if: ${{ github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'chore(release):') }}
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Assemble the changelog section
+        id: prep
+        run: |
+          ARGS="--github-output"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          if [ -n "${{ inputs.version }}" ]; then
+            ARGS="$ARGS --version ${{ inputs.version }}"
+          elif [ -n "${{ inputs.bump }}" ] && [ "${{ inputs.bump }}" != "fragments" ]; then
+            ARGS="$ARGS --bump ${{ inputs.bump }}"
+          fi
+          npm run release:prep -- $ARGS | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Move the version
+        if: ${{ steps.prep.outputs.has_changes == 'true' && inputs.dry_run != true }}
+        run: npm run version:set -- "${{ steps.prep.outputs.version }}"
+
+      - name: Commit and push
+        if: ${{ steps.prep.outputs.has_changes == 'true' && inputs.dry_run != true }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          VERSION: ${{ steps.prep.outputs.version }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add CHANGELOG.md package.json package-lock.json src/server.ts .changes/unreleased
+          git commit -m "chore(release): $VERSION"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin main
+
+      - name: Dispatch the release
+        if: ${{ steps.prep.outputs.has_changes == 'true' && inputs.dry_run != true }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+        run: gh workflow run release.yml --ref main

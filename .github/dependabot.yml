@@ -1,0 +1,23 @@
+# Keep the runtime dependencies and the pinned actions current.
+#
+# Actions are pinned to commit SHAs, which is correct for supply-chain safety and
+# means nothing updates them by hand. Dependabot rewrites the SHA and the version
+# comment together, so the pin stays honest without a human tracking upstream.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, skip-changelog]
+    groups:
+      dev-dependencies:
+        dependency-type: development
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, skip-changelog]

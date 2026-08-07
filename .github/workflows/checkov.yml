@@ -1,0 +1,64 @@
+# Scan the workflows, the Bicep, and the tree for embedded secrets.
+#
+# This repository is PUBLIC and ships infrastructure a consumer deploys into
+# their own tenant, so a leaked value or an over-permissioned template is a
+# defect in the product rather than only in our pipeline. Blocking by design: an
+# accepted finding carries an inline `# checkov:skip=<id>:<reason>` that states
+# why, which is reviewable, rather than a soft-fail nobody reads.
+name: Checkov
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checkov:
+    name: IaC, workflow, and secret scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Install Checkov
+        run: python -m pip install --no-cache-dir checkov==3.2.533
+
+      - name: Run Checkov
+        run: |
+          checkov --directory . \
+            --framework github_actions secrets bicep \
+            --skip-path node_modules --skip-path dist --skip-path host/cast \
+            --output cli --output sarif --output-file-path console,results.sarif
+
+      - name: Upload SARIF to code scanning
+        if: ${{ !cancelled() }}
+        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          sarif_file: results.sarif
+          category: checkov
+
+      - name: Retain the full SARIF
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: checkov-sarif
+          path: results.sarif
+          retention-days: 30

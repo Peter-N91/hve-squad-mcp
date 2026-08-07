@@ -1,0 +1,89 @@
+# Gate every pull request on the release contract.
+#
+# The version and the changelog move ONLY on `main`, assembled from the fragments
+# under `.changes/unreleased/`. A pull request that edited either would conflict
+# with every other open pull request, so this workflow rejects that diff and
+# requires a fragment instead.
+#
+# It deliberately does NOT run tests — `ci.yml` owns that. Splitting them means a
+# missing fragment is reported as a missing fragment rather than buried in a test
+# log, and a red test does not hide a release-state violation.
+name: PR validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  release-state:
+    name: Release state and change fragment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Compute the diff against the base
+        id: diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > /tmp/changed.txt
+          echo "Changed files:"
+          cat /tmp/changed.txt
+
+      - name: Reject edits to release state
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if grep -qx 'CHANGELOG.md' /tmp/changed.txt; then
+            echo "::error file=CHANGELOG.md::CHANGELOG.md is assembled on main from .changes/unreleased/. Add a fragment with 'npm run change' instead."
+            exit 1
+          fi
+          if git diff "$BASE_SHA" "$HEAD_SHA" -- package.json | grep -qE '^[+-]\s*"version"\s*:'; then
+            echo "::error file=package.json::The version is bumped on main by release-prep. Do not edit it in a pull request."
+            exit 1
+          fi
+
+      - name: Require a change fragment
+        env:
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          if grep -qE '^\.changes/unreleased/[0-9]{8}-.+\.md$' /tmp/changed.txt; then
+            echo "Change fragment present."
+            exit 0
+          fi
+          case ",$LABELS," in
+            *,skip-changelog,*)
+              echo "::notice::No fragment, but the skip-changelog label is applied."
+              exit 0
+              ;;
+          esac
+          echo "::error::This pull request adds no change fragment. Run 'npm run change', or apply the skip-changelog label when the change has no consumer-visible effect."
+          exit 1
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve the version this pull request would release
+        run: |
+          npm run release:prep -- --dry-run >> "$GITHUB_STEP_SUMMARY" 2>&1 || {
+            echo "::error::Release prep rejected a pending fragment — see the job summary."
+            exit 1
+          }
