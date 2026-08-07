@@ -165,6 +165,31 @@ export interface AdvisoryPipelineDeps {
    * synchronous/interactive in-process case) the run stays purely in-process.
    */
   persistence?: AdvisoryRunPersistence;
+  /**
+   * The squad-ledger sink. Distinct from {@link persistence}, which stores the
+   * RUN so a status poll can recompile it: this stores the WORK — each stage's
+   * deliverable under its roster Deliverable Root, plus the per-agent and
+   * per-run history entries. A run can want either, both, or neither.
+   */
+  ledger?: AdvisoryLedgerSink;
+}
+
+/**
+ * Where a finished stage's deliverable goes.
+ *
+ * Takes the roster role KEY as well as the agent name, because the Deliverable
+ * Root is looked up by ROLE (`lead` -> `plans/`) while the history file is keyed
+ * by AGENT (`Squad Lead` -> `history/squad-lead.md`), and the pipeline is the
+ * only place that still knows both.
+ */
+export interface AdvisoryLedgerSink {
+  recordStage(stage: {
+    roleKey?: string;
+    agentName: string;
+    artifact: string;
+  }): Promise<void>;
+  /** Record a council or intake verdict in the decision log. */
+  recordDecision(block: string): Promise<void>;
 }
 
 export interface AdvisoryPipelineOptions {
@@ -431,6 +456,7 @@ export async function runAdvisoryPipeline(
         conditions: verdict.conditions,
         rendered: verdict.markdown,
       });
+      await deps.ledger?.recordDecision(verdict.markdown);
 
       // A Stop verdict halts the advisory pipeline (no implement stage to gate).
       if (verdict.verdict === "Stop") {
@@ -471,19 +497,33 @@ export async function runAdvisoryPipeline(
       // Phase 4 — persist the completed stage section (durable/async run only).
       await deps.persistence?.recordStage({ role: stage.role, artifact: result.section });
 
+      // The ledger stores the WORK: this stage's deliverable under its roster
+      // root, plus the per-agent and per-run history entries.
+      await deps.ledger?.recordStage({
+        roleKey: stage.roleKey,
+        agentName: stage.role,
+        artifact: completion.text,
+      });
+
       // The intake gate is a PRE-work readiness check: a Not-Ready verdict must
       // stop the run rather than let downstream roles build on inputs the
       // validator just judged unusable (`squad-intake-gate.instructions.md`).
-      if (stage.intake && intakeVerdictOf(completion.text) === "Not-Ready") {
-        return {
-          outcome: "halted",
-          artifact: compileArtifact(stages),
-          stages,
-          councilVerdict,
-          usage: collectUsage(stages),
-          costUsd: deps.costLedger?.spentUsd() ?? 0,
-          reason: "intake_not_ready",
-        };
+      if (stage.intake) {
+        const verdict = intakeVerdictOf(completion.text);
+        await deps.ledger?.recordDecision(
+          `## Intake Readiness Verdict\n\n* Validator: ${stage.role}\n* Verdict: ${verdict}`,
+        );
+        if (verdict === "Not-Ready") {
+          return {
+            outcome: "halted",
+            artifact: compileArtifact(stages),
+            stages,
+            councilVerdict,
+            usage: collectUsage(stages),
+            costUsd: deps.costLedger?.spentUsd() ?? 0,
+            reason: "intake_not_ready",
+          };
+        }
       }
     }
 

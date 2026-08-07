@@ -28,6 +28,8 @@ import { FileSquadMemoryStore } from "./engine/backends/file-squad-memory.js";
 import { GraphSquadMemoryStore } from "./engine/backends/graph-squad-memory.js";
 import { TargetedSquadMemoryStore } from "./engine/targeted-squad-memory.js";
 import { AutoMemory } from "./engine/auto-memory.js";
+import { MemoryBackedArtifactStore } from "./engine/artifact-store.js";
+import { SquadRunRecorder } from "./engine/squad-run-recorder.js";
 import {
   OverflowSquadMemoryStore,
   type MemoryBlobWriter,
@@ -296,7 +298,7 @@ export function buildHttpHandler(
       concurrency: config.tenantConcurrency,
       monthlyCeilingUsd: config.tenantMonthlyCostCeilingUsd,
     }),
-    gates: new GateKeeper(),
+    gates: new GateKeeper({ advisoryAutopilotEnabled: config.advisoryAutopilotEnabled }),
     runStateStore: stack?.runStateStore,
     approvals: stack?.approvals,
     // WI-1b4-WORKER: when a worker is enabled, the poll is read-only and the ACA
@@ -310,6 +312,17 @@ export function buildHttpHandler(
         ? new AutoMemory({
             store: memoryStack.memoryStore,
             defaultProject: config.memoryDefaultProject,
+            logger,
+          })
+        : undefined,
+    // The squad ledger writes the `.copilot-tracking` tree through whichever
+    // store the memory backend already selected, so an operator picks the
+    // destination once. Requires auto-memory, which is what resolves the project
+    // partition the tree is written under.
+    runRecorder:
+      config.enableArtifacts && config.memoryAutoEnabled && memoryStack
+        ? new SquadRunRecorder({
+            store: new MemoryBackedArtifactStore(memoryStack.memoryStore),
             logger,
           })
         : undefined,

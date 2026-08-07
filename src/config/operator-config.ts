@@ -94,6 +94,22 @@ export interface OperatorConfig {
    */
   remotePipelineEnabled: boolean;
   /**
+   * Allow a run the server has proven ADVISORY-ONLY to proceed without an
+   * out-of-band operator approval. Default FALSE.
+   *
+   * Without it the remote boundary cannot serve its main case: a Copilot Studio
+   * agent has no way to reach `/admin/approve`, so a `product` run holds forever
+   * waiting for a human who is not in that loop. The advisory pipeline runs no
+   * code and takes no impactful action — it produces finished text into the
+   * tracking tree — so the hold protects nothing there while blocking everything.
+   *
+   * A plan seeding any impactful role (`backlog-executor`, `deployer`,
+   * `iac-author`, `azure-diagnose`) still holds, and the decision is made from the
+   * server-resolved plan, never from caller input. Requires
+   * `remotePipelineEnabled` — there is no pipeline to release otherwise.
+   */
+  advisoryAutopilotEnabled: boolean;
+  /**
    * Directory backing the durable run-state store when the pipeline is enabled.
    * Required when `remotePipelineEnabled` is true AND the backend is `file`. NOTE:
    * a local directory is durable across restarts but NOT shared across replicas; a
@@ -471,6 +487,15 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
     );
   }
 
+  const advisoryAutopilotEnabled =
+    (env.SQUAD_MCP_ADVISORY_AUTOPILOT_ENABLED ?? "").trim().toLowerCase() === "true";
+  if (advisoryAutopilotEnabled && !remotePipelineEnabled) {
+    throw new Error(
+      "SQUAD_MCP_ADVISORY_AUTOPILOT_ENABLED=true requires SQUAD_MCP_REMOTE_PIPELINE_ENABLED=true " +
+        "(there is no gated pipeline to release otherwise).",
+    );
+  }
+
   const enableBusinessTools =
     (env.SQUAD_MCP_ENABLE_BUSINESS_TOOLS ?? "").trim().toLowerCase() === "true";
   if (enableBusinessTools && modelEndpoint.length === 0) {
@@ -520,6 +545,7 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
     ),
     sessionIdleMs: numberOr(env.SQUAD_MCP_SESSION_IDLE_MS, DEFAULT_SESSION_IDLE_MS),
     remotePipelineEnabled,
+    advisoryAutopilotEnabled,
     runStateDir,
     runStateBackend,
     storageAccount,

@@ -93,13 +93,16 @@ export class SquadRunRecorder {
     stage: RecordedStage,
   ): Promise<void> {
     const opts = this.optionsFor(request);
+    // A single-stage hero dispatch knows only the agent name, so recover the role
+    // from the roster — the Deliverable Root is looked up by role, not by agent.
+    const roleKey = stage.roleKey ?? this.roleKeyForAgent(stage.agentName);
     try {
       let deliverablePath: string | undefined;
-      if (stage.roleKey) {
+      if (roleKey) {
         deliverablePath = await this.ledger.writeDeliverable(
           tenantId,
           project,
-          stage.roleKey,
+          roleKey,
           `${this.today()}-${runId}`,
           stage.artifact,
           this.tables,
@@ -113,7 +116,7 @@ export class SquadRunRecorder {
         [
           `### ${this.today()} — run ${runId}`,
           "",
-          `* Role: ${stage.roleKey ?? "(unmapped)"}`,
+          `* Role: ${roleKey ?? "(unmapped)"}`,
           `* Deliverable: ${deliverablePath ?? "(returned findings to the coordinator)"}`,
         ].join("\n"),
       );
@@ -126,6 +129,17 @@ export class SquadRunRecorder {
     } catch (error) {
       this.warn("squad ledger stage record failed", error);
     }
+  }
+
+  /** Reverse the Cast Catalog: an agent's `name:` back to the role it fills. */
+  private roleKeyForAgent(agentName: string): string | undefined {
+    const wanted = agentName.trim().toLowerCase();
+    for (const [role, row] of this.tables.cast) {
+      if (row.primary.trim().toLowerCase() === wanted) {
+        return role;
+      }
+    }
+    return undefined;
   }
 
   /** Append a verdict block (council or intake) to the decision log. */
@@ -163,6 +177,29 @@ export class SquadRunRecorder {
       tier: request.tier,
       squad: request.squad,
       date: this.today(),
+    };
+  }
+
+  /**
+   * Bind this recorder to one run, producing the sink the advisory pipeline
+   * writes each finished stage through.
+   *
+   * The pipeline knows the stage; the recorder knows the tenant, the project and
+   * the run. Binding them here keeps the pipeline free of storage types, exactly
+   * as its existing persistence seam does.
+   */
+  sinkFor(
+    tenantId: string,
+    project: string,
+    request: CoordinatorRequest,
+    runId: string,
+  ): {
+    recordStage(stage: RecordedStage): Promise<void>;
+    recordDecision(block: string): Promise<void>;
+  } {
+    return {
+      recordStage: (stage) => this.recordStage(tenantId, project, request, runId, stage),
+      recordDecision: (block) => this.recordDecision(tenantId, project, block),
     };
   }
 
