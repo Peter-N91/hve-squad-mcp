@@ -242,7 +242,9 @@ test("planAdvisoryStages interleaves the council and appends backlog-handoff for
         { role: "lead", agentName: "Squad Lead", tier: "confirm", parallelEligible: false },
         { role: "tester", agentName: "Squad Reviewer", tier: "auto", parallelEligible: true },
       ],
-      council: { engaged: true, members: ["Council Member A", "Council Member B"] },
+      council: { engaged: true, members: ["Council Member A", "Council Member B"], missingQuorum: [] },
+      profile: "default",
+      fanOut: [],
     };
     const rosterMap = new Map([["product-owner", "GitHub Backlog Manager"]]);
     const ordered = planAdvisoryStages(routePlan, [root], rosterMap);
@@ -269,7 +271,9 @@ test("planAdvisoryStages keeps a research-only route to a single research stage"
   try {
     const routePlan: RoutePlan = {
       stages: [{ role: "researcher", agentName: "Squad Researcher", tier: "auto", parallelEligible: true }],
-      council: { engaged: false, members: [] },
+      council: { engaged: false, members: [], missingQuorum: [] },
+      profile: "default",
+      fanOut: [],
     };
     const ordered = planAdvisoryStages(routePlan, [root], new Map());
     assert.deepEqual(ordered.map((s) => `${s.kind}:${s.role}`), ["persona:Squad Researcher"]);

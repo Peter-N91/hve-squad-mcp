@@ -10,6 +10,7 @@ import {
   route,
   type RoutingTables,
 } from "../src/engine/routing.js";
+import type { ProfileTables } from "../src/engine/profiles.js";
 
 // ---------------------------------------------------------------------------
 // A small deterministic fixture of the routing + roster tables so the pure
@@ -36,6 +37,33 @@ const FIXTURE_TABLES: RoutingTables = {
     ["cost-manager", "Squad Cost Manager"],
     ["product-owner", "GitHub Backlog Manager"],
     ["rai", "RAI Planner"],
+  ]),
+};
+
+// The classifier now filters to the roles a profile seeds, so the pure tests
+// carry their own profile fixture rather than reading the deployed roster.
+const FIXTURE_PROFILES: ProfileTables = {
+  profiles: new Map<string, string[]>([
+    ["default", ["researcher", "lead", "developer", "tester", "scribe"]],
+    [
+      "council",
+      [
+        "researcher",
+        "lead",
+        "developer",
+        "tester",
+        "architect",
+        "security",
+        "cost-manager",
+        "product-owner",
+        "rai",
+        "scribe",
+      ],
+    ],
+  ]),
+  deliverableRoots: new Map<string, string>([
+    ["researcher", ".copilot-tracking/research/<date>"],
+    ["lead", ".copilot-tracking/plans"],
   ]),
 };
 
@@ -74,8 +102,9 @@ test("a full advisory request routes research -> plan -> review", () => {
 test("council engages when the request crosses two or more council domains", () => {
   const plan = computeRoutePlan(
     "review the security and cost tradeoffs of the proposed architecture",
-    {},
+    { profile: "council" },
     FIXTURE_TABLES,
+    FIXTURE_PROFILES,
   );
   assert.deepEqual(plan.stages.map((s) => s.role), ["researcher", "lead", "tester"]);
   assert.equal(plan.council.engaged, true);
@@ -91,8 +120,9 @@ test("council engages when the request crosses two or more council domains", () 
 test("council adds RAI when the request touches the RAI domain (>=2 domains)", () => {
   const plan = computeRoutePlan(
     "review the fairness and security posture of the model",
-    {},
+    { profile: "council" },
     FIXTURE_TABLES,
+    FIXTURE_PROFILES,
   );
   assert.equal(plan.council.engaged, true);
   assert.ok(plan.council.members.includes("RAI Planner"));
@@ -178,9 +208,26 @@ test("route() over the real instructions classifies a research request to one st
 });
 
 test("route() over the real instructions classifies a multi-domain request with council", () => {
-  const plan = route("review the security and cost of the proposed architecture");
+  const plan = route("review the security and cost of the proposed architecture", {
+    profile: "full",
+  });
   assert.deepEqual(plan.stages.map((s) => s.role), ["researcher", "lead", "tester"]);
   assert.equal(plan.council.engaged, true);
+  assert.deepEqual(plan.council.missingQuorum, []);
   assert.ok(plan.council.members.includes("Security Planner"));
   assert.ok(plan.council.members.includes("Squad Cost Manager"));
+});
+
+test("a profile without the full council quorum escalates instead of seating a partial council", () => {
+  // `default` seeds researcher, lead, developer, tester, scribe — no council role.
+  const plan = route("review the security and cost of the proposed architecture");
+  assert.equal(plan.profile, "default");
+  assert.equal(plan.council.engaged, false);
+  assert.deepEqual(plan.council.members, []);
+  assert.deepEqual(plan.council.missingQuorum, [
+    "architect",
+    "security",
+    "cost-manager",
+    "product-owner",
+  ]);
 });

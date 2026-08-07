@@ -129,7 +129,9 @@ const ADVISORY_PLAN: RoutePlan = {
     { role: "lead", agentName: "Squad Lead", tier: "confirm", parallelEligible: false },
     { role: "tester", agentName: "Squad Reviewer", tier: "auto", parallelEligible: true },
   ],
-  council: { engaged: false, members: [] },
+  council: { engaged: false, members: [], missingQuorum: [] },
+  profile: "default",
+  fanOut: [],
 };
 
 test("resolveRoutedStages resolves a RoutePlan to real personas via the Phase 1 loader", () => {
