@@ -31,6 +31,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { charterForRole, resolvePersonaForRole } from "./embedded-roles.js";
 import { composeEmbeddedPrompt } from "./embedded-prompt.js";
 import { AutoMemory, withMemoryContext } from "./auto-memory.js";
+import type { SquadRunRecorder } from "./squad-run-recorder.js";
 import type { BusinessToolSpec } from "./business-tools.js";
 import { FEDERATION_ROLE, federationPersona } from "./federation.js";
 import { coordinatorRequestFromRun, encodeRunParams } from "./run-params.js";
@@ -109,6 +110,12 @@ export interface EmbeddedCoordinatorDeps {
    * default), the engine behaves exactly as before — memory stays a manual tool.
    */
   autoMemory?: AutoMemory;
+  /**
+   * Optional squad-ledger recorder. When wired, each run seeds the roster on
+   * first use, reads its own history index back as DATA, and persists stage
+   * deliverables plus the append-only logs. Absent, behaviour is unchanged.
+   */
+  runRecorder?: SquadRunRecorder;
   logger?: RedactingLogger;
 }
 
@@ -177,6 +184,7 @@ export class EmbeddedCoordinator {
   private readonly runTtlMs?: number;
   private readonly leaseMs?: number;
   private readonly autoMemory?: AutoMemory;
+  private readonly runRecorder?: SquadRunRecorder;
   /** Outstanding held runs per tenant, started via startHttpRun (MEDIUM-2). */
   private readonly heldCounts = new Map<string, number>();
 
@@ -192,6 +200,7 @@ export class EmbeddedCoordinator {
     this.runTtlMs = deps.runTtlMs;
     this.leaseMs = deps.leaseMs;
     this.autoMemory = deps.autoMemory;
+    this.runRecorder = deps.runRecorder;
   }
 
   /**
@@ -208,7 +217,16 @@ export class EmbeddedCoordinator {
     }
     const project = this.autoMemory.resolveProject(request);
     const memory = await this.autoMemory.loadContext(tenantId, project);
-    return { request: withMemoryContext(request, memory), project };
+    let carried = withMemoryContext(request, memory);
+    if (this.runRecorder) {
+      // Seeding the roster and reading the run index back are the artifact-shaped
+      // twin of the digest read above, so they share this one moment.
+      const opened = await this.runRecorder.open(tenantId, project, carried);
+      carried = withMemoryContext(carried, opened.historyBlock);
+      // The seeded roster wins over the caller's hint for the rest of the run.
+      carried = { ...carried, profile: opened.profile.name };
+    }
+    return { request: carried, project };
   }
 
   /**
@@ -225,6 +243,7 @@ export class EmbeddedCoordinator {
       return;
     }
     await this.autoMemory.record(tenantId, project, entry);
+    await this.runRecorder?.closeRun(tenantId, project, entry.runId, []);
   }
 
   private decrementHeld(tenantId: string): void {
