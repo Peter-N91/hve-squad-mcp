@@ -59,6 +59,7 @@ jobs:
       - name: Require a change fragment
         env:
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           if grep -qE '^\.changes/unreleased/[0-9]{8}-.+\.md$' /tmp/changed.txt; then
             echo "Change fragment present."
@@ -70,6 +71,19 @@ jobs:
               exit 0
               ;;
           esac
+          # Dependabot cannot author a fragment: it only knows how to bump a
+          # manifest and apply labels, and it silently DROPS a label the
+          # repository does not define — which is what wedged every bot pull
+          # request until `skip-changelog` was created. Exempting by author as
+          # well means a missing label can never block the bot again.
+          #
+          # A runtime-dependency bump can still be consumer-visible (a major
+          # `jose` or SDK move). That is a judgement call, so a maintainer adds
+          # a fragment to the bot's branch when it warrants one.
+          if [ "$PR_AUTHOR" = "dependabot[bot]" ]; then
+            echo "::notice::No fragment; author is dependabot[bot]. Add one to this branch if the bump is consumer-visible."
+            exit 0
+          fi
           echo "::error::This pull request adds no change fragment. Run 'npm run change', or apply the skip-changelog label when the change has no consumer-visible effect."
           exit 1
 
