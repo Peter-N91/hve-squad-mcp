@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Configuration — hve-squad-mcp</title>
+  <meta name="description" content="Operator settings for the hve-squad MCP server: auth, the async pipeline, storage backends, squad memory, and the artifact ledger." />
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<header class="site">
+  <nav class="site">
+    <a class="brand" href="index.html"><img src="assets/logo.svg" alt="" /><span class="wordmark">hve<span class="dot">-</span>squad<span class="tag">mcp</span></span></a>
+    <span class="links">
+      <a class="nav" href="index.html">Home</a>
+      <a class="nav" href="getting-started.html">Getting started</a>
+      <a class="nav" href="tools.html">Tools</a>
+      <a class="nav" href="deploy.html">Deploy</a>
+      <a class="nav" href="configuration.html" aria-current="page">Configuration</a>
+      <a class="nav" href="contributing.html">Contributing</a>
+      <a class="nav" href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a>
+    </span>
+  </nav>
+</header>
+
+<main>
+  <h1>Configuration</h1>
+  <p class="lead">
+    Every setting here is <strong>operator-controlled</strong> and read from the environment at startup. None of it is
+    reachable from caller input or model output — that separation is the point, not an implementation detail.
+  </p>
+
+  <div class="callout warn">
+    <p>
+      Configuration is validated <strong>at startup and fails closed</strong>. A feature enabled without its backing
+      store does not degrade quietly; the server refuses to start and tells you which variable is missing. Treat a
+      startup failure as the design working.
+    </p>
+  </div>
+
+  <h2>Authentication</h2>
+  <table>
+    <thead><tr><th>Variable</th><th>Required</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>SQUAD_MCP_AUDIENCE</code></td><td>yes</td><td>The resource-server token audience. No default — an audience-less server would accept tokens minted for anything.</td></tr>
+      <tr><td><code>SQUAD_MCP_ALLOWED_ISSUERS</code></td><td>—</td><td>Comma-separated issuer allow-list.</td></tr>
+      <tr><td><code>SQUAD_MCP_ALLOWED_TENANTS</code></td><td>—</td><td>Comma-separated tenant allow-list.</td></tr>
+      <tr><td><code>SQUAD_MCP_ALLOWED_ORIGINS</code></td><td>—</td><td>Strict allow-list. A literal <code>*</code> is rejected at startup.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Model backend</h2>
+  <table>
+    <thead><tr><th>Variable</th><th>Default</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>SQUAD_MCP_MODEL_ENDPOINT</code></td><td>—</td><td>Must also appear in the allow-list below, or startup fails.</td></tr>
+      <tr><td><code>SQUAD_MCP_ALLOWED_MODEL_ENDPOINTS</code></td><td>—</td><td>The endpoints this server may ever call. Exfiltration defence.</td></tr>
+      <tr><td><code>SQUAD_MCP_MODEL_DEPLOYMENT</code></td><td>—</td><td>The Azure OpenAI deployment name.</td></tr>
+      <tr><td><code>SQUAD_MCP_MODEL_API_VERSION</code></td><td><code>2024-10-21</code></td><td></td></tr>
+      <tr><td><code>SQUAD_MCP_TENANT_CONCURRENCY</code></td><td>built-in</td><td>Per-tenant concurrent run cap.</td></tr>
+      <tr><td><code>SQUAD_MCP_TENANT_COST_CEILING_USD</code></td><td>built-in</td><td>Per-tenant spend ceiling. Set this before real users.</td></tr>
+      <tr><td><code>SQUAD_MCP_SESSION_IDLE_MS</code></td><td>built-in</td><td>Idle session eviction.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>The async pipeline</h2>
+  <table>
+    <thead><tr><th>Variable</th><th>Default</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>SQUAD_MCP_REMOTE_PIPELINE_ENABLED</code></td><td><code>false</code></td><td>Off by default. The default remote surface is the advisory tools.</td></tr>
+      <tr><td><code>SQUAD_MCP_RUN_STATE_BACKEND</code></td><td><code>file</code></td><td><code>file</code> (single replica) or <code>table</code> (Azure Table, cross-replica CAS).</td></tr>
+      <tr><td><code>SQUAD_MCP_RUN_STATE_DIR</code></td><td>—</td><td>Required for the <code>file</code> backend.</td></tr>
+      <tr><td><code>SQUAD_MCP_STORAGE_ACCOUNT</code></td><td>—</td><td>Required for the <code>table</code> backend, renders, memory, and overflow.</td></tr>
+      <tr><td><code>SQUAD_MCP_RUN_TABLE_NAME</code></td><td><code>squadruns</code></td><td></td></tr>
+      <tr><td><code>SQUAD_MCP_WORKER_ENABLED</code></td><td><code>false</code></td><td>Background worker for runs over ~4 minutes. Requires the <code>table</code> backend.</td></tr>
+      <tr><td><code>SQUAD_MCP_RUN_ENCRYPTION_KEY_B64</code></td><td>—</td><td>Base64 key. When set, per-stage artifacts, the Council Verdict, and caller <code>request</code>/<code>context</code> are AES-256-GCM encrypted at rest.</td></tr>
+      <tr><td><code>SQUAD_MCP_ADVISORY_AUTOPILOT_ENABLED</code></td><td><code>false</code></td><td>Lets <strong>advisory-only</strong> runs proceed unattended. Narrows the gate; never removes it for impactful roles.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout danger">
+    <p>
+      <code>SQUAD_MCP_ADVISORY_AUTOPILOT_ENABLED</code> is not a gate override. It is scoped to runs whose roles land
+      no impactful action. A run that touches a backlog executor, a deployer, an IaC author, or Azure diagnostics still
+      holds for an operator regardless of this setting.
+    </p>
+  </div>
+
+  <h2>Squad memory</h2>
+  <p>
+    The server writes the same <code>.copilot-tracking/squad/</code> tree the squad produces locally — research notes,
+    plans, verdicts, the run ledger — so a remote run leaves the same durable trail as a local one, and history can be
+    read back automatically on the next run instead of being retyped into the prompt.
+  </p>
+
+  <table>
+    <thead><tr><th>Variable</th><th>Default</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>SQUAD_MCP_ENABLE_MEMORY</code></td><td><code>false</code></td><td>Master switch for the memory broker tools.</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_BACKEND</code></td><td><code>table</code></td><td><code>table</code>, <code>file</code>, or <code>graph</code>.</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_TABLE_NAME</code></td><td><code>squadmemory</code></td><td></td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_DIR</code></td><td>—</td><td>Required for the <code>file</code> backend.</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_GRAPH_DRIVE_ID</code></td><td>—</td><td>Required for <code>graph</code>: the SharePoint or OneDrive document library.</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_GRAPH_ROOT_PATH</code></td><td>—</td><td>Folder path within that library.</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_GRAPH_ENCRYPT</code></td><td><code>false</code></td><td>Field-level encryption before content leaves for Graph.</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_AUTO_ENABLED</code></td><td><code>false</code></td><td>Write memory automatically as a run progresses, rather than on an explicit tool call.</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_DEFAULT_PROJECT</code></td><td><code>default</code></td><td>Lower-kebab-case; it is a store partition segment.</td></tr>
+      <tr><td><code>SQUAD_MCP_ENABLE_ARTIFACTS</code></td><td><code>false</code></td><td>Persist the squad ledger — <code>team.md</code>, <code>routing.md</code>, <code>state.json</code>, and the append-only logs. Requires memory.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Several destinations at once</h3>
+  <p>
+    <code>SQUAD_MCP_MEMORY_TARGETS</code> takes a JSON array of named destinations, and
+    <code>SQUAD_MCP_MEMORY_DEFAULT_TARGET</code> names the one used when the caller does not choose. Target names are
+    lower-kebab-case because they are the caller-facing selector. This is how one deployment serves, say, an
+    engineering SharePoint library and a separate customer-facing one without the caller being able to reach across.
+  </p>
+
+  <h3>Overflow to blob</h3>
+  <p>
+    Table entities have a size ceiling, so a large artifact would otherwise fail the write. With
+    <code>SQUAD_MCP_MEMORY_OVERFLOW_ENABLED</code>, anything past
+    <code>SQUAD_MCP_MEMORY_OVERFLOW_THRESHOLD_BYTES</code> (default 32 KiB) spills into
+    <code>SQUAD_MCP_MEMORY_OVERFLOW_CONTAINER</code> with a pointer left in the entity.
+  </p>
+
+  <h2>Deterministic render</h2>
+  <table>
+    <thead><tr><th>Variable</th><th>Default</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>SQUAD_MCP_ENABLE_RENDER_PPTX</code></td><td><code>false</code></td><td>Enables <code>squad_render_pptx</code>.</td></tr>
+      <tr><td><code>SQUAD_MCP_RENDER_PYTHON_PATH</code></td><td>—</td><td>Required when enabled — the in-image <code>python-pptx</code> interpreter.</td></tr>
+      <tr><td><code>SQUAD_MCP_RENDER_SCRIPTS_DIR</code></td><td>—</td><td>Required when enabled.</td></tr>
+      <tr><td><code>SQUAD_MCP_RENDER_BLOB_CONTAINER</code></td><td><code>renders</code></td><td></td></tr>
+      <tr><td><code>SQUAD_MCP_RENDER_SAS_TTL_MINUTES</code></td><td><code>60</code></td><td>User-delegation SAS lifetime. The SAS is never logged.</td></tr>
+      <tr><td><code>SQUAD_MCP_RENDER_BRAND_TEMPLATE_PATH</code></td><td>—</td><td>Optional branded <code>.pptx</code> template.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Business tools</h2>
+  <table>
+    <thead><tr><th>Variable</th><th>Default</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>SQUAD_MCP_ENABLE_BUSINESS_TOOLS</code></td><td><code>false</code></td><td>Enables <code>squad_business_plan</code> and <code>squad_backlog</code>. Requires a model endpoint.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <p>
+      This list is the shape of the surface, not the deployment procedure. Exact parameter wiring, Key Vault
+      references, and the Bicep parameters live in
+      <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/host/RUNBOOK.md">host/RUNBOOK.md</a>.
+    </p>
+  </div>
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>MIT licensed. Built on <a href="https://github.com/Peter-N91/hve-squad">hve-squad</a>.</span>
+    <span><a href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a> · <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/CHANGELOG.md">Changelog</a></span>
+  </div>
+</footer>
+</body>
+</html>
