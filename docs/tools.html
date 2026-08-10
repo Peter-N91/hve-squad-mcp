@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tools — hve-squad-mcp</title>
+  <meta name="description" content="Every tool the hve-squad MCP server exposes: the routing intent it maps to, the OAuth scope it requires, and where it is reachable from." />
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<header class="site">
+  <nav class="site">
+    <a class="brand" href="index.html"><img src="assets/logo.svg" alt="" /><span class="wordmark">hve<span class="dot">-</span>squad<span class="tag">mcp</span></span></a>
+    <span class="links">
+      <a class="nav" href="index.html">Home</a>
+      <a class="nav" href="getting-started.html">Getting started</a>
+      <a class="nav" href="tools.html" aria-current="page">Tools</a>
+      <a class="nav" href="deploy.html">Deploy</a>
+      <a class="nav" href="configuration.html">Configuration</a>
+      <a class="nav" href="contributing.html">Contributing</a>
+      <a class="nav" href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a>
+    </span>
+  </nav>
+</header>
+
+<main>
+  <h1>Tools</h1>
+  <p class="lead">
+    The surface is deliberately coarse. Each squad tool maps 1:1 to a row in the squad's routing table — not to one of
+    the ~200 agents. The Squad Coordinator owns routing; these tools are shortcuts into it.
+  </p>
+
+  <h2>Squad tools</h2>
+  <p>
+    These come from <code>tools.catalog.yml</code>, the source of truth for the surface. The build fails if any of them
+    maps to a routing intent that is not a real routing row, or to a role that is not a bundled agent.
+  </p>
+
+  <table>
+    <thead>
+      <tr><th>Tool</th><th>Primary role</th><th>Scope</th><th>Remote</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>squad_research</code></td><td>Squad Researcher</td><td><code>Squad.Research</code></td><td><span class="pill ok">advisory</span></td></tr>
+      <tr><td><code>squad_plan</code></td><td>Squad Lead</td><td><code>Squad.Plan</code></td><td><span class="pill ok">advisory</span></td></tr>
+      <tr><td><code>squad_review</code></td><td>Squad Reviewer</td><td><code>Squad.Review</code></td><td><span class="pill ok">advisory</span></td></tr>
+      <tr><td><code>squad_architect</code></td><td>System Architecture Reviewer</td><td><code>Squad.Architect</code></td><td><span class="pill ok">advisory</span></td></tr>
+      <tr><td><code>squad_run</code></td><td>Squad Coordinator</td><td><code>Squad.Run</code></td><td><span class="pill optin">pipeline</span></td></tr>
+      <tr><td><code>squad_federate</code></td><td>Squad Federation Coordinator</td><td><code>Squad.Federate</code></td><td><span class="pill optin">pipeline</span></td></tr>
+    </tbody>
+  </table>
+
+  <h3>The advisory four</h3>
+  <p>
+    <code>squad_research</code>, <code>squad_plan</code>, <code>squad_review</code>, and <code>squad_architect</code>
+    each run a <strong>single-stage</strong> dispatch and land no impactful action. That is why they are exposed
+    remotely even when the async pipeline is off — the default remote posture is advisory-only.
+  </p>
+
+  <h3>squad_run — the full advisory pipeline</h3>
+  <p>
+    <code>squad_run</code> is the catch-all. It routes data-driven across the real roster — researcher → lead →
+    council members → tester — and the council synthesizes a most-restrictive-wins verdict of Go, Go-With-Conditions,
+    or Stop. It honours <code>mode</code>: interactive pauses per stage, autopilot runs through to one compiled
+    artifact.
+  </p>
+  <p>
+    It is <strong>safe by construction</strong>. It holds at a non-bypassable Human Gate and never auto-releases. An
+    operator holding the distinct <code>Squad.Operate</code> app role releases a held run through the out-of-band
+    <code>POST /admin/approve</code> route — never through a <code>tools/call</code> — after which a
+    <code>squad_status</code> poll drives it to completion. Approvals are audited with approver and timestamp, and
+    tenant-scoped.
+  </p>
+
+  <h3>squad_federate — sub-squads</h3>
+  <p>
+    The federation meta layer routes across named sub-squads. It carries a <em>dedicated</em> scope rather than reusing
+    <code>Squad.Run</code>, because a caller authorized to run one squad is not thereby authorized to drive a whole
+    federation. Same safety class as <code>squad_run</code>, so it inherits the same gate and durable run-state
+    prerequisites.
+  </p>
+
+  <h2>Utility tools</h2>
+  <p>
+    These are transport-level utilities, not routing intents, so they are not in the catalog and do not participate in
+    the drift check. Each is off unless the operator turns its feature on.
+  </p>
+
+  <table>
+    <thead>
+      <tr><th>Tool</th><th>Scope</th><th>Enabled by</th><th>What it does</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>squad_status</code></td><td><code>Squad.Run</code></td><td>pipeline</td>
+        <td>Polls a run the caller started. Reuses the run scope — you may inspect runs you are authorized to start.</td>
+      </tr>
+      <tr>
+        <td><code>squad_render_pptx</code></td><td><code>Squad.Render</code></td><td><code>SQUAD_MCP_ENABLE_RENDER_PPTX</code></td>
+        <td>Renders deck content YAML to a <code>.pptx</code> with in-image <code>python-pptx</code> and returns a
+            short-lived, tenant-scoped user-delegation SAS link. No model call; the SAS is never logged.</td>
+      </tr>
+      <tr>
+        <td><code>squad_memory_read</code></td><td><code>Squad.Memory</code></td><td><code>SQUAD_MCP_ENABLE_MEMORY</code></td>
+        <td>Reads the project's <code>.copilot-tracking/squad/</code> memory.</td>
+      </tr>
+      <tr>
+        <td><code>squad_history</code></td><td><code>Squad.Memory</code></td><td><code>SQUAD_MCP_ENABLE_MEMORY</code></td>
+        <td>Lists and reads the <code>.copilot-tracking</code> tree a run wrote — the artifact side of the same project.</td>
+      </tr>
+      <tr>
+        <td><code>squad_memory_write</code></td><td><code>Squad.MemoryWrite</code></td><td><code>SQUAD_MCP_ENABLE_MEMORY</code></td>
+        <td>Compare-and-swap write-back of one memory entry. Separate scope from read, so a read grant cannot mutate.</td>
+      </tr>
+      <tr>
+        <td><code>squad_memory_sync</code></td><td><code>Squad.MemoryWrite</code></td><td><code>SQUAD_MCP_ENABLE_MEMORY</code></td>
+        <td>Batch compare-and-swap — flushes a whole run's artifacts, each under its own CAS token.</td>
+      </tr>
+      <tr>
+        <td><code>squad_business_plan</code></td><td><code>Squad.Business</code></td><td><code>SQUAD_MCP_ENABLE_BUSINESS_TOOLS</code></td>
+        <td>One advisory dispatch against a real cast persona, returning a sectioned business plan.</td>
+      </tr>
+      <tr>
+        <td><code>squad_backlog</code></td><td><code>Squad.Backlog</code></td><td><code>SQUAD_MCP_ENABLE_BUSINESS_TOOLS</code></td>
+        <td>Produces a <em>validated JSON</em> backlog contract — epics → stories → tasks plus a flattened
+            <code>workItems[]</code>.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Why squad_backlog is JSON, not prose</h3>
+  <p>
+    The native Azure DevOps and Jira connectors need one call per work item with typed fields. A prose handoff forces
+    the orchestrating agent to parse English, which is the dominant failure mode: one giant work item, lost acceptance
+    criteria, invented parents. With the JSON contract the agent iterates <code>workItems</code> in order, creates
+    parents first, and links children by matching <code>parentRef</code> against the ids it recorded — no title
+    matching, no guessing. The server validates and normalizes the model's JSON and fails cleanly if it cannot.
+  </p>
+
+  <div class="callout danger">
+    <p>
+      <strong>The trust boundary is unchanged.</strong> Neither business tool writes to Azure DevOps or Jira. This
+      server produces the plan; the certified native connector performs every write on the end user's own connection,
+      under that connector's auth, DLP, and throttles.
+    </p>
+  </div>
+
+  <h2>Scopes are default-deny</h2>
+  <p>
+    Every tool requires an explicit OAuth scope; absent the scope the call is denied. Scopes are least-privilege by
+    design — a render grant does not imply research, a memory read grant does not imply a memory write, and none of
+    them imply <code>Squad.Operate</code>, the distinct operator role that releases a held run. Audience binding is
+    enforced separately from scope: a token minted for another resource is rejected outright.
+  </p>
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>MIT licensed. Built on <a href="https://github.com/Peter-N91/hve-squad">hve-squad</a>.</span>
+    <span><a href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a> · <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/CHANGELOG.md">Changelog</a></span>
+  </div>
+</footer>
+</body>
+</html>

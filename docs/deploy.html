@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Deploy — hve-squad-mcp</title>
+  <meta name="description" content="Deploy the hve-squad MCP server to your own Azure tenant on Container Apps, and reach it from Copilot Studio over authenticated HTTP." />
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<header class="site">
+  <nav class="site">
+    <a class="brand" href="index.html"><img src="assets/logo.svg" alt="" /><span class="wordmark">hve<span class="dot">-</span>squad<span class="tag">mcp</span></span></a>
+    <span class="links">
+      <a class="nav" href="index.html">Home</a>
+      <a class="nav" href="getting-started.html">Getting started</a>
+      <a class="nav" href="tools.html">Tools</a>
+      <a class="nav" href="deploy.html" aria-current="page">Deploy</a>
+      <a class="nav" href="configuration.html">Configuration</a>
+      <a class="nav" href="contributing.html">Contributing</a>
+      <a class="nav" href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a>
+    </span>
+  </nav>
+</header>
+
+<main>
+  <h1>Deploy to your own tenant</h1>
+  <p class="lead">
+    Embedded mode runs the dispatch server-side against your Azure OpenAI deployment, behind Entra authentication.
+    That is what makes the squad reachable from Copilot Studio — and what makes it cost money.
+  </p>
+
+  <div class="callout">
+    <p>
+      This page is the shape of the deployment. The authoritative, copy-paste procedure with every command and
+      parameter is the
+      <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/host/RUNBOOK.md"><strong>host/RUNBOOK.md</strong></a>.
+      Follow that; use this page to know what you are getting into first.
+    </p>
+  </div>
+
+  <h2>What you are deploying</h2>
+  <ul>
+    <li><strong>Azure Container Apps</strong> — the server itself, scale-to-zero capable, with a user-assigned managed identity.</li>
+    <li><strong>Azure Container Registry</strong> — the image, built in ACR from <code>host/Containerfile</code>.</li>
+    <li><strong>Azure Key Vault</strong> — operator secrets; the app reads them through its managed identity.</li>
+    <li><strong>Azure OpenAI</strong> — the model backend. <strong>This is where real spend begins.</strong></li>
+    <li><strong>An Entra app registration</strong> — the resource server whose Application ID URI becomes the token audience.</li>
+    <li><strong>Optionally</strong> Azure Table Storage for durable run state, and Blob Storage for renders and memory overflow.</li>
+  </ul>
+  <p>Everything is expressed as Bicep in <code>host/infra/</code>. There is no click-through path.</p>
+
+  <h2>The shape of it</h2>
+  <ol class="steps">
+    <li><strong>Deploy identity.</strong> OIDC federation for CI, or a local <code>az login</code> for a manual run.</li>
+    <li><strong>Register the Entra app and expose the API.</strong> The Application ID URI is the audience the server
+        enforces on every token. Expose one scope per tool, plus the <code>Squad.Operate</code> app role for the
+        operator who releases held runs.</li>
+    <li><strong>Provision Azure OpenAI.</strong> Real spend starts here. The endpoint must appear in the server's
+        model-endpoint allow-list, or the server refuses to start.</li>
+    <li><strong>Fill in the deployment parameters</strong> in <code>host/infra/main.bicepparam</code>.</li>
+    <li><strong>Build the image in ACR</strong> and deploy the Container App, Key Vault, and managed identity.</li>
+    <li><strong>Grant the app identity access to Azure OpenAI</strong> — least privilege, no keys in configuration.</li>
+    <li><strong>Import the connector into Copilot Studio</strong> from
+        <code>generated/copilot-studio-connector/</code>, which is generated and committed.</li>
+  </ol>
+
+  <h2>Authentication is non-negotiable</h2>
+  <p>
+    The remote surface is default-deny at three independent layers, and a call must pass all three:
+  </p>
+  <table>
+    <thead><tr><th>Layer</th><th>Rejects</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Audience binding</strong></td><td>A valid token minted for a different resource. Confused-deputy defence.</td></tr>
+      <tr><td><strong>Per-tool scope</strong></td><td>A token with no explicit scope for the tool being called.</td></tr>
+      <tr><td><strong>Origin allow-list</strong></td><td>Any origin not explicitly listed. <code>*</code> is rejected at startup, not at request time.</td></tr>
+    </tbody>
+  </table>
+  <p>
+    Tenant isolation is enforced on top: every store path is prefixed by the caller's tenant and traversal-guarded, so
+    one tenant cannot address another's runs, artifacts, or memory. The <code>test/conformance/</code> suites exist
+    specifically to make a regression in any of this loud.
+  </p>
+
+  <h2>Releasing a held run</h2>
+  <p>
+    <code>squad_run</code> holds at the Human Gate. Releasing it is an <strong>operator</strong> action, not a tool
+    call: the holder of the <code>Squad.Operate</code> app role posts to <code>/admin/approve</code> out of band. The
+    approval is recorded with approver and timestamp, and it is tenant-scoped. There is no code path by which caller
+    input or model output can release a gate.
+  </p>
+  <p>
+    If you want advisory-only runs to proceed unattended, that is a separate, explicit opt-in
+    (<code>SQUAD_MCP_ADVISORY_AUTOPILOT_ENABLED</code>) which <em>narrows</em> the gate to advisory runs — it never
+    removes it for impactful ones. See <a href="configuration.html">Configuration</a>.
+  </p>
+
+  <h2>Single-replica or multi-replica</h2>
+  <p>
+    The async pipeline needs durable run state, and which backend you pick determines whether you can scale:
+  </p>
+  <table>
+    <thead><tr><th>Backend</th><th>Replicas</th><th>Trade</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>file</code></td><td>one</td>
+        <td>A local directory. Simplest to stand up. Approval is only visible to the replica that holds the file, so
+            scale-out silently breaks release.</td>
+      </tr>
+      <tr>
+        <td><code>table</code></td><td>many</td>
+        <td>Azure Table Storage with ETag compare-and-swap. Makes release visible across replicas, which is what makes
+            scale-to-zero safe.</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    Runs longer than about four minutes exceed the request path. Enable the background <strong>worker</strong> (an ACA
+    Job) and the status poll becomes read-only while the worker drives approved runs to completion. The worker requires
+    the <code>table</code> backend, for the same reason scale-out does.
+  </p>
+
+  <h2>Cost</h2>
+  <p>
+    Delegated mode is effectively free — the caller's own model runs the inference. Embedded mode is dominated by
+    server-side inference, which is why hosting is scale-to-zero and why per-tenant concurrency and a per-tenant cost
+    ceiling are first-class settings rather than afterthoughts. Set
+    <code>SQUAD_MCP_TENANT_COST_CEILING_USD</code> before you expose anything to real users.
+  </p>
+
+  <h2>What this deployment deliberately does not do</h2>
+  <ul>
+    <li>It does not write to Azure DevOps, Jira, or GitHub. Ever. A certified native connector does that.</li>
+    <li>It does not execute code or run a deploy. Embedded mode is advisory: finished text, plus the deterministic
+        <code>.pptx</code> render.</li>
+    <li>It does not target Microsoft 365 Copilot or Cowork yet.</li>
+    <li>It does not auto-release a gate under any configuration.</li>
+  </ul>
+
+  <h2>Governed-tenant onboarding</h2>
+  <p>
+    For tenants running Agents 365 governance, the server can be registered as a bring-your-own tool in the tenant
+    catalog, approved in the Microsoft 365 Admin Center, and then consumed from Copilot Studio as an approved tool.
+    The runbook covers the CLI registration, the admin approval, and the consumption step.
+  </p>
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>MIT licensed. Built on <a href="https://github.com/Peter-N91/hve-squad">hve-squad</a>.</span>
+    <span><a href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a> · <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/CHANGELOG.md">Changelog</a></span>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>hve-squad-mcp — the hve-squad as MCP tools</title>
+  <meta name="description" content="An outbound Model Context Protocol server that exposes the hve-squad as coarse, model-invocable tools — locally over stdio in VS Code, and remotely over HTTP for Copilot Studio." />
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<header class="site">
+  <nav class="site">
+    <a class="brand" href="index.html"><img src="assets/logo.svg" alt="" /><span class="wordmark">hve<span class="dot">-</span>squad<span class="tag">mcp</span></span></a>
+    <span class="links">
+      <a class="nav" href="index.html" aria-current="page">Home</a>
+      <a class="nav" href="getting-started.html">Getting started</a>
+      <a class="nav" href="tools.html">Tools</a>
+      <a class="nav" href="deploy.html">Deploy</a>
+      <a class="nav" href="configuration.html">Configuration</a>
+      <a class="nav" href="contributing.html">Contributing</a>
+      <a class="nav" href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a>
+    </span>
+  </nav>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="hero-logo">
+      <img src="assets/logo.svg" alt="hve-squad-mcp logo" />
+      <span class="wordmark">hve<span class="dot">-</span>squad<span class="tag">mcp</span></span>
+    </div>
+    <p class="lead">
+      An outbound <a href="https://modelcontextprotocol.io">Model Context Protocol</a> server that exposes the
+      <a href="https://github.com/Peter-N91/hve-squad">hve-squad</a> as coarse, model-invocable tools — so an MCP host
+      can call the squad directly instead of reimplementing it.
+    </p>
+    <div class="actions">
+      <a class="btn btn-primary" href="getting-started.html">Get started</a>
+      <a class="btn" href="tools.html">See the tools</a>
+      <a class="btn" href="https://github.com/Peter-N91/hve-squad-mcp">Source</a>
+    </div>
+  </div>
+
+  <section>
+    <h2>What this is</h2>
+    <p>
+      hve-squad ships a multi-agent squad — a coordinator, a roster of role personas, and a council that returns a
+      most-restrictive-wins verdict. That squad normally runs <em>inside</em> a host that installed the package.
+      This server turns it inside out: it is the squad's <strong>own</strong> MCP server, which other hosts consume.
+    </p>
+    <p>
+      It is the outbound inverse of the squad's inbound MCP template. The generator reads the deployed squad sources
+      read-only and never duplicates agent logic, so the single source of truth for behaviour stays the personas and
+      the routing instructions — not this package.
+    </p>
+  </section>
+
+  <section>
+    <h2>Two execution modes</h2>
+    <p>Be precise about which one a claim refers to. They are at different maturity levels.</p>
+
+    <table>
+      <thead>
+        <tr><th>Mode</th><th>Host</th><th>State</th><th>Behaves as the full package?</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Delegated</strong> (stdio)</td>
+          <td>VS Code GitHub Copilot, local</td>
+          <td><span class="pill ok">works</span></td>
+          <td><strong>Yes.</strong> VS Code dispatches the real deployed cast. Needs the built package plus an
+              <code>apm install</code> of the cast.</td>
+        </tr>
+        <tr>
+          <td><strong>Embedded advisory</strong></td>
+          <td>Copilot Studio, remote HTTP</td>
+          <td><span class="pill ok">works</span></td>
+          <td><strong>Advisory parity.</strong> Each call runs one server-side dispatch against the real from-disk
+              persona from the bundled cast, under Entra auth, gates, tenant isolation and cost caps. Text only.</td>
+        </tr>
+        <tr>
+          <td><strong>Embedded async pipeline</strong></td>
+          <td>Copilot Studio, remote HTTP</td>
+          <td><span class="pill optin">opt-in</span></td>
+          <td><strong>Advisory parity, full cast.</strong> Data-driven routing runs research → plan → council →
+              review → backlog and produces one sectioned artifact. Off by default.</td>
+        </tr>
+        <tr>
+          <td><strong>Deterministic render</strong></td>
+          <td>Copilot Studio, remote HTTP</td>
+          <td><span class="pill optin">opt-in</span></td>
+          <td><strong>File output.</strong> Renders content YAML to a <code>.pptx</code> and returns a short-lived
+              user-delegation SAS link. No model call.</td>
+        </tr>
+        <tr>
+          <td>Code-executing implement / deploy</td>
+          <td>—</td>
+          <td><span class="pill soon">deferred</span></td>
+          <td>A real tool-calling backend and a persistent workspace. Not available — do not represent it as such.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout">
+      <p>
+        <strong>Bottom line.</strong> Deploy this and you get the full package locally in VS Code, the advisory tools
+        in Copilot Studio today, and — with the pipeline enabled — the full advisory squad running end to end as an
+        async pipeline. Advisory scope means finished <em>text</em> deliverables.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Where to go next</h2>
+    <div class="cards">
+      <a class="card" href="getting-started.html">
+        <h3>Getting started</h3>
+        <p>Build the server and register it in VS Code so Copilot can call the squad locally.</p>
+      </a>
+      <a class="card" href="tools.html">
+        <h3>Tools</h3>
+        <p>Every tool on the surface, the scope it needs, and where it is reachable from.</p>
+      </a>
+      <a class="card" href="deploy.html">
+        <h3>Deploy</h3>
+        <p>Ship the remote HTTP server to Azure Container Apps and reach it from Copilot Studio.</p>
+      </a>
+      <a class="card" href="configuration.html">
+        <h3>Configuration</h3>
+        <p>Operator settings, storage backends, and the automatic squad memory the server writes.</p>
+      </a>
+      <a class="card" href="contributing.html">
+        <h3>Contributing</h3>
+        <p>The release contract, the cast pin, and the security invariants a change must hold.</p>
+      </a>
+      <a class="card" href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/docs/planning/adrs/0001-dual-mode-mcp-exposure-delegated-vs-embedded.md">
+        <h3>Decision record</h3>
+        <p>ADR-0001: why the surface is split into delegated and embedded, and where the trust boundary sits.</p>
+      </a>
+    </div>
+  </section>
+
+  <section>
+    <h2>The trust boundary</h2>
+    <p>
+      This server <strong>never</strong> writes to Azure DevOps, Jira, or GitHub. It produces the plan; a certified
+      native connector performs every write on the end user's own connection, under that connector's auth, DLP, and
+      throttles. Caller input is always data, never instruction — only a persona charter carries authority. Every
+      store path is tenant-scoped and traversal-guarded.
+    </p>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>MIT licensed. Built on <a href="https://github.com/Peter-N91/hve-squad">hve-squad</a>.</span>
+    <span><a href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a> · <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/CHANGELOG.md">Changelog</a></span>
+  </div>
+</footer>
+</body>
+</html>

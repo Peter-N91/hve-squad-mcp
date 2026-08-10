@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Contributing — hve-squad-mcp</title>
+  <meta name="description" content="How to contribute to hve-squad-mcp: the change fragment release contract, the cast pin, and the security invariants every change must hold." />
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<header class="site">
+  <nav class="site">
+    <a class="brand" href="index.html"><img src="assets/logo.svg" alt="" /><span class="wordmark">hve<span class="dot">-</span>squad<span class="tag">mcp</span></span></a>
+    <span class="links">
+      <a class="nav" href="index.html">Home</a>
+      <a class="nav" href="getting-started.html">Getting started</a>
+      <a class="nav" href="tools.html">Tools</a>
+      <a class="nav" href="deploy.html">Deploy</a>
+      <a class="nav" href="configuration.html">Configuration</a>
+      <a class="nav" href="contributing.html" aria-current="page">Contributing</a>
+      <a class="nav" href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a>
+    </span>
+  </nav>
+</header>
+
+<main>
+  <h1>Contributing</h1>
+  <p class="lead">
+    Contributions reach consumers through a fork and pull request. The full guide —
+    <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a> — is the
+    authoritative version; this page is the orientation.
+  </p>
+
+  <div class="actions">
+    <a class="btn btn-primary" href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/CONTRIBUTING.md">Read CONTRIBUTING.md</a>
+    <a class="btn" href="https://github.com/Peter-N91/hve-squad-mcp/issues">Open an issue</a>
+  </div>
+
+  <h2>The release contract</h2>
+  <p>
+    Do not edit <code>CHANGELOG.md</code>, and do not bump <code>version</code> in <code>package.json</code>. Both are
+    release <em>outputs</em>, assembled on <code>main</code>. A pull request that edits either is rejected by CI.
+  </p>
+  <p>
+    The reason is mechanical: a version line is one line and the newest changelog heading is one position, so two pull
+    requests that both touch them always conflict — and the second to merge silently reuses a version the first already
+    claimed. Instead, every pull request adds one new file under <code>.changes/unreleased/</code>:
+  </p>
+  <pre><code>npm run change</code></pre>
+  <p>
+    It asks four things — type, bump, title, entry — and writes a dated, slugged file that never collides with another
+    open pull request. Merging your pull request is what releases it.
+  </p>
+
+  <h3>Bumps track ideas, not artifacts</h3>
+  <table>
+    <thead><tr><th>Bump</th><th>Use when</th></tr></thead>
+    <tbody>
+      <tr><td><code>major</code></td><td>A consumer must change their integration to keep working.</td></tr>
+      <tr><td><code>minor</code></td><td>A genuinely new idea — a new tool, a new execution mode, a new backend family.</td></tr>
+      <tr><td><code>patch</code></td><td>Everything else, including a new role binding under a capability that already shipped.</td></tr>
+    </tbody>
+  </table>
+  <p>
+    When in doubt choose <code>patch</code>. The maintainer sees the resolved level on the pull request check and can
+    raise it; an accidental <code>minor</code> is permanent.
+  </p>
+
+  <h2>Before you open a pull request</h2>
+  <pre><code>npm ci
+npm run lint
+npm test
+npm run test:conformance
+npm run generate:check
+npm run generate:connector:check
+</code></pre>
+
+  <h2>The three invariants</h2>
+  <p>A change that weakens one of these is declined, regardless of what else it does:</p>
+  <ul>
+    <li>
+      <strong>Charter is authority; caller input is data.</strong> Anything arriving from a caller —
+      <code>request</code>, <code>context</code>, deck YAML, a file name — is untrusted content. Only a persona charter
+      carries instruction authority.
+    </li>
+    <li>
+      <strong>The server never writes to Azure DevOps, Jira, or GitHub.</strong> It produces the plan; a certified
+      native connector performs every write on the end user's own connection.
+    </li>
+    <li>
+      <strong>Every store path is tenant-scoped and traversal-guarded.</strong> A new storage target inherits the
+      tenant prefix and the path guard, or it does not ship.
+    </li>
+  </ul>
+  <p>
+    Any change touching auth, gates, tenant isolation, or exposure needs a conformance test under
+    <code>test/conformance/</code>.
+  </p>
+
+  <h2>Editing these docs</h2>
+  <p>
+    This site is plain hand-authored HTML under <code>docs/</code>, deployed to GitHub Pages on push to
+    <code>main</code>. There is no build step — edit the HTML and the CSS directly, and keep the shared nav in sync
+    across pages. Read
+    <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/docs/assets/BRAND.md">BRAND.md</a> before touching the
+    logo or the palette: the mark is a family shared with hve-squad, and only its inner variant layer may change.
+  </p>
+
+  <div class="callout danger">
+    <p>
+      <strong>This repository is public.</strong> Never commit a tenant id, subscription id, resource endpoint, object
+      id, or secret — not in code, not in a fixture, not in an example, not in a changelog entry. Use placeholders.
+    </p>
+  </div>
+
+  <h2>Reporting a vulnerability</h2>
+  <p>
+    Do not open a public issue. Report it privately through
+    <a href="https://github.com/Peter-N91/hve-squad-mcp/security/advisories/new">GitHub Security Advisories</a>.
+  </p>
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>MIT licensed. Built on <a href="https://github.com/Peter-N91/hve-squad">hve-squad</a>.</span>
+    <span><a href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a> · <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/CHANGELOG.md">Changelog</a></span>
+  </div>
+</footer>
+</body>
+</html>

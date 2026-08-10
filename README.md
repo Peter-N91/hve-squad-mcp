@@ -1,8 +1,14 @@
+<p align="center">
+  <img src="docs/assets/logo.svg" alt="hve-squad-mcp logo" width="120" height="120" />
+</p>
+
 # hve-squad MCP server
 
 An outbound [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes the **hve-squad** as coarse, model-invocable tools (five per-role intent tools plus `squad_federate` for the opt-in federation of sub-squads) so MCP hosts can call the squad directly.
 
 This is the outbound inverse of the squad's existing inbound MCP template (`squad-src/.github/skills/squad/mcp.template.json`, which registers servers the squad *consumes*). This package ships the squad's *own* server, which other hosts consume.
+
+**Documentation:** <https://peter-n91.github.io/hve-squad-mcp/> · **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md) · **License:** [MIT](LICENSE)
 
 ## Status — what works today (read this first)
 
@@ -195,6 +201,16 @@ Everything here is new. The generator reads the existing squad sources read-only
 ## Design references
 
 - Remote deploy runbook: [host/RUNBOOK.md](host/RUNBOOK.md) (ACA + Entra + Copilot Studio connector).
-- Dual-mode decision record: [docs/planning/adrs/0001-dual-mode-mcp-exposure-delegated-vs-embedded.md](../docs/planning/adrs/0001-dual-mode-mcp-exposure-delegated-vs-embedded.md) (delegated vs embedded, trust boundary, ARCH-1/ARCH-2).
+- Dual-mode decision record: [docs/planning/adrs/0001-dual-mode-mcp-exposure-delegated-vs-embedded.md](docs/planning/adrs/0001-dual-mode-mcp-exposure-delegated-vs-embedded.md) (delegated vs embedded, trust boundary, ARCH-1/ARCH-2).
 - IaC: [host/infra/main.bicep](host/infra/main.bicep) · connector: [generated/copilot-studio-connector/README.md](generated/copilot-studio-connector/README.md).
 - Conformance (security) proof: `test/conformance/` (auth rejection, cross-tenant, gate carry-through, remote async, pipeline exposure).
+
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) first. The short version: never edit `CHANGELOG.md` or the `version` in `package.json` — add a fragment with `npm run change` instead, and CI resolves the release from the fragments on `main`.
+
+This repository is **public**. Never commit a tenant id, subscription id, resource endpoint, or secret. Report a vulnerability privately through [GitHub Security Advisories](https://github.com/Peter-N91/hve-squad-mcp/security/advisories/new), not a public issue.
+
+## License
+
+MIT — see [LICENSE](LICENSE). The bundled cast under `host/cast/.github/` is redistributed content and each file remains under the license of its originating project; see [NOTICE](NOTICE).

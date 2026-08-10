@@ -5,6 +5,14 @@
   "type": "module",
   "description": "Outbound Model Context Protocol (MCP) server that exposes the hve-squad as coarse intent tools (squad_research, squad_plan, squad_review, squad_architect, squad_run) plus squad_federate for the opt-in federation of named sub-squads, to MCP hosts such as VS Code GitHub Copilot. Phase 0: local stdio, delegated execution.",
   "license": "MIT",
+  "homepage": "https://peter-n91.github.io/hve-squad-mcp/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Peter-N91/hve-squad-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Peter-N91/hve-squad-mcp/issues"
+  },
   "bin": {
     "hve-squad-mcp": "dist/src/server.js"
   },
@@ -13,7 +21,8 @@
     "tools.catalog.yml",
     "generated/mcp-tools.schema.json",
     "generated/copilot-studio-connector",
-    "README.md"
+    "README.md",
+    "NOTICE"
   ],
   "scripts": {
     "build": "tsc",

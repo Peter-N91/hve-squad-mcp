@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Getting started — hve-squad-mcp</title>
+  <meta name="description" content="Build the hve-squad MCP server and register it in VS Code GitHub Copilot so the squad tools become callable locally." />
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<header class="site">
+  <nav class="site">
+    <a class="brand" href="index.html"><img src="assets/logo.svg" alt="" /><span class="wordmark">hve<span class="dot">-</span>squad<span class="tag">mcp</span></span></a>
+    <span class="links">
+      <a class="nav" href="index.html">Home</a>
+      <a class="nav" href="getting-started.html" aria-current="page">Getting started</a>
+      <a class="nav" href="tools.html">Tools</a>
+      <a class="nav" href="deploy.html">Deploy</a>
+      <a class="nav" href="configuration.html">Configuration</a>
+      <a class="nav" href="contributing.html">Contributing</a>
+      <a class="nav" href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a>
+    </span>
+  </nav>
+</header>
+
+<main>
+  <h1>Getting started</h1>
+  <p class="lead">
+    The fastest path is <strong>delegated mode</strong>: the server runs locally on stdio, and VS Code GitHub Copilot
+    dispatches the real deployed cast. No Azure, no auth, no model cost beyond your own Copilot session.
+  </p>
+
+  <h2>Prerequisites</h2>
+  <ul>
+    <li><strong>Node.js 20 or newer.</strong> Developed on Node 24; CI runs 22.</li>
+    <li><strong>VS Code with GitHub Copilot</strong> and MCP support enabled.</li>
+    <li><strong>The hve-squad cast installed in your workspace.</strong> Delegated mode returns a charter for Copilot
+      to dispatch, so the personas must exist locally — install the
+      <a href="https://github.com/Peter-N91/hve-squad">hve-squad</a> APM package and run <code>apm install</code>.</li>
+  </ul>
+
+  <div class="callout warn">
+    <p>
+      The npm package is currently <code>private</code> and unpublished, so <code>npx -y @hve-squad/mcp</code> will not
+      resolve yet. Build from source and point VS Code at the local <code>dist/</code> path.
+    </p>
+  </div>
+
+  <h2>Build the server</h2>
+  <pre><code>git clone https://github.com/Peter-N91/hve-squad-mcp.git
+cd hve-squad-mcp
+npm ci
+npm run build     # tsc -> dist/
+npm test          # unit suites
+</code></pre>
+
+  <p>To run it by hand — it speaks JSON-RPC on stdout, and logs go to stderr:</p>
+
+  <pre><code>node dist/src/server.js</code></pre>
+
+  <h2>Register it in VS Code</h2>
+  <ol class="steps">
+    <li>
+      <strong>Open (or create) your workspace <code>.vscode/mcp.json</code>.</strong>
+      The package never writes this file for you — the template in the squad sources is an example you copy.
+    </li>
+    <li>
+      <strong>Add the server entry</strong>, pointing <code>args</code> at the absolute path of your build:
+      <pre><code>{
+  "servers": {
+    "hve-squad": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["C:\\path\\to\\hve-squad-mcp\\dist\\src\\server.js"]
+    }
+  }
+}</code></pre>
+    </li>
+    <li>
+      <strong>Reload VS Code.</strong> The <code>squad_*</code> tools appear in the Copilot tool picker.
+    </li>
+    <li>
+      <strong>Ask for the squad in natural language</strong> — "research X with the squad", "have the squad review this
+      design". Copilot picks the tool, the server returns the delegated charter, and Copilot dispatches the real
+      persona from your installed cast.
+    </li>
+  </ol>
+
+  <h2>What "delegated" actually means</h2>
+  <p>
+    In delegated mode the server performs <strong>no model call</strong>. It resolves the routing intent, loads the
+    matching persona charter from disk, and hands that charter back to the calling host. Your Copilot session runs the
+    inference. That is why delegated mode costs nothing on the server side and why it reaches full package parity — the
+    host is running the same cast it always ran, just routed by the squad's own routing table.
+  </p>
+  <p>
+    The remote <a href="deploy.html">embedded mode</a> is the opposite trade: the server runs the dispatch itself
+    against Azure OpenAI, which is what makes it reachable from Copilot Studio, and what makes it cost money.
+  </p>
+
+  <h2>Verify a change</h2>
+  <p>If you are modifying the server, these are the checks CI runs:</p>
+  <pre><code>npm run lint                      # tsc --noEmit
+npm test                          # unit suites
+npm run test:conformance          # security conformance suites
+npm run generate:check            # generated descriptor is not stale
+npm run generate:connector:check  # generated connector is not stale
+npm run snapshot:cast:check       # bundled cast matches its pin
+</code></pre>
+
+  <div class="callout">
+    <p>
+      <code>generated/</code> is committed <em>and</em> regenerable. If you touched <code>tools.catalog.yml</code>,
+      run <code>npm run generate</code> and commit the result — CI fails on drift, not on the change itself.
+    </p>
+  </div>
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>MIT licensed. Built on <a href="https://github.com/Peter-N91/hve-squad">hve-squad</a>.</span>
+    <span><a href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a> · <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/CHANGELOG.md">Changelog</a></span>
+  </div>
+</footer>
+</body>
+</html>

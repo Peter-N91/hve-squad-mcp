@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="hve-squad MCP server logo" width="64" height="64">
+  <!--
+    hve-squad brand family. The BASE LAYER (defs, hexagon badge, coordinator
+    core, command chevron) is byte-identical across every variant and must not
+    diverge. Only the VARIANT LAYER below changes. See BRAND.md.
+  -->
+  <defs>
+    <linearGradient id="hsEdge" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3ddc97"/>
+      <stop offset="1" stop-color="#5aa9ff"/>
+    </linearGradient>
+    <radialGradient id="hsCore" cx="32" cy="30" r="8" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8ffccf"/>
+      <stop offset="1" stop-color="#3ddc97"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Hexagon badge -->
+  <polygon
+    points="32,3 55.1,16.5 55.1,47.5 32,61 8.9,47.5 8.9,16.5"
+    fill="#11171f" stroke="url(#hsEdge)" stroke-width="2.5" stroke-linejoin="round"/>
+
+  <!-- VARIANT LAYER (mcp): protocol links out to exposed tool ports.
+       Dashed because the hop is over the wire, not in-process. -->
+  <g stroke="#5aa9ff" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 2.6" opacity="0.55">
+    <line x1="32" y1="30" x2="32" y2="16"/>
+    <line x1="32" y1="30" x2="18" y2="44"/>
+    <line x1="32" y1="30" x2="46" y2="44"/>
+  </g>
+
+  <!-- Tool ports: squares, not agent circles -->
+  <g fill="#5aa9ff">
+    <rect x="27.8" y="11.8" width="8.4" height="8.4" rx="1.8"/>
+    <rect x="13.8" y="39.8" width="8.4" height="8.4" rx="1.8"/>
+    <rect x="41.8" y="39.8" width="8.4" height="8.4" rx="1.8"/>
+  </g>
+  <g stroke="#0b0f14" stroke-width="1.7" stroke-linecap="round">
+    <line x1="29.8" y1="16" x2="34.2" y2="16"/>
+    <line x1="15.8" y1="44" x2="20.2" y2="44"/>
+    <line x1="43.8" y1="44" x2="48.2" y2="44"/>
+  </g>
+  <!-- END VARIANT LAYER -->
+
+  <!-- Coordinator core -->
+  <circle cx="32" cy="30" r="6.5" fill="url(#hsCore)" stroke="#06281c" stroke-width="1.5"/>
+
+  <!-- Command chevron inside the core -->
+  <path d="M29.6 27.4 L33 30 L29.6 32.6" fill="none" stroke="#06281c" stroke-width="1.6"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
