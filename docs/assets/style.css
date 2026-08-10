@@ -441,12 +441,23 @@ ol.steps > li::before {
   place-items: center;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 760px) {
   .hero-logo .wordmark {
     font-size: 1.45rem;
   }
 
   nav.site .links {
     gap: 0.75rem;
+  }
+
+  /* Keep a wide table inside its own scroller instead of widening the page. */
+  table {
+    display: block;
+    overflow-x: auto;
+    width: 100%;
+  }
+
+  td code {
+    white-space: normal;
   }
 }
