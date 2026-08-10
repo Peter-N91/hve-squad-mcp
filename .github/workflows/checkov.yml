@@ -48,11 +48,41 @@ jobs:
             --skip-path node_modules --skip-path dist --skip-path host/cast \
             --output cli --output sarif --output-file-path console,results.sarif
 
+      # Checkov records an inline `checkov:skip` as a SARIF `suppressions` entry
+      # carrying its justification, and Checkov's own exit code honours it. GitHub
+      # Code Scanning does NOT read that property, so an accepted finding still
+      # lands in the Security tab as an open alert — which trains people to ignore
+      # the Security tab, the one outcome a scanner must avoid.
+      #
+      # Suppressed results are therefore dropped before upload and reported here
+      # instead, so the justification stays visible and reviewable rather than
+      # silently disappearing. The artifact below keeps the UNFILTERED SARIF.
+      - name: Report and drop suppressed results
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          jq '(.runs[]?.results) |= map(select((.suppressions // []) | length == 0))' \
+            results.sarif > code-scanning.sarif
+
+          COUNT=$(jq '[.runs[]?.results[]? | select((.suppressions // []) | length > 0)] | length' results.sarif)
+          echo "### Checkov: $COUNT accepted finding(s)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$COUNT" -gt 0 ]; then
+            {
+              echo
+              echo "| Rule | Location | Justification |"
+              echo "|------|----------|---------------|"
+              jq -r '.runs[]?.results[]?
+                | select((.suppressions // []) | length > 0)
+                | "| \(.ruleId) | \(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine) | \(.suppressions[0].justification // "none given") |"' \
+                results.sarif
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Upload SARIF to code scanning
         if: ${{ !cancelled() }}
         uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
-          sarif_file: results.sarif
+          sarif_file: code-scanning.sarif
           category: checkov
 
       - name: Retain the full SARIF
