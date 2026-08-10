@@ -10,6 +10,24 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
+## [0.3.4] - 2026-08-10
+
+> Built against `Peter-N91/hve-squad@0.12.6` (see `host/cast/package-pin.json`).
+
+### Added
+
+- **The repository shipped with no license, no contributor guide, and no consumer-facing documentation.** Added `LICENSE` (MIT, matching the `license` field `package.json` already declared) and a `NOTICE` recording that `host/cast/.github/` is redistributed content whose files stay under their originating licenses. Added `CONTRIBUTING.md` covering the change-fragment release contract, the `tools.catalog.yml` drift check, the cast-pin procedure, and the three security invariants a change must hold. Added a GitHub Pages site under `docs/` — home, getting started, tools, deploy, configuration, and contributing — published by the new `.github/workflows/docs.yml`, plus the `hve-squad-mcp` logo variant and `docs/assets/BRAND.md` defining the shared badge and the variant layer that future surfaces swap.
+
+### Consumer install
+
+Pin to this version:
+
+```powershell
+npm install "Peter-N91/hve-squad-mcp#v0.3.4"
+```
+
+[0.3.4]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.3.4
+
 ## [0.3.3] - 2026-08-10
 
 > Built against `Peter-N91/hve-squad@0.12.6` (see `host/cast/package-pin.json`).
