@@ -21,3 +21,10 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     labels: [dependencies, skip-changelog]
+    groups:
+      # init, analyze, and upload-sarif refuse to run at different versions:
+      # "Loaded a configuration file for version '4.36.0', but running version
+      # '4.37.6'". Bumped separately, each pull request is red by construction.
+      codeql-action:
+        patterns:
+          - 'github/codeql-action*'
