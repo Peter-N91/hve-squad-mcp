@@ -10,6 +10,24 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
+## [0.3.3] - 2026-08-10
+
+> Built against `Peter-N91/hve-squad@0.12.6` (see `host/cast/package-pin.json`).
+
+### Fixed
+
+- **Accepted Checkov findings still showed as open alerts in the Security tab.** Checkov records an inline `checkov:skip` as a SARIF `suppressions` entry and honours it in its own exit code, but GitHub Code Scanning ignores that property, so three justified suppressions sat open as warnings. Suppressed results are now dropped before the upload and reported in the job summary with their justification instead, so an accepted finding stays reviewable without training anyone to ignore the Security tab. The unfiltered SARIF is still retained as an artifact (`.github/workflows/checkov.yml`).
+
+### Consumer install
+
+Pin to this version:
+
+```powershell
+npm install "Peter-N91/hve-squad-mcp#v0.3.3"
+```
+
+[0.3.3]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.3.3
+
 ## [0.3.2] - 2026-08-10
 
 > Built against `Peter-N91/hve-squad@0.12.6` (see `host/cast/package-pin.json`).
