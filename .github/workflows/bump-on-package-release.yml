@@ -141,14 +141,27 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-            echo "::notice::$BRANCH already exists — a pull request is already open for $TARGET."
+
+          # Check for an open PULL REQUEST, not for the branch. A previous run
+          # pushed the branch and then failed at `gh pr create`, and a
+          # branch-exists guard read that as "already open" and exited clean —
+          # so the bump sat stranded on a branch nobody was told about while
+          # every later run reported success. Recover by opening the PR.
+          if gh pr list --head "$BRANCH" --state open --json number --jq 'length' | grep -qx '[1-9][0-9]*'; then
+            echo "::notice::A pull request is already open for $TARGET."
             exit 0
           fi
-          git checkout -b "$BRANCH"
-          git add host/cast .changes/unreleased generated
-          git commit -m "chore(cast): pin ${PACKAGE_REPO}@${TARGET}"
-          git push origin "$BRANCH"
+
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "::notice::$BRANCH already exists without an open pull request — reusing it."
+            git fetch origin "$BRANCH"
+            git checkout -B "$BRANCH" "origin/$BRANCH"
+          else
+            git checkout -b "$BRANCH"
+            git add host/cast .changes/unreleased generated
+            git commit -m "chore(cast): pin ${PACKAGE_REPO}@${TARGET}"
+            git push origin "$BRANCH"
+          fi
           {
             echo "Tracks \`$PACKAGE_REPO\` \`$CURRENT\` -> \`$TARGET\`."
             echo
@@ -158,8 +171,11 @@ jobs:
             echo
             echo "The version and \`CHANGELOG.md\` are deliberately untouched — release-prep moves them on \`main\` from the fragment in this branch."
           } > /tmp/pr-body.md
-          gh pr create \
+          if ! gh pr create \
             --title "chore(cast): pin ${PACKAGE_REPO}@${TARGET}" \
             --body-file /tmp/pr-body.md \
             --base main \
-            --head "$BRANCH"
+            --head "$BRANCH"; then
+            echo "::error::Pushed $BRANCH but could not open the pull request. GitHub blocks the job token from creating pull requests unless Settings > Actions > General > 'Allow GitHub Actions to create and approve pull requests' is enabled, or a PACKAGE_SYNC_TOKEN secret (a PAT) is configured. The branch is pushed, so opening the pull request by hand loses nothing."
+            exit 1
+          fi
