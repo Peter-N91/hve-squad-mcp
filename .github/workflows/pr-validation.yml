@@ -38,20 +38,26 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > /tmp/changed.txt
+          # Diff against the MERGE BASE, not the base branch tip. `base.sha` is
+          # whatever main pointed at when the event fired, so a branch that has
+          # fallen behind reads main's own newer commits as reversions — which
+          # rejected a bot pin-bump for "editing CHANGELOG.md" it never touched.
+          MERGE_BASE=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+          echo "merge-base=$MERGE_BASE" >> "$GITHUB_OUTPUT"
+          git diff --name-only "$MERGE_BASE" "$HEAD_SHA" > /tmp/changed.txt
           echo "Changed files:"
           cat /tmp/changed.txt
 
       - name: Reject edits to release state
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_BASE: ${{ steps.diff.outputs.merge-base }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           if grep -qx 'CHANGELOG.md' /tmp/changed.txt; then
             echo "::error file=CHANGELOG.md::CHANGELOG.md is assembled on main from .changes/unreleased/. Add a fragment with 'npm run change' instead."
             exit 1
           fi
-          if git diff "$BASE_SHA" "$HEAD_SHA" -- package.json | grep -qE '^[+-]\s*"version"\s*:'; then
+          if git diff "$MERGE_BASE" "$HEAD_SHA" -- package.json | grep -qE '^[+-]\s*"version"\s*:'; then
             echo "::error file=package.json::The version is bumped on main by release-prep. Do not edit it in a pull request."
             exit 1
           fi
