@@ -10,6 +10,28 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
+## [0.3.6] - 2026-08-10
+
+> Built against `Peter-N91/hve-squad@0.12.6` (see `host/cast/package-pin.json`).
+
+### Added
+
+- **The scenario walkthrough enabled squad memory without saying where any of it lands.** Added *Part 2 - Decide where the history is saved* to `docs/scenario-product-backlog.html`: the `.copilot-tracking/` tree a run writes, a `table` / `graph` / `file` comparison with the operator action each one needs, the SharePoint path (`graph-memory-permissions.bicep`, `Sites.Selected` plus a single-site grant, and why encryption defeats the point of choosing SharePoint), blob overflow for artifacts past the table entity ceiling, multi-target allow-lists, and the two ways history is read back. Calls out that run state and memory are separate stores that both read `SQUAD_MCP_STORAGE_ACCOUNT`, and that leaving the memory section in the agent instructions while auto-memory is on silently destroys continuity.
+
+### Fixed
+
+- **The cast-bump workflow pushed a branch it could not open a pull request for.** `GH_TOKEN` fell back to `github.token`, which GitHub forbids from creating pull requests, so the job did every step and failed on the last line - leaving `0.12.7` stranded on a pushed branch. It now resolves `PACKAGE_SYNC_TOKEN` or `RELEASE_TOKEN` and checks for one **before** the branch is pushed, so a missing token fails fast with nothing to clean up and an error naming both remedies.
+
+### Consumer install
+
+Pin to this version:
+
+```powershell
+npm install "Peter-N91/hve-squad-mcp#v0.3.6"
+```
+
+[0.3.6]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.3.6
+
 ## [0.3.5] - 2026-08-10
 
 > Built against `Peter-N91/hve-squad@0.12.6` (see `host/cast/package-pin.json`).
