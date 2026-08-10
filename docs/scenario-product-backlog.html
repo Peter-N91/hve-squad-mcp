@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scenario: idea to backlog — hve-squad-mcp</title>
+  <meta name="description" content="End-to-end walkthrough: deploy the hve-squad MCP server, run the product profile from Copilot Studio, and create the resulting epics, stories, and tasks in Azure DevOps, Jira, or GitHub." />
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<header class="site">
+  <nav class="site">
+    <a class="brand" href="index.html"><img src="assets/logo.svg" alt="" /><span class="wordmark">hve<span class="dot">-</span>squad<span class="tag">mcp</span></span></a>
+    <span class="links">
+      <a class="nav" href="index.html">Home</a>
+      <a class="nav" href="getting-started.html">Getting started</a>
+      <a class="nav" href="tools.html">Tools</a>
+      <a class="nav" href="deploy.html">Deploy</a>
+      <a class="nav" href="configuration.html">Configuration</a>
+      <a class="nav" href="scenario-product-backlog.html" aria-current="page">Scenario</a>
+      <a class="nav" href="contributing.html">Contributing</a>
+      <a class="nav" href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a>
+    </span>
+  </nav>
+</header>
+
+<main>
+  <h1>Scenario: from an idea to a delivery backlog</h1>
+  <p class="lead">
+    A business user types an idea into a Copilot Studio agent. The <strong>product</strong> squad researches it, plans
+    it, produces the stakeholder deliverables, and hands back a structured backlog — which the agent then creates as
+    epics, stories, and tasks in Azure DevOps, Jira, or GitHub. This page is the whole path, end to end, so you can
+    reproduce it.
+  </p>
+
+  <div class="callout">
+    <p>
+      <strong>Two things this scenario is not.</strong> The server never writes to Azure DevOps, Jira, or GitHub — the
+      agent does, through the certified native connector on the user's own connection. And the squad's output is
+      <em>advisory</em>: finished text and a validated plan, not executed code.
+    </p>
+  </div>
+
+  <h2>What you will have at the end</h2>
+  <ol>
+    <li>A deployed MCP server in your own Azure tenant, with the product profile and the business tools enabled.</li>
+    <li>A Copilot Studio agent with two connectors: this server, and your native work-tracking connector.</li>
+    <li>A repeatable conversation: <em>"turn this PRD into a backlog"</em> → confirmation → work items created, correctly
+        parented, with acceptance criteria intact.</li>
+    <li>A durable trail under <code>.copilot-tracking/</code> in your own storage, read back automatically on the next run.</li>
+  </ol>
+
+  <h2>Part 0 — Prerequisites</h2>
+  <ul>
+    <li>An Azure subscription you can deploy to, and permission to create an Entra app registration.</li>
+    <li>An Azure OpenAI deployment. <strong>This is where the cost is.</strong></li>
+    <li>A Copilot Studio licence, and the ability to add a custom connector.</li>
+    <li>Azure DevOps, Jira, or GitHub, with a licence that permits the native connector.</li>
+    <li>The repository cloned, and <code>npm ci &amp;&amp; npm run build</code> run once.</li>
+  </ul>
+
+  <h2>Part 1 — Deploy with the product path switched on</h2>
+  <p>
+    Follow <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/host/RUNBOOK.md">host/RUNBOOK.md</a> steps 1–7
+    for the base deployment. This scenario needs more than the default advisory posture, so set the following before
+    Step 6 (they are <code>main.bicepparam</code> parameters as well as environment variables):
+  </p>
+
+  <table>
+    <thead><tr><th>Setting</th><th>Value</th><th>Why this scenario needs it</th></tr></thead>
+    <tbody>
+      <tr><td><code>SQUAD_MCP_REMOTE_PIPELINE_ENABLED</code></td><td><code>true</code></td><td>Serves <code>squad_run</code> and <code>squad_status</code>. Off by default.</td></tr>
+      <tr><td><code>SQUAD_MCP_RUN_STATE_BACKEND</code></td><td><code>table</code></td><td>A product run is long. Table state survives scale-to-zero and makes approval visible across replicas.</td></tr>
+      <tr><td><code>SQUAD_MCP_STORAGE_ACCOUNT</code></td><td>your account</td><td>Backs run state, memory, and overflow.</td></tr>
+      <tr><td><code>SQUAD_MCP_WORKER_ENABLED</code></td><td><code>true</code></td><td>A 10-stage product run exceeds the request path. The worker drives it off-request.</td></tr>
+      <tr><td><code>SQUAD_MCP_ENABLE_BUSINESS_TOOLS</code></td><td><code>true</code></td><td>Serves <code>squad_backlog</code> — the JSON contract this whole scenario turns on.</td></tr>
+      <tr><td><code>SQUAD_MCP_ENABLE_MEMORY</code></td><td><code>true</code></td><td>Persists the <code>.copilot-tracking/</code> tree.</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_BACKEND</code></td><td><code>table</code> or <code>graph</code></td><td>Where that tree lands. <a href="#history">Decide this in Part 2</a> before you deploy.</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_AUTO_ENABLED</code></td><td><code>true</code></td><td>Reads prior state back into <code>context</code> automatically, so the backlog call already knows what the run decided.</td></tr>
+      <tr><td><code>SQUAD_MCP_ENABLE_ARTIFACTS</code></td><td><code>true</code></td><td>Writes the ledger — <code>team.md</code>, <code>routing.md</code>, <code>state.json</code> — so the squad is inspectable.</td></tr>
+      <tr><td><code>SQUAD_MCP_ADVISORY_AUTOPILOT_ENABLED</code></td><td><code>true</code></td><td><strong>Optional but recommended here.</strong> See the note below.</td></tr>
+      <tr><td><code>SQUAD_MCP_RUN_ENCRYPTION_KEY_B64</code></td><td>a base64 key</td><td>Encrypts stage artifacts and caller input at rest. Requirements documents are usually confidential.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <p>
+      <strong>About autopilot.</strong> <code>squad_run</code> normally holds at a Human Gate and needs an operator to
+      release it — which is fine for you, and confusing for a business user who just wants a backlog. The product
+      profile carries <em>no impactful role</em> (no deployer, no IaC author, no backlog executor), so it resolves as
+      advisory-only, and <code>SQUAD_MCP_ADVISORY_AUTOPILOT_ENABLED=true</code> lets it run to completion unattended.
+    </p>
+    <p>
+      This <strong>narrows</strong> the gate; it does not remove it. Ask for anything that routes an impactful role and
+      the run still holds. If you would rather keep every run gated, leave it off and use the operator release in
+      Part 6.
+    </p>
+  </div>
+
+  <h2 id="history">Part 2 — Decide where the history is saved</h2>
+  <p>
+    This is the decision people skip, and then discover after their first real run that a month of squad output lives
+    somewhere nobody can open. Decide it now — it is one setting, and it is the same setting for everything the squad
+    writes.
+  </p>
+
+  <h3>What actually gets written</h3>
+  <p>
+    With <code>SQUAD_MCP_ENABLE_ARTIFACTS=true</code> a run writes a browsable <code>.copilot-tracking/</code> tree —
+    the same tree the squad produces when it runs locally in VS Code:
+  </p>
+  <pre><code>squad/team.md                          the 13 seeded roles
+squad/routing.md                       the rows those roles can serve
+squad/state.json                       the ledger
+squad/decisions.md                     append-only — incl. the Intake Readiness Verdict
+squad/notifications.md                 append-only
+squad/history/&lt;agent&gt;.md               per agent, with a measured Consumption block
+squad/history/autopilot-run-&lt;id&gt;.md    per run
+squad/consumption.md                   rebuilt from those blocks, so earlier turns are never dropped
+plans/ · docs/ · outputs/ · ppt/&lt;date&gt;/&lt;slug&gt;/   the deliverables themselves</code></pre>
+  <div class="callout warn">
+    <p>
+      Without <code>SQUAD_MCP_ENABLE_ARTIFACTS</code>, auto-memory keeps <strong>three flat keys</strong>. That is
+      enough for continuity between two turns and nothing you can audit — you cannot open the PRD a run produced or see
+      which agent wrote what. For this scenario, turn it on.
+    </p>
+  </div>
+
+  <h3>Pick a destination</h3>
+  <p>
+    One setting, <code>SQUAD_MCP_MEMORY_BACKEND</code>, chooses it for memory, the ledger, and the deliverables at once.
+  </p>
+  <table>
+    <thead><tr><th>Backend</th><th>Where it lands</th><th>Choose it when</th><th>What you must do</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>table</code><br /><em>default</em></td>
+        <td>Azure Table Storage in your account, table <code>squadmemory</code></td>
+        <td>You want it durable, cheap, and multi-replica safe, and you read it through the tools rather than by hand.</td>
+        <td>Set <code>SQUAD_MCP_STORAGE_ACCOUNT</code>. <strong>Nothing else</strong> — <code>main.bicep</code> assigns
+            <em>Storage Table Data Contributor</em> to the app and worker identity for you.</td>
+      </tr>
+      <tr>
+        <td><code>graph</code></td>
+        <td>A SharePoint document library or OneDrive, one readable <code>.md</code> file per entry</td>
+        <td><strong>Business users need to open the output themselves.</strong> For a product-profile scenario this is
+            usually the right answer.</td>
+        <td>Set <code>SQUAD_MCP_MEMORY_GRAPH_DRIVE_ID</code> and run a <em>separate, admin-privileged</em> deployment —
+            see below.</td>
+      </tr>
+      <tr>
+        <td><code>file</code></td>
+        <td>A local directory in the container</td>
+        <td>A single-replica trial. Not durable across a scale-to-zero restart.</td>
+        <td>Set <code>SQUAD_MCP_MEMORY_DIR</code>. Do not combine with the worker.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <p>
+      <strong>Run state and memory are two different stores.</strong> <code>SQUAD_MCP_RUN_STATE_BACKEND</code> holds the
+      in-flight run so it survives a restart; <code>SQUAD_MCP_MEMORY_BACKEND</code> holds the history you keep. They can
+      differ — <code>table</code> run state with <code>graph</code> memory is a normal combination — and they both read
+      <code>SQUAD_MCP_STORAGE_ACCOUNT</code>, which is why the two are easy to confuse.
+    </p>
+  </div>
+
+  <h3>If you chose SharePoint</h3>
+  <p>Each entry becomes one markdown file at:</p>
+  <pre><code>&lt;rootPath&gt;/&lt;tenantId&gt;/&lt;project&gt;/&lt;path&gt;.md</code></pre>
+  <p>
+    versioned by SharePoint and subject to your existing retention, search, and DLP policy. Concurrency uses Graph's
+    native <code>eTag</code> with <code>If-Match</code>, so a stale write loses the race rather than clobbering.
+  </p>
+  <p>Two steps you must perform yourself:</p>
+  <ol class="steps">
+    <li>
+      <strong>Resolve the drive id</strong> of the library that will hold the history:
+      <pre><code>SITE_ID=$(az rest --method GET \
+  --url "https://graph.microsoft.com/v1.0/sites/&lt;TENANT&gt;.sharepoint.com:/sites/&lt;SITE_PATH&gt;" \
+  --query id --output tsv)
+
+az rest --method GET \
+  --url "https://graph.microsoft.com/v1.0/sites/$SITE_ID/drives" \
+  --query "value[].{name:name,id:id}" --output table</code></pre>
+    </li>
+    <li>
+      <strong>Grant the app identity access to that one library</strong>, as an administrator:
+      <pre><code>az deployment group create \
+  --resource-group "$RG" \
+  --template-file host/infra/graph-memory-permissions.bicep \
+  --parameters host/infra/graph-memory-permissions.bicepparam</code></pre>
+      This assigns <code>Sites.Selected</code> — which on its own grants access to <strong>no</strong> site — and then
+      grants write on exactly the site you named. It is a separate deployment on purpose: it needs
+      <code>AppRoleAssignment.ReadWrite.All</code> and <code>Sites.FullControl.All</code>, far above what deploying the
+      Container App needs, so your routine deploys never require Graph admin rights. Re-running it is a no-op.
+    </li>
+  </ol>
+  <div class="callout warn">
+    <p>
+      <strong>Leave <code>SQUAD_MCP_MEMORY_GRAPH_ENCRYPT</code> off</strong> unless policy forces it. The entire reason
+      to target SharePoint is that a human can open the file; encrypting the content defeats that. If you do enable it,
+      configure <code>runEncryptionKeyBase64</code> as well.
+    </p>
+    <p>
+      Leaving <code>sharePointSiteId</code> empty assigns <code>Sites.Selected</code> only. That is a deliberate safe
+      partial state — the identity is eligible but reaches nothing, so a half-finished onboarding never silently
+      exposes a library.
+    </p>
+  </div>
+
+  <h3>Large artifacts</h3>
+  <p>
+    A table entity has a size ceiling, and a PRD or a full backlog will exceed it. Enable overflow so the write does not
+    fail:
+  </p>
+  <table>
+    <thead><tr><th>Variable</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td><code>SQUAD_MCP_MEMORY_OVERFLOW_ENABLED</code></td><td><code>true</code></td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_OVERFLOW_CONTAINER</code></td><td>a blob container name</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_OVERFLOW_THRESHOLD_BYTES</code></td><td><code>32768</code> default</td></tr>
+    </tbody>
+  </table>
+  <p>Anything past the threshold spills to blob with a pointer left in the entity. Reads are transparent.</p>
+
+  <h3>Offering a choice to different teams</h3>
+  <p>
+    If one deployment serves several teams that must not share a destination, declare an allow-list instead of a single
+    backend:
+  </p>
+  <pre><code>SQUAD_MCP_MEMORY_TARGETS=[
+  { "name": "azure",      "backend": "table", "tableName": "squadmemory" },
+  { "name": "sharepoint", "backend": "graph", "driveId": "&lt;DRIVE_ID&gt;", "rootPath": "squad-memory" }
+]
+SQUAD_MCP_MEMORY_DEFAULT_TARGET=azure</code></pre>
+  <p>
+    The caller then passes an opaque <code>target</code> name. <strong>You</strong> own every credential-bearing field;
+    an undeclared name is rejected before any I/O and never falls back to the default.
+  </p>
+
+  <h3>Reading it back</h3>
+  <p>There are two paths, and for this scenario the first one is the one that matters:</p>
+  <ul>
+    <li>
+      <strong>Automatic.</strong> With <code>SQUAD_MCP_MEMORY_AUTO_ENABLED=true</code> the server reads the project's
+      <code>state</code> and <code>decisions</code> before every dispatch and injects them as delimited
+      <strong>data</strong> — never authority. Nobody has to remember to ask for it. This is why the
+      <code>squad_backlog</code> call in Part 7 does not need the run's artifact pasted back in.
+    </li>
+    <li>
+      <strong>On demand.</strong> <code>squad_history</code> browses the tree — <code>op=index</code> to summarize,
+      <code>op=list</code> to enumerate, <code>op=read</code> to open one file. It needs the
+      <code>Squad.Memory</code> scope.
+    </li>
+  </ul>
+  <div class="callout danger">
+    <p>
+      <strong>Turn the memory tools off in the agent.</strong> With automatic memory on, the generated instructions'
+      memory section must be deleted. Left in, the agent calls the tools too, invents a different
+      <code>project</code> name each session, and continuity silently disappears — which looks exactly like the feature
+      not working.
+    </p>
+  </div>
+
+  <h3>What is true regardless of destination</h3>
+  <ul>
+    <li>The validated token's <code>tenantId</code> is always the first path segment, so tenant isolation holds on
+        Azure Table, SharePoint, and disk alike.</li>
+    <li>The partition is derived from a pinned sub-squad or <code>SQUAD_MCP_MEMORY_DEFAULT_PROJECT</code> — it is
+        <strong>never</strong> taken from caller free text.</li>
+    <li>With <code>SQUAD_MCP_RUN_ENCRYPTION_KEY_B64</code> set, stage artifacts, the Council Verdict, and caller
+        <code>request</code>/<code>context</code> are AES-256-GCM encrypted at rest.</li>
+    <li>Writes are compare-and-swap, so two concurrent runs in one project cannot clobber each other.</li>
+  </ul>
+
+  <h2>Part 3 — Expose the scopes this scenario uses</h2>
+  <p>In the Entra app registration from Step 2 of the runbook, expose and consent to:</p>
+  <table>
+    <thead><tr><th>Scope</th><th>Granted to</th><th>For</th></tr></thead>
+    <tbody>
+      <tr><td><code>Squad.Run</code></td><td>the Copilot Studio connection</td><td>Starting the product run and polling it with <code>squad_status</code>.</td></tr>
+      <tr><td><code>Squad.Backlog</code></td><td>the Copilot Studio connection</td><td><code>squad_backlog</code>. Separate from <code>Squad.Business</code> so it is independently revocable.</td></tr>
+      <tr><td><code>Squad.Memory</code></td><td>the Copilot Studio connection</td><td>Optional — only if you want the agent to browse history with <code>squad_history</code>.</td></tr>
+      <tr><td><code>Squad.Operate</code></td><td><strong>you</strong>, as an app role</td><td>Releasing a held run. Never grant this to the agent.</td></tr>
+    </tbody>
+  </table>
+  <p>
+    Every scope is fail-closed: a missing one returns 403 with no work performed and nothing billed.
+  </p>
+
+  <h2>Part 4 — Import the connector into Copilot Studio</h2>
+  <ol class="steps">
+    <li>
+      Regenerate the connector so it reflects your build, then fill in the placeholders in
+      <code>generated/copilot-studio-connector/apiDefinition.swagger.json</code> and <code>apiProperties.json</code>:
+      <pre><code>npm run generate:connector</code></pre>
+      <table>
+        <thead><tr><th>Placeholder</th><th>Replace with</th></tr></thead>
+        <tbody>
+          <tr><td><code>&lt;SQUAD_MCP_HOST&gt;</code></td><td>your Container App FQDN, host only, no scheme</td></tr>
+          <tr><td><code>&lt;ENTRA_TENANT_ID&gt;</code></td><td>your tenant id</td></tr>
+          <tr><td><code>&lt;ENTRA_CLIENT_ID&gt;</code></td><td>the app id from Step 2</td></tr>
+          <tr><td><code>&lt;SQUAD_MCP_AUDIENCE&gt;</code></td><td><code>api://&lt;ENTRA_CLIENT_ID&gt;</code></td></tr>
+        </tbody>
+      </table>
+    </li>
+    <li><strong>Add a custom connector</strong> in Copilot Studio from the OpenAPI file. It advertises the
+        <code>x-ms-agentic-protocol: mcp-streamable-1.0</code> <code>/mcp</code> operation.</li>
+    <li><strong>Complete the Entra OAuth 2.0 connection</strong>, consenting to the scopes in Part 3.</li>
+    <li><strong>Enable generative orchestration</strong> on the agent. Without it the agent cannot call MCP tools at all
+        — this is the single most common reason "nothing happens".</li>
+    <li><strong>Add your work-tracking connector</strong> to the same agent: the certified Azure DevOps, Jira, or GitHub
+        connector, authenticated as the end user.</li>
+    <li><strong>Paste the generated agent instructions</strong> from
+        <code>generated/copilot-studio-connector/agent-instructions.md</code> into the agent's Instructions field. It
+        already contains the create-work-items protocol, the confirmation requirement, and the parenting rules. Delete
+        the memory section — you enabled automatic memory in Part 1, so the agent must not call the memory tools.</li>
+  </ol>
+
+  <h2>Part 5 — What the product profile actually runs</h2>
+  <p>
+    <code>profile: "product"</code> seeds 13 roles, and that seeding is what makes this scenario different from a
+    generic <code>squad_run</code>. Resolved against the bundled cast, a product run sequences:
+  </p>
+
+  <table>
+    <thead><tr><th>#</th><th>Stage</th><th>Role</th><th>Resolved agent</th></tr></thead>
+    <tbody>
+      <tr><td>0</td><td><strong>Intake gate</strong></td><td><code>intake-validator</code></td><td>Product Manager Advisor</td></tr>
+      <tr><td>1</td><td>Research</td><td><code>researcher</code></td><td>Squad Researcher</td></tr>
+      <tr><td>2</td><td>Plan</td><td><code>lead</code></td><td>Squad Lead</td></tr>
+      <tr><td>—</td><td>Council</td><td colspan="2">Interleaved here only when the request engages it. A backlog request usually does not.</td></tr>
+      <tr><td>3</td><td rowspan="7"><strong>Deliverable fan-out</strong></td><td><code>analyst</code></td><td>PRD Builder</td></tr>
+      <tr><td>4</td><td><code>product-owner</code></td><td>GitHub Backlog Manager</td></tr>
+      <tr><td>5</td><td><code>designer</code></td><td>UX UI Designer</td></tr>
+      <tr><td>6</td><td><code>experimenter</code></td><td>Experiment Designer</td></tr>
+      <tr><td>7</td><td><code>presenter</code></td><td>PowerPoint Subagent</td></tr>
+      <tr><td>8</td><td><code>technical-writer</code></td><td>Squad Technical Writer</td></tr>
+      <tr><td>9</td><td><code>data-scientist</code></td><td>DS Gen Data Spec</td></tr>
+      <tr><td>10</td><td>Review</td><td><code>tester</code></td><td>Squad Reviewer</td></tr>
+    </tbody>
+  </table>
+
+  <p>Two behaviours here are worth understanding before you run it:</p>
+  <ul>
+    <li>
+      <strong>The intake gate can stop the run.</strong> Because the product profile seeds
+      <code>intake-validator</code>, a run grounded in a requirements document is validated <em>first</em>. The
+      validator records <code>Ready</code>, <code>Ready-With-Gaps</code>, or <code>Not-Ready</code>. On
+      <code>Not-Ready</code> the pipeline halts with <code>reason: "intake_not_ready"</code> rather than letting seven
+      specialists build on inputs it just rejected. That is the gate working — fix the document and re-run.
+    </li>
+    <li>
+      <strong>There is no separate backlog-handoff stage.</strong> The product profile carries
+      <code>product-owner</code> inside the fan-out, so the handoff <em>is</em> stage 4. A profile without it gets a
+      backlog stage appended instead.
+    </li>
+  </ul>
+
+  <p>Each specialist writes to its own root, which is where you go looking afterwards:</p>
+  <table>
+    <thead><tr><th>Role</th><th>Deliverable root</th></tr></thead>
+    <tbody>
+      <tr><td>analyst, product-owner, designer, experimenter</td><td><code>.copilot-tracking/plans</code></td></tr>
+      <tr><td>presenter</td><td><code>.copilot-tracking/ppt/&lt;date&gt;/deck</code></td></tr>
+      <tr><td>technical-writer</td><td><code>docs</code></td></tr>
+      <tr><td>data-scientist</td><td><code>outputs</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>Part 6 — Run it</h2>
+  <p>In the Copilot Studio agent, the user says something like:</p>
+  <pre><code>Run the full product squad on our customer onboarding PRD and turn it into a delivery backlog.</code></pre>
+  <p>The agent calls <code>squad_run</code>. Make sure your instructions pass the profile:</p>
+  <pre><code>{
+  "name": "squad_run",
+  "arguments": {
+    "request": "Turn our customer onboarding PRD into a delivery backlog",
+    "profile": "product",
+    "mode": "autopilot",
+    "squad": "onboarding",
+    "context": "&lt;the PRD text, or the constraints the user gave&gt;"
+  }
+}</code></pre>
+
+  <div class="callout">
+    <p>
+      <code>squad</code> is the project partition. Use a stable name per initiative — it scopes the memory, the ledger,
+      and the history that the next run reads back. <code>default</code> works, but everything then shares one tree.
+    </p>
+  </div>
+
+  <p><strong>What comes back depends on your Part 1 choice:</strong></p>
+  <table>
+    <thead><tr><th>Autopilot</th><th>Behaviour</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>enabled</td>
+        <td>The run proceeds unattended. The agent gets a run id; the user polls with <code>squad_status</code> until
+            the compiled artifact returns.</td>
+      </tr>
+      <tr>
+        <td>disabled</td>
+        <td>The run holds. The agent reports the run id and says it awaits approval — it must not claim the work is
+            done. You release it out of band:
+            <pre><code>curl -sS -X POST "https://$FQDN/admin/approve" \
+  -H "Authorization: Bearer $OPERATOR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"runId":"&lt;run-id&gt;"}'</code></pre>
+            Then a <code>squad_status</code> poll drives it to completion. The release is tenant-scoped and audited with
+            approver and timestamp.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Part 7 — Turn the result into work items</h2>
+  <p>
+    The compiled artifact is prose — good for a human, wrong for a connector. <code>squad_backlog</code> is the
+    converter:
+  </p>
+  <pre><code>{
+  "name": "squad_backlog",
+  "arguments": {
+    "request": "Break the approved onboarding plan into epics, stories, and tasks",
+    "squad": "onboarding"
+  }
+}</code></pre>
+  <p>
+    With automatic memory on you do not have to paste the run's output back in — the pre-read merges the project's
+    prior state into <code>context</code> as data, so passing the same <code>squad</code> is enough. Pass
+    <code>context</code> explicitly only to add something the run never saw, such as an existing backlog or a
+    definition of done.
+  </p>
+
+  <h3>The contract you get back</h3>
+  <pre><code>{
+  "summary": "Plain-language summary for the business user.",
+  "epics": [ { "title": "...", "description": "...",
+               "acceptanceCriteria": ["..."],
+               "stories": [ { "title": "...", "tasks": [ ... ] } ] } ],
+  "workItems": [
+    { "ref": "E1",       "type": "Epic",       "title": "...", "acceptanceCriteria": ["..."] },
+    { "ref": "E1-S1",    "type": "User Story", "parentRef": "E1",    "estimate": "M", "...": "..." },
+    { "ref": "E1-S1-T1", "type": "Task",       "parentRef": "E1-S1", "...": "..." }
+  ]
+}</code></pre>
+  <p>
+    <code>workItems</code> is a depth-first flattening of <code>epics</code>, so <strong>parents always precede their
+    children</strong>. Iterating it in order and creating as you go means a parent id always exists by the time a child
+    needs it. <code>ref</code> and <code>parentRef</code> are assigned by the server, not the model — which is the point:
+    the agent links by id it recorded, never by matching titles, because titles are not unique and a model will rephrase
+    them.
+  </p>
+  <p>
+    The server validates and normalizes the model's JSON and fails cleanly if it cannot, so the agent never receives
+    half-parsed output. Hard caps apply — 30 epics, 30 stories per epic, 30 tasks per story, 20 acceptance criteria,
+    4000 characters per text field — so one call can never emit an unbounded backlog.
+  </p>
+
+  <h3>The agent's create loop</h3>
+  <p>This is already in the generated instructions; it is repeated here so you can verify the behaviour you see:</p>
+  <ol class="steps">
+    <li>Show the user the <code>summary</code> and the epic/story list. <strong>Ask for confirmation.</strong> Never
+        bulk-create unconfirmed.</li>
+    <li>On confirmation, iterate <code>workItems</code> in order, one connector call per element: type from
+        <code>type</code>, title from <code>title</code>, description from <code>description</code>, and the
+        <code>acceptanceCriteria</code> lines joined as a list.</li>
+    <li>Record the created id against the element's <code>ref</code>. When an element has a <code>parentRef</code>, link
+        it to the id recorded for that ref.</li>
+    <li>On a failure, report which <code>ref</code> failed, continue with the rest, then offer to retry only the
+        failures.</li>
+    <li>Pace the calls. The connectors are rate limited per connection — create one epic and its stories at a time
+        rather than firing the whole array at once.</li>
+  </ol>
+
+  <h2>Part 8 — Mapping to your tracker</h2>
+  <p>
+    The contract uses the Azure DevOps type names. That is a naming choice, not a lock-in — the mapping happens in your
+    agent's instructions, and the server is unaware of which tracker you use.
+  </p>
+  <table>
+    <thead><tr><th>Contract <code>type</code></th><th>Azure DevOps</th><th>Jira</th><th>GitHub</th></tr></thead>
+    <tbody>
+      <tr><td><code>Epic</code></td><td>Epic</td><td>Epic</td><td>Issue labelled <code>epic</code></td></tr>
+      <tr><td><code>User Story</code></td><td>User Story <em>(Product Backlog Item on Scrum)</em></td><td>Story</td><td>Issue labelled <code>story</code>, as a sub-issue of the epic</td></tr>
+      <tr><td><code>Task</code></td><td>Task</td><td>Sub-task</td><td>Sub-issue, or a task-list item on the story</td></tr>
+      <tr><td>parenting</td><td><code>Add link</code>, parent/child</td><td>issue link / parent field</td><td>sub-issues</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <p>
+      <strong>Check your ADO process template.</strong> <em>User Story</em> exists in Agile; Scrum calls it
+      <em>Product Backlog Item</em> and CMMI calls it <em>Requirement</em>. If creates fail with an unknown work item
+      type, add the substitution to your agent instructions — the server will keep emitting
+      <code>User Story</code>.
+    </p>
+    <p>
+      <strong>GitHub has no native epic.</strong> The three-level hierarchy maps onto issues plus sub-issues, so decide
+      the convention up front and put it in the instructions. Otherwise the agent will invent one, differently each
+      time.
+    </p>
+  </div>
+
+  <h2>Part 9 — Verify it worked</h2>
+  <table>
+    <thead><tr><th>Check</th><th>Expected</th></tr></thead>
+    <tbody>
+      <tr><td>The run's ledger</td><td><code>team.md</code> lists the 13 product roles; <code>routing.md</code> shows only rows those roles can serve.</td></tr>
+      <tr><td>The decision log</td><td>An <code>## Intake Readiness Verdict</code> block, if the run was grounded in a document.</td></tr>
+      <tr><td>Deliverable roots</td><td>Artifacts under <code>.copilot-tracking/plans</code>, <code>docs</code>, and <code>outputs</code>.</td></tr>
+      <tr><td>The tracker</td><td>Every <code>ref</code> created once, children parented, acceptance criteria present on stories.</td></tr>
+      <tr><td>The next run</td><td>Ask a follow-up with the same <code>squad</code>. It should already know what was decided.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Troubleshooting</h2>
+  <table>
+    <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
+    <tbody>
+      <tr><td>The agent answers from its own knowledge and never calls a tool</td><td>Generative orchestration is off, or the instructions were not pasted</td><td>Enable it, and paste the generated instructions block</td></tr>
+      <tr><td><code>squad_run</code> is not in the tool list</td><td>The pipeline is disabled</td><td><code>SQUAD_MCP_REMOTE_PIPELINE_ENABLED=true</code> plus a durable run-state backend</td></tr>
+      <tr><td><code>squad_backlog</code> is not in the tool list</td><td>Business tools are off</td><td><code>SQUAD_MCP_ENABLE_BUSINESS_TOOLS=true</code>, and a model endpoint must be configured</td></tr>
+      <tr><td>403 on a tool call</td><td>The scope was never consented</td><td>Grant the scope in Part 2 and re-authorize the connection</td></tr>
+      <tr><td>401 on every call</td><td>Token audience or issuer not accepted</td><td>Check <code>&lt;SQUAD_MCP_AUDIENCE&gt;</code> matches <code>api://&lt;client-id&gt;</code></td></tr>
+      <tr><td>403 <code>origin_not_allowed</code></td><td>Origin allow-list</td><td>Add the caller origin to <code>SQUAD_MCP_ALLOWED_ORIGINS</code>. <code>*</code> is rejected at startup</td></tr>
+      <tr><td>The run never finishes</td><td>It is held at the gate, or exceeds the request path</td><td>Approve it, or enable autopilot; and enable the worker for long runs</td></tr>
+      <tr><td>The run stops early with <code>intake_not_ready</code></td><td>The intake gate rejected the inputs</td><td>Read the verdict, fix the requirements document, re-run. This is intended behaviour</td></tr>
+      <tr><td>The squad has the wrong roles</td><td>The project already had a squad</td><td>The seeded roster wins over the <code>profile</code> hint. Use a new <code>squad</code> name</td></tr>
+      <tr><td>Only one giant work item was created</td><td>The agent parsed prose instead of calling <code>squad_backlog</code></td><td>Confirm the tool is reachable and the instructions route backlog requests to it</td></tr>
+      <tr><td>Children are attached to the wrong parent</td><td>The agent matched on title</td><td>It must match on <code>ref</code>. Re-paste the generated instructions</td></tr>
+      <tr><td>Creates fail partway with throttling</td><td>The whole array was fired at once</td><td>Batch: one epic and its stories per pass</td></tr>
+      <tr><td>The next run remembers nothing</td><td>The agent still calls the memory tools and invents a new project name each session</td><td>Delete the memory section from the agent instructions, and pass a stable <code>squad</code></td></tr>
+      <tr><td>A large artifact fails to save</td><td>Table entity size ceiling</td><td>Enable <code>SQUAD_MCP_MEMORY_OVERFLOW_ENABLED</code> with a blob container</td></tr>
+      <tr><td>Nothing appears in the SharePoint library</td><td><code>Sites.Selected</code> was assigned but no site was granted</td><td>Re-run <code>graph-memory-permissions.bicep</code> with <code>sharePointSiteId</code> filled in</td></tr>
+      <tr><td>History vanishes after a restart</td><td>The <code>file</code> memory backend on a scale-to-zero app</td><td>Move to <code>table</code> or <code>graph</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>What this scenario deliberately does not do</h2>
+  <ul>
+    <li>It does not write to Azure DevOps, Jira, or GitHub from the server. Every write is the agent, on the user's own
+        connection, under that connector's auth, DLP, and throttles.</li>
+    <li>It does not execute code, open a pull request, or deploy anything.</li>
+    <li>It does not let the model or the caller release a Human Gate. Only <code>Squad.Operate</code> does, out of band.</li>
+    <li>It does not treat the PRD as instructions. Caller content is data; only a persona charter carries authority.</li>
+  </ul>
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>MIT licensed. Built on <a href="https://github.com/Peter-N91/hve-squad">hve-squad</a>.</span>
+    <span><a href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a> · <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/CHANGELOG.md">Changelog</a></span>
+  </div>
+</footer>
+</body>
+</html>

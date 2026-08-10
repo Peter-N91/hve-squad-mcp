@@ -77,7 +77,7 @@ Federation is additive: on a plain repository (no `federation.md`) the `squad` i
 
 The server surfaces the gate in the **delegated (local VS Code)** path: the coordinator persona's gate context now instructs the host to run the intake gate ahead of the Implementation Gate whenever a request is requirements-driven. The gate maps to a new `intake-validator` role that reuses existing agents by input type (Product Manager Advisor by default; PRD/BRD Quality Reviewer; Squad Challenger), shipped with the `product` and `full` profiles. The gate is conditional and additive &mdash; with no input artifacts in scope it is a silent no-op.
 
-Surfacing the intake gate as an explicit stage of the **embedded/advisory pipeline** (`squad_run`) is deferred to a later release, mirroring how the embedded federation pipeline was staged; the delegated path carries the full behavior today.
+The **embedded/advisory pipeline** (`squad_run`) now carries the gate too: `route()` prepends an intake stage for any profile that seeds `intake-validator` (`product`, `full`), and the pipeline records an `## Intake Readiness Verdict` before dispatching a downstream role. A `Not-Ready` verdict **halts the run** (`reason: "intake_not_ready"`) rather than letting the plan and deliverable stages build on inputs the validator just rejected; an unreadable verdict line degrades to `Ready-With-Gaps` rather than to `Ready`.
 
 ## Execution model — delegated (local VS Code)
 

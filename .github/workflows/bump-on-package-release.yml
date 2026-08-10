@@ -132,11 +132,19 @@ jobs:
       - name: Open the pull request
         if: steps.target.outputs.skip != 'true'
         env:
-          GH_TOKEN: ${{ secrets.PACKAGE_SYNC_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.PACKAGE_SYNC_TOKEN || secrets.RELEASE_TOKEN }}
           TARGET: ${{ steps.target.outputs.version }}
           CURRENT: ${{ steps.target.outputs.current }}
         run: |
           set -euo pipefail
+          # Checked BEFORE the branch is pushed. The job token can push a branch
+          # but CANNOT open a pull request, so falling back to it did all the work
+          # and then failed on the last line, stranding the bump on a branch
+          # nobody was told about. Fail here instead, with nothing to clean up.
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::No pull-request token. GitHub blocks the Actions job token from creating pull requests, so this workflow needs a PAT in PACKAGE_SYNC_TOKEN (or reuses RELEASE_TOKEN) with contents:write and pull-requests:write. The alternative is Settings > Actions > General > 'Allow GitHub Actions to create and approve pull requests', which also lets workflows APPROVE pull requests — prefer the PAT."
+            exit 1
+          fi
           BRANCH="chore/pin-hve-squad-$TARGET"
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
@@ -176,6 +184,6 @@ jobs:
             --body-file /tmp/pr-body.md \
             --base main \
             --head "$BRANCH"; then
-            echo "::error::Pushed $BRANCH but could not open the pull request. GitHub blocks the job token from creating pull requests unless Settings > Actions > General > 'Allow GitHub Actions to create and approve pull requests' is enabled, or a PACKAGE_SYNC_TOKEN secret (a PAT) is configured. The branch is pushed, so opening the pull request by hand loses nothing."
+            echo "::error::Pushed $BRANCH but could not open the pull request. The configured token lacks pull-requests:write, or the repository forbids it. The branch is pushed, so opening the pull request by hand loses nothing."
             exit 1
           fi
