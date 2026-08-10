@@ -56,6 +56,21 @@ jobs:
           ref: main
           persist-credentials: false
 
+      # The `main` ruleset requires a pull request and bypasses only repository
+      # admins, so the release commit must be pushed by a PAT that belongs to
+      # one. Checked BEFORE any work: the job token would otherwise get all the
+      # way to the push and fail with "repository rule violations", which points
+      # at the branch protection rather than at the missing secret.
+      - name: Require the release token
+        if: ${{ inputs.dry_run != true }}
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "::error::RELEASE_TOKEN is not set. The main ruleset ('Changes must be made through a pull request') bypasses only repository admins, so the release commit cannot be pushed by the Actions job token. Add a RELEASE_TOKEN secret holding a PAT owned by a repository admin with contents:write and actions:write."
+            exit 1
+          fi
+
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -93,7 +108,7 @@ jobs:
       - name: Commit and push
         if: ${{ steps.prep.outputs.has_changes == 'true' && inputs.dry_run != true }}
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           VERSION: ${{ steps.prep.outputs.version }}
         run: |
           git config user.name 'github-actions[bot]'
@@ -106,5 +121,5 @@ jobs:
       - name: Dispatch the release
         if: ${{ steps.prep.outputs.has_changes == 'true' && inputs.dry_run != true }}
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: gh workflow run release.yml --ref main
