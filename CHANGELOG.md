@@ -10,6 +10,28 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
+## [0.3.1] - 2026-08-10
+
+> Built against `Peter-N91/hve-squad@0.12.4` (see `host/cast/package-pin.json`).
+
+### Changed
+
+- **Every Dependabot pull request failed validation, and the cast-bump workflow stranded a branch while reporting success.** Dependabot silently drops a label the repository does not define, so the `skip-changelog` it was configured to apply never landed and each bump was asked for a change fragment it cannot write; validation now also exempts `dependabot[bot]` by author, so a missing label cannot wedge it again. The bump workflow guarded on the BRANCH existing rather than on an open pull request, so a run that pushed the branch and then failed at `gh pr create` left the bump invisible while every later run exited clean (`.github/workflows/pr-validation.yml`, `.github/workflows/bump-on-package-release.yml`).
+
+### Fixed
+
+- **Release prep assembled the release and then could not push it.** The `main` ruleset requires changes to arrive through a pull request and bypasses only repository admins, so the `chore(release):` commit was rejected with `GH013: Repository rule violations found`. The workflow had been falling back to the Actions job token when `RELEASE_TOKEN` was unset, which turned a missing secret into an error message about branch protection. It now requires the token up front and says which secret to add (`.github/workflows/release-prep.yml`).
+
+### Consumer install
+
+Pin to this version:
+
+```powershell
+npm install "Peter-N91/hve-squad-mcp#v0.3.1"
+```
+
+[0.3.1]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.3.1
+
 ## [0.3.0] - 2026-08-07
 
 > Built against `Peter-N91/hve-squad@0.12.4` (see `host/cast/package-pin.json`).
