@@ -76,6 +76,7 @@
       <tr><td><code>SQUAD_MCP_WORKER_ENABLED</code></td><td><code>true</code></td><td>A 10-stage product run exceeds the request path. The worker drives it off-request.</td></tr>
       <tr><td><code>SQUAD_MCP_ENABLE_BUSINESS_TOOLS</code></td><td><code>true</code></td><td>Serves <code>squad_backlog</code> — the JSON contract this whole scenario turns on.</td></tr>
       <tr><td><code>SQUAD_MCP_ENABLE_MEMORY</code></td><td><code>true</code></td><td>Persists the <code>.copilot-tracking/</code> tree.</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_BACKEND</code></td><td><code>table</code> or <code>graph</code></td><td>Where that tree lands. <a href="#history">Decide this in Part 2</a> before you deploy.</td></tr>
       <tr><td><code>SQUAD_MCP_MEMORY_AUTO_ENABLED</code></td><td><code>true</code></td><td>Reads prior state back into <code>context</code> automatically, so the backlog call already knows what the run decided.</td></tr>
       <tr><td><code>SQUAD_MCP_ENABLE_ARTIFACTS</code></td><td><code>true</code></td><td>Writes the ledger — <code>team.md</code>, <code>routing.md</code>, <code>state.json</code> — so the squad is inspectable.</td></tr>
       <tr><td><code>SQUAD_MCP_ADVISORY_AUTOPILOT_ENABLED</code></td><td><code>true</code></td><td><strong>Optional but recommended here.</strong> See the note below.</td></tr>
@@ -93,11 +94,189 @@
     <p>
       This <strong>narrows</strong> the gate; it does not remove it. Ask for anything that routes an impactful role and
       the run still holds. If you would rather keep every run gated, leave it off and use the operator release in
-      Part 5.
+      Part 6.
     </p>
   </div>
 
-  <h2>Part 2 — Expose the scopes this scenario uses</h2>
+  <h2 id="history">Part 2 — Decide where the history is saved</h2>
+  <p>
+    This is the decision people skip, and then discover after their first real run that a month of squad output lives
+    somewhere nobody can open. Decide it now — it is one setting, and it is the same setting for everything the squad
+    writes.
+  </p>
+
+  <h3>What actually gets written</h3>
+  <p>
+    With <code>SQUAD_MCP_ENABLE_ARTIFACTS=true</code> a run writes a browsable <code>.copilot-tracking/</code> tree —
+    the same tree the squad produces when it runs locally in VS Code:
+  </p>
+  <pre><code>squad/team.md                          the 13 seeded roles
+squad/routing.md                       the rows those roles can serve
+squad/state.json                       the ledger
+squad/decisions.md                     append-only — incl. the Intake Readiness Verdict
+squad/notifications.md                 append-only
+squad/history/&lt;agent&gt;.md               per agent, with a measured Consumption block
+squad/history/autopilot-run-&lt;id&gt;.md    per run
+squad/consumption.md                   rebuilt from those blocks, so earlier turns are never dropped
+plans/ · docs/ · outputs/ · ppt/&lt;date&gt;/&lt;slug&gt;/   the deliverables themselves</code></pre>
+  <div class="callout warn">
+    <p>
+      Without <code>SQUAD_MCP_ENABLE_ARTIFACTS</code>, auto-memory keeps <strong>three flat keys</strong>. That is
+      enough for continuity between two turns and nothing you can audit — you cannot open the PRD a run produced or see
+      which agent wrote what. For this scenario, turn it on.
+    </p>
+  </div>
+
+  <h3>Pick a destination</h3>
+  <p>
+    One setting, <code>SQUAD_MCP_MEMORY_BACKEND</code>, chooses it for memory, the ledger, and the deliverables at once.
+  </p>
+  <table>
+    <thead><tr><th>Backend</th><th>Where it lands</th><th>Choose it when</th><th>What you must do</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>table</code><br /><em>default</em></td>
+        <td>Azure Table Storage in your account, table <code>squadmemory</code></td>
+        <td>You want it durable, cheap, and multi-replica safe, and you read it through the tools rather than by hand.</td>
+        <td>Set <code>SQUAD_MCP_STORAGE_ACCOUNT</code>. <strong>Nothing else</strong> — <code>main.bicep</code> assigns
+            <em>Storage Table Data Contributor</em> to the app and worker identity for you.</td>
+      </tr>
+      <tr>
+        <td><code>graph</code></td>
+        <td>A SharePoint document library or OneDrive, one readable <code>.md</code> file per entry</td>
+        <td><strong>Business users need to open the output themselves.</strong> For a product-profile scenario this is
+            usually the right answer.</td>
+        <td>Set <code>SQUAD_MCP_MEMORY_GRAPH_DRIVE_ID</code> and run a <em>separate, admin-privileged</em> deployment —
+            see below.</td>
+      </tr>
+      <tr>
+        <td><code>file</code></td>
+        <td>A local directory in the container</td>
+        <td>A single-replica trial. Not durable across a scale-to-zero restart.</td>
+        <td>Set <code>SQUAD_MCP_MEMORY_DIR</code>. Do not combine with the worker.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <p>
+      <strong>Run state and memory are two different stores.</strong> <code>SQUAD_MCP_RUN_STATE_BACKEND</code> holds the
+      in-flight run so it survives a restart; <code>SQUAD_MCP_MEMORY_BACKEND</code> holds the history you keep. They can
+      differ — <code>table</code> run state with <code>graph</code> memory is a normal combination — and they both read
+      <code>SQUAD_MCP_STORAGE_ACCOUNT</code>, which is why the two are easy to confuse.
+    </p>
+  </div>
+
+  <h3>If you chose SharePoint</h3>
+  <p>Each entry becomes one markdown file at:</p>
+  <pre><code>&lt;rootPath&gt;/&lt;tenantId&gt;/&lt;project&gt;/&lt;path&gt;.md</code></pre>
+  <p>
+    versioned by SharePoint and subject to your existing retention, search, and DLP policy. Concurrency uses Graph's
+    native <code>eTag</code> with <code>If-Match</code>, so a stale write loses the race rather than clobbering.
+  </p>
+  <p>Two steps you must perform yourself:</p>
+  <ol class="steps">
+    <li>
+      <strong>Resolve the drive id</strong> of the library that will hold the history:
+      <pre><code>SITE_ID=$(az rest --method GET \
+  --url "https://graph.microsoft.com/v1.0/sites/&lt;TENANT&gt;.sharepoint.com:/sites/&lt;SITE_PATH&gt;" \
+  --query id --output tsv)
+
+az rest --method GET \
+  --url "https://graph.microsoft.com/v1.0/sites/$SITE_ID/drives" \
+  --query "value[].{name:name,id:id}" --output table</code></pre>
+    </li>
+    <li>
+      <strong>Grant the app identity access to that one library</strong>, as an administrator:
+      <pre><code>az deployment group create \
+  --resource-group "$RG" \
+  --template-file host/infra/graph-memory-permissions.bicep \
+  --parameters host/infra/graph-memory-permissions.bicepparam</code></pre>
+      This assigns <code>Sites.Selected</code> — which on its own grants access to <strong>no</strong> site — and then
+      grants write on exactly the site you named. It is a separate deployment on purpose: it needs
+      <code>AppRoleAssignment.ReadWrite.All</code> and <code>Sites.FullControl.All</code>, far above what deploying the
+      Container App needs, so your routine deploys never require Graph admin rights. Re-running it is a no-op.
+    </li>
+  </ol>
+  <div class="callout warn">
+    <p>
+      <strong>Leave <code>SQUAD_MCP_MEMORY_GRAPH_ENCRYPT</code> off</strong> unless policy forces it. The entire reason
+      to target SharePoint is that a human can open the file; encrypting the content defeats that. If you do enable it,
+      configure <code>runEncryptionKeyBase64</code> as well.
+    </p>
+    <p>
+      Leaving <code>sharePointSiteId</code> empty assigns <code>Sites.Selected</code> only. That is a deliberate safe
+      partial state — the identity is eligible but reaches nothing, so a half-finished onboarding never silently
+      exposes a library.
+    </p>
+  </div>
+
+  <h3>Large artifacts</h3>
+  <p>
+    A table entity has a size ceiling, and a PRD or a full backlog will exceed it. Enable overflow so the write does not
+    fail:
+  </p>
+  <table>
+    <thead><tr><th>Variable</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td><code>SQUAD_MCP_MEMORY_OVERFLOW_ENABLED</code></td><td><code>true</code></td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_OVERFLOW_CONTAINER</code></td><td>a blob container name</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_OVERFLOW_THRESHOLD_BYTES</code></td><td><code>32768</code> default</td></tr>
+    </tbody>
+  </table>
+  <p>Anything past the threshold spills to blob with a pointer left in the entity. Reads are transparent.</p>
+
+  <h3>Offering a choice to different teams</h3>
+  <p>
+    If one deployment serves several teams that must not share a destination, declare an allow-list instead of a single
+    backend:
+  </p>
+  <pre><code>SQUAD_MCP_MEMORY_TARGETS=[
+  { "name": "azure",      "backend": "table", "tableName": "squadmemory" },
+  { "name": "sharepoint", "backend": "graph", "driveId": "&lt;DRIVE_ID&gt;", "rootPath": "squad-memory" }
+]
+SQUAD_MCP_MEMORY_DEFAULT_TARGET=azure</code></pre>
+  <p>
+    The caller then passes an opaque <code>target</code> name. <strong>You</strong> own every credential-bearing field;
+    an undeclared name is rejected before any I/O and never falls back to the default.
+  </p>
+
+  <h3>Reading it back</h3>
+  <p>There are two paths, and for this scenario the first one is the one that matters:</p>
+  <ul>
+    <li>
+      <strong>Automatic.</strong> With <code>SQUAD_MCP_MEMORY_AUTO_ENABLED=true</code> the server reads the project's
+      <code>state</code> and <code>decisions</code> before every dispatch and injects them as delimited
+      <strong>data</strong> — never authority. Nobody has to remember to ask for it. This is why the
+      <code>squad_backlog</code> call in Part 7 does not need the run's artifact pasted back in.
+    </li>
+    <li>
+      <strong>On demand.</strong> <code>squad_history</code> browses the tree — <code>op=index</code> to summarize,
+      <code>op=list</code> to enumerate, <code>op=read</code> to open one file. It needs the
+      <code>Squad.Memory</code> scope.
+    </li>
+  </ul>
+  <div class="callout danger">
+    <p>
+      <strong>Turn the memory tools off in the agent.</strong> With automatic memory on, the generated instructions'
+      memory section must be deleted. Left in, the agent calls the tools too, invents a different
+      <code>project</code> name each session, and continuity silently disappears — which looks exactly like the feature
+      not working.
+    </p>
+  </div>
+
+  <h3>What is true regardless of destination</h3>
+  <ul>
+    <li>The validated token's <code>tenantId</code> is always the first path segment, so tenant isolation holds on
+        Azure Table, SharePoint, and disk alike.</li>
+    <li>The partition is derived from a pinned sub-squad or <code>SQUAD_MCP_MEMORY_DEFAULT_PROJECT</code> — it is
+        <strong>never</strong> taken from caller free text.</li>
+    <li>With <code>SQUAD_MCP_RUN_ENCRYPTION_KEY_B64</code> set, stage artifacts, the Council Verdict, and caller
+        <code>request</code>/<code>context</code> are AES-256-GCM encrypted at rest.</li>
+    <li>Writes are compare-and-swap, so two concurrent runs in one project cannot clobber each other.</li>
+  </ul>
+
+  <h2>Part 3 — Expose the scopes this scenario uses</h2>
   <p>In the Entra app registration from Step 2 of the runbook, expose and consent to:</p>
   <table>
     <thead><tr><th>Scope</th><th>Granted to</th><th>For</th></tr></thead>
@@ -112,7 +291,7 @@
     Every scope is fail-closed: a missing one returns 403 with no work performed and nothing billed.
   </p>
 
-  <h2>Part 3 — Import the connector into Copilot Studio</h2>
+  <h2>Part 4 — Import the connector into Copilot Studio</h2>
   <ol class="steps">
     <li>
       Regenerate the connector so it reflects your build, then fill in the placeholders in
@@ -130,7 +309,7 @@
     </li>
     <li><strong>Add a custom connector</strong> in Copilot Studio from the OpenAPI file. It advertises the
         <code>x-ms-agentic-protocol: mcp-streamable-1.0</code> <code>/mcp</code> operation.</li>
-    <li><strong>Complete the Entra OAuth 2.0 connection</strong>, consenting to the scopes in Part 2.</li>
+    <li><strong>Complete the Entra OAuth 2.0 connection</strong>, consenting to the scopes in Part 3.</li>
     <li><strong>Enable generative orchestration</strong> on the agent. Without it the agent cannot call MCP tools at all
         — this is the single most common reason "nothing happens".</li>
     <li><strong>Add your work-tracking connector</strong> to the same agent: the certified Azure DevOps, Jira, or GitHub
@@ -141,7 +320,7 @@
         the memory section — you enabled automatic memory in Part 1, so the agent must not call the memory tools.</li>
   </ol>
 
-  <h2>Part 4 — What the product profile actually runs</h2>
+  <h2>Part 5 — What the product profile actually runs</h2>
   <p>
     <code>profile: "product"</code> seeds 13 roles, and that seeding is what makes this scenario different from a
     generic <code>squad_run</code>. Resolved against the bundled cast, a product run sequences:
@@ -192,7 +371,7 @@
     </tbody>
   </table>
 
-  <h2>Part 5 — Run it</h2>
+  <h2>Part 6 — Run it</h2>
   <p>In the Copilot Studio agent, the user says something like:</p>
   <pre><code>Run the full product squad on our customer onboarding PRD and turn it into a delivery backlog.</code></pre>
   <p>The agent calls <code>squad_run</code>. Make sure your instructions pass the profile:</p>
@@ -237,7 +416,7 @@
     </tbody>
   </table>
 
-  <h2>Part 6 — Turn the result into work items</h2>
+  <h2>Part 7 — Turn the result into work items</h2>
   <p>
     The compiled artifact is prose — good for a human, wrong for a connector. <code>squad_backlog</code> is the
     converter:
@@ -297,7 +476,7 @@
         rather than firing the whole array at once.</li>
   </ol>
 
-  <h2>Part 7 — Mapping to your tracker</h2>
+  <h2>Part 8 — Mapping to your tracker</h2>
   <p>
     The contract uses the Azure DevOps type names. That is a naming choice, not a lock-in — the mapping happens in your
     agent's instructions, and the server is unaware of which tracker you use.
@@ -326,7 +505,7 @@
     </p>
   </div>
 
-  <h2>Part 8 — Verify it worked</h2>
+  <h2>Part 9 — Verify it worked</h2>
   <table>
     <thead><tr><th>Check</th><th>Expected</th></tr></thead>
     <tbody>
@@ -354,6 +533,10 @@
       <tr><td>Only one giant work item was created</td><td>The agent parsed prose instead of calling <code>squad_backlog</code></td><td>Confirm the tool is reachable and the instructions route backlog requests to it</td></tr>
       <tr><td>Children are attached to the wrong parent</td><td>The agent matched on title</td><td>It must match on <code>ref</code>. Re-paste the generated instructions</td></tr>
       <tr><td>Creates fail partway with throttling</td><td>The whole array was fired at once</td><td>Batch: one epic and its stories per pass</td></tr>
+      <tr><td>The next run remembers nothing</td><td>The agent still calls the memory tools and invents a new project name each session</td><td>Delete the memory section from the agent instructions, and pass a stable <code>squad</code></td></tr>
+      <tr><td>A large artifact fails to save</td><td>Table entity size ceiling</td><td>Enable <code>SQUAD_MCP_MEMORY_OVERFLOW_ENABLED</code> with a blob container</td></tr>
+      <tr><td>Nothing appears in the SharePoint library</td><td><code>Sites.Selected</code> was assigned but no site was granted</td><td>Re-run <code>graph-memory-permissions.bicep</code> with <code>sharePointSiteId</code> filled in</td></tr>
+      <tr><td>History vanishes after a restart</td><td>The <code>file</code> memory backend on a scale-to-zero app</td><td>Move to <code>table</code> or <code>graph</code></td></tr>
     </tbody>
   </table>
 
