@@ -1,5 +1,5 @@
 {
   "package": "Peter-N91/hve-squad",
-  "version": "0.12.7",
+  "version": "0.12.8",
   "note": "The hve-squad APM package version this squad-mcp release (see package.json) is built against. 'npm run snapshot:cast' resolves the tag v<version> in this package, reads that release's apm.yml deployment manifest, and fetches every bundled file from its pinned source — no local package checkout and no 'apm install'. Bump this pin together with the server version, re-run the snapshot, and commit the regenerated host/cast/.github + manifest.json; the snapshot fails if the tag does not declare this version, and 'npm run snapshot:cast:check' fails if the committed bundle is not what this pin resolves to."
 }
