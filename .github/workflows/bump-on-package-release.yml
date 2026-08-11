@@ -142,7 +142,7 @@ jobs:
           # and then failed on the last line, stranding the bump on a branch
           # nobody was told about. Fail here instead, with nothing to clean up.
           if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::error::No pull-request token. GitHub blocks the Actions job token from creating pull requests, so this workflow needs a PAT in PACKAGE_SYNC_TOKEN (or reuses RELEASE_TOKEN) with contents:write and pull-requests:write. The alternative is Settings > Actions > General > 'Allow GitHub Actions to create and approve pull requests', which also lets workflows APPROVE pull requests — prefer the PAT."
+            echo "::error::No pull-request token. GitHub blocks the Actions job token from creating pull requests, so this workflow needs a PAT in PACKAGE_SYNC_TOKEN, or RELEASE_TOKEN extended with 'Pull requests: Read and write' (the release flow only needs contents + actions, so RELEASE_TOKEN does NOT carry it by default). The alternative is Settings > Actions > General > 'Allow GitHub Actions to create and approve pull requests', which also lets workflows APPROVE pull requests — prefer the PAT."
             exit 1
           fi
           BRANCH="chore/pin-hve-squad-$TARGET"
@@ -184,6 +184,6 @@ jobs:
             --body-file /tmp/pr-body.md \
             --base main \
             --head "$BRANCH"; then
-            echo "::error::Pushed $BRANCH but could not open the pull request. The configured token lacks pull-requests:write, or the repository forbids it. The branch is pushed, so opening the pull request by hand loses nothing."
+            echo "::error::Pushed $BRANCH but could not open the pull request. Read the GraphQL error above: 'Resource not accessible by personal access token' means the PAT is missing 'Pull requests: Read and write' — contents:write alone is not enough. 'GitHub Actions is not permitted to create or approve pull requests' means no PAT was resolved and the job token was used. The branch is pushed and this step reuses it, so the next run opens the pull request once the token is fixed."
             exit 1
           fi
