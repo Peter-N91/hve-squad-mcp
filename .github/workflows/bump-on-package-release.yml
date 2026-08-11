@@ -122,12 +122,36 @@ jobs:
           CURRENT: ${{ steps.target.outputs.current }}
         run: |
           set -euo pipefail
+          # Mirror the level hve-squad moved. A pin bump repackages someone else's
+          # release, so inventing a level here would mean a patch upstream landing
+          # as a minor downstream and the two version lines drifting apart. Any
+          # version we cannot parse resolves to `patch`, per CONTRIBUTING: raising
+          # at review is cheap, an accidental minor is permanent.
+          SEMVER='^[0-9]+\.[0-9]+\.[0-9]+'
+          if ! [[ "$CURRENT" =~ $SEMVER ]] || ! [[ "$TARGET" =~ $SEMVER ]]; then
+            BUMP=patch
+            LEVEL="an unparseable version change"
+          else
+            IFS=. read -r CUR_MAJOR CUR_MINOR _ <<<"${CURRENT%%-*}"
+            IFS=. read -r TGT_MAJOR TGT_MINOR _ <<<"${TARGET%%-*}"
+            if [ "$TGT_MAJOR" != "$CUR_MAJOR" ]; then
+              BUMP=major
+              LEVEL="a major"
+            elif [ "$TGT_MINOR" != "$CUR_MINOR" ]; then
+              BUMP=minor
+              LEVEL="a minor"
+            else
+              BUMP=patch
+              LEVEL="a patch"
+            fi
+          fi
+          echo "Resolved bump: $BUMP ($CURRENT -> $TARGET)"
           npm run change -- \
             --type Changed \
-            --bump minor \
+            --bump "$BUMP" \
             --force \
             --title "pin hve-squad $TARGET" \
-            --body "- **Bumped the bundled cast pin from \`$CURRENT\` to \`$PACKAGE_REPO@$TARGET\`** and refreshed \`host/cast/\` from that release's \`apm.yml\`. A cast change is a minor: the squad a consumer gets is different."
+            --body "- **Bumped the bundled cast pin from \`$CURRENT\` to \`$PACKAGE_REPO@$TARGET\`** and refreshed \`host/cast/\` from that release's \`apm.yml\`. This tracks $LEVEL release upstream, so it carries the same level here."
 
       - name: Open the pull request
         if: steps.target.outputs.skip != 'true'
