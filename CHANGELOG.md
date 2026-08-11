@@ -10,6 +10,24 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
+## [0.3.8] - 2026-08-11
+
+> Built against `Peter-N91/hve-squad@0.12.8` (see `host/cast/package-pin.json`).
+
+### Changed
+
+- **Bumped the bundled cast pin from `0.12.7` to `Peter-N91/hve-squad@0.12.8`** and refreshed `host/cast/` from that release's `apm.yml`. A cast change is a patch: the squad a consumer gets is different.
+
+### Consumer install
+
+Pin to this version:
+
+```powershell
+npm install "Peter-N91/hve-squad-mcp#v0.3.8"
+```
+
+[0.3.8]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.3.8
+
 ## [0.3.7] - 2026-08-10
 
 > Built against `Peter-N91/hve-squad@0.12.7` (see `host/cast/package-pin.json`).
