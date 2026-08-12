@@ -35,7 +35,7 @@ const FIXTURE_TABLES: RoutingTables = {
     ["architect", "System Architecture Reviewer"],
     ["security", "Security Planner"],
     ["cost-manager", "Squad Cost Manager"],
-    ["product-owner", "GitHub Backlog Manager"],
+    ["product-owner", "Functional Planner"],
     ["rai", "RAI Planner"],
   ]),
 };
@@ -118,7 +118,7 @@ test("council engages when the request crosses two or more council domains", () 
     "System Architecture Reviewer",
     "Security Planner",
     "Squad Cost Manager",
-    "GitHub Backlog Manager",
+    "Functional Planner",
   ]);
 });
 

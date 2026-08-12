@@ -164,7 +164,7 @@ test("a product-owner stage becomes work items a connector can create", async ()
 
     await fixture.recorder.recordStage(TENANT, PROJECT, REQUEST, RUN, {
       roleKey: "product-owner",
-      agentName: "GitHub Backlog Manager",
+      agentName: "Functional Planner",
       artifact: backlogProse,
     });
 
@@ -194,7 +194,7 @@ test("a product-owner that emits no parsable backlog writes no work-item file", 
   try {
     await fixture.recorder.recordStage(TENANT, PROJECT, REQUEST, RUN, {
       roleKey: "product-owner",
-      agentName: "GitHub Backlog Manager",
+      agentName: "Functional Planner",
       artifact: "We should probably build sign-up first, then billing.",
     });
     const tree = (await fixture.store.list(TENANT, PROJECT, ".copilot-tracking/plans")).map(

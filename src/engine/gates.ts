@@ -310,8 +310,8 @@ export interface GateClassifyInput {
  * Roles that reach OUTSIDE the tracking tree, so a plan containing one is never
  * advisory regardless of the operator's setting.
  *
- * `backlog-executor` writes into a live Azure DevOps or Jira backlog, where a
- * create is announced to a whole team by notifications and webhooks the moment it
+ * `backlog-executor` writes into a live Azure DevOps, GitHub, or Jira backlog, where
+ * a create is announced to a whole team by notifications and webhooks the moment it
  * lands; `deployer` changes running infrastructure. No profile seeds
  * `backlog-executor` at all, so this is belt-and-braces against a custom roster.
  */

@@ -172,13 +172,14 @@ tools:
     councilIntent: "validate, cross-check, pre-implementation review, council, design review, go/no-go, implement-and-cost, implement-and-risk"
     councilTier: confirm
     # Council members are the dispatchable Primary of each council role. The
-    # `product-owner` seat is GitHub Backlog Manager: the ADO and Jira managers
-    # are user-invocable entry points that `runSubagent` cannot reach.
+    # `product-owner` seat is Functional Planner: HVE Core's own `Backlog
+    # Manager` orchestrator is a user-invocable entry point `runSubagent`
+    # cannot reach.
     council:
       - "System Architecture Reviewer"
       - "Security Planner"
       - "Squad Cost Manager"
-      - "GitHub Backlog Manager"
+      - "Functional Planner"
       - "RAI Planner"
     input:
       type: object

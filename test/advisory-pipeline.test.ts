@@ -65,7 +65,7 @@ function fullAdvisoryPlan(): AdvisoryStagePlan[] {
       members: [persona("architect", "ARCH"), persona("security", "SEC"), persona("cost-manager", "COST"), persona("product-owner", "PO")],
     },
     personaStage("Squad Reviewer", "REVIEW"),
-    personaStage("GitHub Backlog Manager", "BACKLOG", true),
+    personaStage("Functional Planner", "BACKLOG", true),
   ];
 }
 
@@ -109,8 +109,8 @@ test("mode=autopilot runs the full routed advisory sequence to one compiled arti
   assert.match(a, /## Squad Lead/);
   assert.match(a, /## Council Verdict/);
   assert.match(a, /## Squad Reviewer/);
-  assert.match(a, /## GitHub Backlog Manager/);
-  const order = ["## Squad Researcher", "## Squad Lead", "## Council Verdict", "## Squad Reviewer", "## GitHub Backlog Manager"].map(
+  assert.match(a, /## Functional Planner/);
+  const order = ["## Squad Researcher", "## Squad Lead", "## Council Verdict", "## Squad Reviewer", "## Functional Planner"].map(
     (h) => a.indexOf(h),
   );
   assert.deepEqual(order, [...order].sort((x, y) => x - y));
@@ -142,7 +142,7 @@ test("a Stop council verdict halts the advisory pipeline before review/backlog r
   assert.equal(backend.calls, 6);
   assert.equal(result.stages.length, 3);
   assert.doesNotMatch(result.artifact, /## Squad Reviewer/);
-  assert.doesNotMatch(result.artifact, /## GitHub Backlog Manager/);
+  assert.doesNotMatch(result.artifact, /## Functional Planner/);
   // The compiled artifact ends with the council verdict.
   assert.ok(result.artifact.trimEnd().endsWith("Permits Implementation Dispatch: no (Stop)"));
 });
@@ -229,7 +229,7 @@ function makeAdvisoryCastFixture(): { root: string; cleanup: () => void } {
   write("squad-reviewer.agent.md", "Squad Reviewer");
   write("council-a.agent.md", "Council Member A");
   write("council-b.agent.md", "Council Member B");
-  write("github-backlog-manager.agent.md", "GitHub Backlog Manager");
+  write("functional-planner.agent.md", "Functional Planner");
   return { root, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
@@ -246,7 +246,7 @@ test("planAdvisoryStages interleaves the council and appends backlog-handoff for
       profile: "default",
       fanOut: [],
     };
-    const rosterMap = new Map([["product-owner", "GitHub Backlog Manager"]]);
+    const rosterMap = new Map([["product-owner", "Functional Planner"]]);
     const ordered = planAdvisoryStages(routePlan, [root], rosterMap);
 
     assert.deepEqual(
@@ -256,7 +256,7 @@ test("planAdvisoryStages interleaves the council and appends backlog-handoff for
         "persona:Squad Lead",
         "council:Council Verdict",
         "persona:Squad Reviewer",
-        "persona:GitHub Backlog Manager",
+        "persona:Functional Planner",
       ],
     );
     assert.equal(ordered[2].members?.length, 2);
@@ -332,7 +332,7 @@ test("an async advisory run persists each stage as it completes; a status read r
     assert.equal(final?.councilVerdict?.class, "Go");
     assert.match(final?.councilVerdict?.rendered ?? "", /## Council Verdict/);
     const compiled = compilePersistedStages(final!.stages!);
-    for (const heading of ["## Squad Researcher", "## Squad Lead", "## Council Verdict", "## Squad Reviewer", "## GitHub Backlog Manager"]) {
+    for (const heading of ["## Squad Researcher", "## Squad Lead", "## Council Verdict", "## Squad Reviewer", "## Functional Planner"]) {
       assert.ok(compiled.includes(heading), `compiled artifact includes ${heading}`);
     }
   } finally {
