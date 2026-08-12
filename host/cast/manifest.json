@@ -1,26 +1,25 @@
 {
   "generatedBy": "host/snapshot-cast.ts",
   "sourcePackage": "Peter-N91/hve-squad",
-  "linkedPackageVersion": "0.12.8",
-  "sourceRef": "v0.12.8",
-  "sourceCommit": "3eec5a825e84121123b7c80bdf9db95c99840ac2",
-  "sourceManifestSha256": "fa318111cc9674d35633ad478e64a790e59e70d429b4d2ff48833c8b3b83ad58",
+  "linkedPackageVersion": "0.13.0",
+  "sourceRef": "v0.13.0",
+  "sourceCommit": "148e95d8b0f2d687da06b421acb8fc7f62e62673",
+  "sourceManifestSha256": "2d580d4b4f9ca2f69720f4317859ced5687d2269c8f58e723d2efb22a48af32b",
   "upstreamCommits": {
-    "microsoft/hve-core": "db1be8f09a91525ff0412d38c581e1cd6922e01b",
-    "Peter-N91/hve-squad": "3eec5a825e84121123b7c80bdf9db95c99840ac2"
+    "microsoft/hve-core": "3d681c92ff25fc307778f545446b54cf9b26a057",
+    "Peter-N91/hve-squad": "148e95d8b0f2d687da06b421acb8fc7f62e62673"
   },
-  "generatedAt": "2026-08-11",
-  "agentFileCount": 87,
+  "generatedAt": "2026-08-12",
+  "agentFileCount": 85,
   "instructionFileCount": 14,
   "agentNames": [
     "Accessibility Framework Assessor",
     "Accessibility Planner",
     "Accessibility Reviewer",
     "Accessibility Surface Inventory",
-    "ADO Backlog Manager",
+    "ADO Backlog Executor",
     "ADR Creator",
-    "Agile Coach",
-    "AzDO PRD to WIT",
+    "Backlog Manager",
     "BRD Builder",
     "BRD Quality Reviewer",
     "Code Review",
@@ -45,11 +44,11 @@
     "Evaluation Dataset Creator",
     "Experiment Designer",
     "Finding Deep Verifier",
-    "GitHub Backlog Manager",
+    "Functional Planner",
+    "GitHub Backlog Executor",
     "HVE Artifact Tester",
     "Issue Triage Agent",
-    "Jira Backlog Manager",
-    "Jira PRD to WIT",
+    "Jira Backlog Executor",
     "Meeting Analyst",
     "Network ISA-95 Planner",
     "PowerPoint Builder",
@@ -58,7 +57,6 @@
     "PRD Quality Reviewer",
     "Privacy Planner",
     "Privacy Reviewer",
-    "Product Manager Advisor",
     "RAI Planner",
     "RAI Reviewer",
     "RAI Skill Assessor",
@@ -105,507 +103,497 @@
     {
       "path": "agents/accessibility-framework-assessor.agent.md",
       "sha256": "2e88a4a551065d37f4057d468a0c8d6e559b212c82c508ade9c3f8834fc8c889",
-      "source": "microsoft/hve-core/.github/agents/accessibility/subagents/accessibility-framework-assessor.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/accessibility/subagents/accessibility-framework-assessor.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/accessibility-planner.agent.md",
       "sha256": "a586653fedd3cfef0c7e7f7489c6165dc237f2cb6f6774db46410009d4de07b9",
-      "source": "microsoft/hve-core/.github/agents/accessibility/accessibility-planner.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/accessibility/accessibility-planner.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/accessibility-reviewer.agent.md",
       "sha256": "589c54ab16abdab3996e9ee35002d69758ca8c6136f2371f0a505c3d300ad134",
-      "source": "microsoft/hve-core/.github/agents/accessibility/accessibility-reviewer.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/accessibility/accessibility-reviewer.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/accessibility-surface-inventory.agent.md",
       "sha256": "3fb30eb29e612884af0b24029ec29ff84385605b930d2abaafde6bdf65bc3711",
-      "source": "microsoft/hve-core/.github/agents/accessibility/subagents/accessibility-surface-inventory.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/accessibility/subagents/accessibility-surface-inventory.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
-      "path": "agents/ado-backlog-manager.agent.md",
-      "sha256": "be0f197d22b7dba5d4f1f0153bfbbde3fc8e82c76c4b3c7fd657c88df48f6479",
-      "source": "microsoft/hve-core/.github/agents/ado/ado-backlog-manager.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
-    },
-    {
-      "path": "agents/ado-prd-to-wit.agent.md",
-      "sha256": "49a66a418559f9015653ab4410d3c8c393a27bbc08823ab2b1d11a804edb0841",
-      "source": "microsoft/hve-core/.github/agents/ado/ado-prd-to-wit.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "path": "agents/ado-backlog-executor.agent.md",
+      "sha256": "2a6c3b1e9cf5c8be2be77557c412f78fbb4895ab20d2695728062e6e875bc239",
+      "source": "microsoft/hve-core/.github/agents/project-planning/subagents/ado-backlog-executor.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/adr-creation.agent.md",
       "sha256": "8f51bf43a1d500492102ff8b2200fdce4cab60458434880395978a3c66c371b4",
-      "source": "microsoft/hve-core/.github/agents/project-planning/adr-creation.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/project-planning/adr-creation.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/agentic-workflows.agent.md",
       "sha256": "b7cdff5d8aa7a921c3e4f8cb2d0711a8d0f64c6b2a3cd862d2e2a49e31157297",
-      "source": "microsoft/hve-core/.github/agents/agentic-workflows.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/agentic-workflows.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
-      "path": "agents/agile-coach.agent.md",
-      "sha256": "33d4626cc62fc75c10ae358c2c5cf6a7a6fa9e3a20bc763173cba1dbc40d13c9",
-      "source": "microsoft/hve-core/.github/agents/project-planning/agile-coach.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "path": "agents/backlog-manager.agent.md",
+      "sha256": "3877735f8a5b41a20af53cc1fc325c10127ad29c523ade6dc09e5913d57cac30",
+      "source": "microsoft/hve-core/.github/agents/project-planning/backlog-manager.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/brd-builder.agent.md",
       "sha256": "adb72bf6a88c158ed6c9e98f746328220b8ca1a9b5a0403df077ecb8112f651e",
-      "source": "microsoft/hve-core/.github/agents/project-planning/brd-builder.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/project-planning/brd-builder.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/brd-quality-reviewer.agent.md",
       "sha256": "1c3e47fbbd3874f7c99e62833fc3f48c0141c41dd496e797ff761e4d209531bf",
-      "source": "microsoft/hve-core/.github/agents/project-planning/subagents/brd-quality-reviewer.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/project-planning/subagents/brd-quality-reviewer.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/code-review-accessibility.agent.md",
       "sha256": "a8faff469c5518abb00e8ce9281767f483d90575a016e029fc70bcd17c84fba4",
-      "source": "microsoft/hve-core/.github/agents/coding-standards/subagents/code-review-accessibility.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/coding-standards/subagents/code-review-accessibility.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/code-review-explainer.agent.md",
       "sha256": "c64bdaf3d3a5c2392f6dad91ea4c17a74d830749ccede59924c1c11c99cacdfc",
-      "source": "microsoft/hve-core/.github/agents/coding-standards/subagents/code-review-explainer.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/coding-standards/subagents/code-review-explainer.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/code-review-functional.agent.md",
       "sha256": "662f8f0538204af37e6617dcb9b118b10bc02a553decb53682441364cae3b91e",
-      "source": "microsoft/hve-core/.github/agents/coding-standards/subagents/code-review-functional.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/coding-standards/subagents/code-review-functional.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/code-review-pr.agent.md",
       "sha256": "9e2f74758d21050324cecf33bc0037aa7750d4423097bc992191a490e8aa4be5",
-      "source": "microsoft/hve-core/.github/agents/coding-standards/subagents/code-review-pr.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/coding-standards/subagents/code-review-pr.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/code-review-readiness.agent.md",
       "sha256": "43cd3badad7cacb0b7b596d7459287fc16c3a1ca65cdce832782826c1ae8a1f8",
-      "source": "microsoft/hve-core/.github/agents/coding-standards/subagents/code-review-readiness.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/coding-standards/subagents/code-review-readiness.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/code-review-security.agent.md",
       "sha256": "942e5403f4bafea2ba10e846577f360322fb1dd2601b5add6d08db58539d489f",
-      "source": "microsoft/hve-core/.github/agents/coding-standards/subagents/code-review-security.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/coding-standards/subagents/code-review-security.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/code-review-standards.agent.md",
       "sha256": "c7bb77b247830fc7e9a4b840df9ef8ede9f61b45ae8ca1b5e4d3f6ff2f6cf697",
-      "source": "microsoft/hve-core/.github/agents/coding-standards/subagents/code-review-standards.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/coding-standards/subagents/code-review-standards.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/code-review-walkback.agent.md",
       "sha256": "4ab329063bfb7b33de0d8cf2588c4e1e8900bc86668c9d98c1d6a44992951d59",
-      "source": "microsoft/hve-core/.github/agents/coding-standards/subagents/code-review-walkback.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/coding-standards/subagents/code-review-walkback.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/code-review.agent.md",
       "sha256": "c573c7f01c9cca4675f7ed6634dcb1c93a200470818e3b9d71602054b577c8f3",
-      "source": "microsoft/hve-core/.github/agents/coding-standards/code-review.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/coding-standards/code-review.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/codebase-profiler.agent.md",
       "sha256": "049568a6122a3742f4821faa58ef0e1a3be6ca81ee2db8ed1519102f977c3399",
-      "source": "microsoft/hve-core/.github/agents/security/subagents/codebase-profiler.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/security/subagents/codebase-profiler.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/cve-analyzer.agent.md",
       "sha256": "f91d64522a3a89bb74db70b469b38a589b89d32fc968f3a592ef87dbeb46ec48",
-      "source": "microsoft/hve-core/.github/agents/security/subagents/cve-analyzer.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/security/subagents/cve-analyzer.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/dependency-reviewer.agent.md",
       "sha256": "b69d93890acca014032791eebcb9e089ae097b27e5ea51bc3ecdedc6a2ab3444",
-      "source": "microsoft/hve-core/.github/agents/dependency-reviewer.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/dependency-reviewer.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/documentation.agent.md",
       "sha256": "546ba8c36b98a7d2348952531a2b5afd3ba5f0cc5e4b4551582876c930cefd22",
-      "source": "microsoft/hve-core/.github/agents/hve-core/documentation.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/hve-core/documentation.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/dt-coach.agent.md",
       "sha256": "42a4665ebec24399a37eda2d859c9a3751d88ae8dbb914655b9bbd9aaf3651f6",
-      "source": "microsoft/hve-core/.github/agents/design-thinking/dt-coach.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/design-thinking/dt-coach.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/dt-learning-tutor.agent.md",
       "sha256": "b4261eb1f7cd3e65035892645f9ea62c69e0a7898f9ea08bf56bd47adb4a1dab",
-      "source": "microsoft/hve-core/.github/agents/design-thinking/dt-learning-tutor.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/design-thinking/dt-learning-tutor.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/eval-dataset-creator.agent.md",
       "sha256": "b134eb0b478949a8cd45eb7286939fee538f1d85ef286cf461ca9edd5a23a1c7",
-      "source": "microsoft/hve-core/.github/agents/data-science/eval-dataset-creator.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/data-science/eval-dataset-creator.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/experiment-designer.agent.md",
-      "sha256": "c6a5e4c3626a3409dd42d4049bed93c7b7ce100a790228663a712c8c22cd34e4",
-      "source": "microsoft/hve-core/.github/agents/experimental/experiment-designer.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "sha256": "968ced009af71b2ebaa40f33b40229f89630917f12c2a4e5c515ccb81b7c4dd7",
+      "source": "microsoft/hve-core/.github/agents/experimental/experiment-designer.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/finding-deep-verifier.agent.md",
       "sha256": "2d79816eaf8b4e07e9423522c706186caeb726c62eb80d6c128c1a1d35e4368b",
-      "source": "microsoft/hve-core/.github/agents/security/subagents/finding-deep-verifier.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/security/subagents/finding-deep-verifier.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
+    },
+    {
+      "path": "agents/functional-planner.agent.md",
+      "sha256": "7ee016f7db14ca751176396a91862f332180fbd8032eff2d5ea032b5aee8e5b0",
+      "source": "microsoft/hve-core/.github/agents/project-planning/functional-planner.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/gen-data-spec.agent.md",
       "sha256": "2e4bb5cf22775f8d09af50052c3b39a055ae0e98b99008be47959ce57080e92d",
-      "source": "microsoft/hve-core/.github/agents/data-science/gen-data-spec.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/data-science/gen-data-spec.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/gen-jupyter-notebook.agent.md",
       "sha256": "3ef9da0cf72f90a350a875fad98d74782c2a32be55428d0cbf2659c7d0d45281",
-      "source": "microsoft/hve-core/.github/agents/data-science/gen-jupyter-notebook.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/data-science/gen-jupyter-notebook.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/gen-streamlit-dashboard.agent.md",
       "sha256": "894379b2030ea88c4c05563be8751fe0c0ab6c65cec9c7292485dca82c7d83b7",
-      "source": "microsoft/hve-core/.github/agents/data-science/gen-streamlit-dashboard.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/data-science/gen-streamlit-dashboard.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
-      "path": "agents/github-backlog-manager.agent.md",
-      "sha256": "69de26344a163cc2395bcfa38ba9fd0abad670e47cb86581f503a8bf4407952b",
-      "source": "microsoft/hve-core/.github/agents/github/github-backlog-manager.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "path": "agents/github-backlog-executor.agent.md",
+      "sha256": "7ed18d1f44e0538b5bfd6ff168928d76ea8adf3542697bac72f85ae00faac6c6",
+      "source": "microsoft/hve-core/.github/agents/project-planning/subagents/github-backlog-executor.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/hve-artifact-tester.agent.md",
       "sha256": "ff6ce7fdbd5ce3bc24fe13ee7e1b6a9c5cd4e30ce26ba4a6196631b5f9c24e9f",
-      "source": "microsoft/hve-core/.github/agents/hve-core/subagents/hve-artifact-tester.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/hve-core/subagents/hve-artifact-tester.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/issue-triage.agent.md",
-      "sha256": "e5449265dcf2b6759ef0a40843f52e635bde0cd8c50cb2dc98483ab7773f4bc2",
-      "source": "microsoft/hve-core/.github/agents/issue-triage.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "sha256": "ded899042c409c7f79d379d748785a06a8f217afc4df41765cfc989e87c58b00",
+      "source": "microsoft/hve-core/.github/agents/issue-triage.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
-      "path": "agents/jira-backlog-manager.agent.md",
-      "sha256": "067dd542fab5466f838745778d7750b4d85e969f25eb630362eb89391bb5013b",
-      "source": "microsoft/hve-core/.github/agents/jira/jira-backlog-manager.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
-    },
-    {
-      "path": "agents/jira-prd-to-wit.agent.md",
-      "sha256": "586aae49d9df0eae0f6e951a6d843fd204540b0ca4772229f6d1059740ef5ab9",
-      "source": "microsoft/hve-core/.github/agents/jira/jira-prd-to-wit.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "path": "agents/jira-backlog-executor.agent.md",
+      "sha256": "fee3b2b902048dce68cfb38ae4d3d1e9888f2f2d2b73d83338711a33518a00b9",
+      "source": "microsoft/hve-core/.github/agents/project-planning/subagents/jira-backlog-executor.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/meeting-analyst.agent.md",
-      "sha256": "cee77e7077e3cbdb2b9213aba6c495de3b708718f9511b35dc94b2b682fe3ef1",
-      "source": "microsoft/hve-core/.github/agents/project-planning/meeting-analyst.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "sha256": "e8c4c34430c2c6c0183f2c54db7335580056b5d29120ef48a63db872cb30b093",
+      "source": "microsoft/hve-core/.github/agents/project-planning/meeting-analyst.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/network-isa95-planner.agent.md",
       "sha256": "8252fb3c08e42e780db775818142c7066d27844c16a56b9e3c3dc08e2a74615d",
-      "source": "microsoft/hve-core/.github/agents/project-planning/network-isa95-planner.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/project-planning/network-isa95-planner.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/pptx-subagent.agent.md",
       "sha256": "26c5fed7d774aa82a816742f9f3a059c18886821e63379b9911d2dd8d4cf9c4c",
-      "source": "microsoft/hve-core/.github/agents/experimental/subagents/pptx-subagent.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/experimental/subagents/pptx-subagent.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/pptx.agent.md",
       "sha256": "82df6e5b9d205e0d93134662e50190b817d69372eee523c36e7d4f3d07b9d6f6",
-      "source": "microsoft/hve-core/.github/agents/experimental/pptx.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/experimental/pptx.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/prd-builder.agent.md",
-      "sha256": "417cb44b3f443c62bf8aca43428936583f0f3d7f5855c3c1622ae00b5a236fec",
-      "source": "microsoft/hve-core/.github/agents/project-planning/prd-builder.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "sha256": "c10818df088c8f3fc8a311a729ff8b10493f29b8e5c0c10394c9dd5dd4e45181",
+      "source": "microsoft/hve-core/.github/agents/project-planning/prd-builder.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/prd-quality-reviewer.agent.md",
       "sha256": "35ac252e447b7cb283308d642c770c352d274d34fb8cc5b6b518a1fb3123c473",
-      "source": "microsoft/hve-core/.github/agents/project-planning/subagents/prd-quality-reviewer.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/project-planning/subagents/prd-quality-reviewer.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/privacy-planner.agent.md",
       "sha256": "8be73590c49b86f2cf3fe34074173333a5b4c8eebc08a13c391ae9850448b701",
-      "source": "microsoft/hve-core/.github/agents/privacy/privacy-planner.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/privacy/privacy-planner.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/privacy-reviewer.agent.md",
       "sha256": "212758dc818eb38e47c761c44fb8a738851cde6acdf2bee28a058fd23ad4b275",
-      "source": "microsoft/hve-core/.github/agents/privacy/privacy-reviewer.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
-    },
-    {
-      "path": "agents/product-manager-advisor.agent.md",
-      "sha256": "2f5e3e78429136859e4ad663a700db20022ef257b9fdd800861780c1c3c37526",
-      "source": "microsoft/hve-core/.github/agents/project-planning/product-manager-advisor.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/privacy/privacy-reviewer.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/rai-planner.agent.md",
       "sha256": "f7ba642a21ca91a329380d016d26ed05e7b60eff65af51f4bd63890516b6de1a",
-      "source": "microsoft/hve-core/.github/agents/rai-planning/rai-planner.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/rai-planning/rai-planner.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/rai-reviewer.agent.md",
       "sha256": "137dc05db34dbe708e507fb771ec2ca3c62779443fd883a8678968345161b866",
-      "source": "microsoft/hve-core/.github/agents/rai-planning/rai-reviewer.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/rai-planning/rai-reviewer.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/rai-skill-assessor.agent.md",
       "sha256": "61f0f3dcdc0cbf6f5e106a411cf7705cbdc84efb5abf803704e76e423fb7ce6d",
-      "source": "microsoft/hve-core/.github/agents/rai-planning/subagents/rai-skill-assessor.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/rai-planning/subagents/rai-skill-assessor.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/report-generator.agent.md",
       "sha256": "b15bb9920b7f10a0e18297b54c1d2fc32b880308ed82855121eb4fd85459e3c5",
-      "source": "microsoft/hve-core/.github/agents/security/subagents/report-generator.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/security/subagents/report-generator.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/rpi-agent.agent.md",
       "sha256": "4792bdec74ccccbef29d723087659e9eae46c47693ec5dc7f1e10ee88c38eeaa",
-      "source": "microsoft/hve-core/.github/agents/hve-core/rpi-agent.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/hve-core/rpi-agent.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/rpi-planner.agent.md",
       "sha256": "f05a6b910a8157a4f86936c903907d587f7291f937b6fbf6d9fc2d72e6076e1b",
-      "source": "microsoft/hve-core/.github/agents/hve-core/subagents/rpi-planner.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/hve-core/subagents/rpi-planner.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/rpi-researcher.agent.md",
       "sha256": "d2622c7249da9946cc197012d2211304e2d267b2fa6a14598b7aa903d54fb4a3",
-      "source": "microsoft/hve-core/.github/agents/hve-core/subagents/rpi-researcher.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/hve-core/subagents/rpi-researcher.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/security-planner.agent.md",
       "sha256": "100392a179c1014fd7af12e727c33377a7e98857c4ea443b6a1a81e1ee1c3327",
-      "source": "microsoft/hve-core/.github/agents/security/security-planner.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/security/security-planner.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/security-reviewer.agent.md",
       "sha256": "d6ba1a400abd9403253260354771ef7e94b518e45a94b5ba1007d6af08c94acd",
-      "source": "microsoft/hve-core/.github/agents/security/security-reviewer.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/security/security-reviewer.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/skill-assessor.agent.md",
       "sha256": "00d76734932680ac23aa8ad38a6d9eb5c17dc2b8e9dfc100776ba0a3d65c669c",
-      "source": "microsoft/hve-core/.github/agents/security/subagents/skill-assessor.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/security/subagents/skill-assessor.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/squad/squad-asbuilt-author.agent.md",
       "sha256": "c71b5cba8e370016ad64afa7eee04902c4497d0cfbd36d285ece24eda242406b",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-asbuilt-author.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-asbuilt-author.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-azure-architect.agent.md",
       "sha256": "ff7993351407e2fd9ec80c9c215bceb7d6c21f870fdde0959fa7ada202918cb9",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-azure-architect.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-azure-architect.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-azure-diagnose.agent.md",
       "sha256": "8975b2d6f4d081045234e8c722eb29a1366c1ac9abeac39522c83ecd1aaec586",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-azure-diagnose.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-azure-diagnose.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-backlog-executor.agent.md",
-      "sha256": "723b5861d7d17ad0f1a1c9438401310e535244696d7b1c261256f9eedb755b23",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-backlog-executor.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "sha256": "2f2756f60a0482508b15d5851f6388a68c4311bca20483e06f07ce701d784e53",
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-backlog-executor.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-challenger.agent.md",
       "sha256": "f5ba384afeb29aef3761d9216c65b7b4a569c02db25b038f68a504e3e07d7257",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-challenger.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-challenger.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-coordinator.agent.md",
-      "sha256": "964b1d507037ea8520c6180d367dfda6fd9424bd16d4078be7247c24a29d3a5b",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-coordinator.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "sha256": "07d31418bbcdb33f0eee5d0dc69df710f562017ab97416c2373ce4490d27a1bb",
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-coordinator.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-cost-manager.agent.md",
       "sha256": "3d68a1dba883d4a435df4a81db67518a4b17d4acedc58ab1691bcf74e058c1f2",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-cost-manager.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-cost-manager.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-deployer.agent.md",
       "sha256": "4a3cb3cc714a96ca6cb8d950594c573e1aac8345cfdf6e1081b4a58c954a616a",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-deployer.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-deployer.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-federation-coordinator.agent.md",
-      "sha256": "aefec81c549b47da32bf8b9a1c1e73aec4d8be550c61a1685f1c0e68211cd20a",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-federation-coordinator.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "sha256": "7ac5f2be7297f58826d8fbd847ee63e0b6b434d272cca6e27873e9e23a2c3356",
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-federation-coordinator.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-iac-author.agent.md",
       "sha256": "537d7fb5ba649e80dde90ae2f0f4623432e2e13bf6d35eb457dc2982ca9a2469",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-iac-author.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-iac-author.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-implementor.agent.md",
       "sha256": "7491bed728870fa45902ad88445518d00e85b782b4ff1fb53ffacffa7c47c3d3",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-implementor.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-implementor.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-lead.agent.md",
       "sha256": "7199c71ca5fee401a96c8860c530bf0218c79e8eb62d33abcafbfc73192e1c30",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-lead.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-lead.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-modernization-planner.agent.md",
       "sha256": "e166c26c2c96ae40fffa7f670dcbb6a99683fac1039dab77cf5bae0240c1cc05",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-modernization-planner.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-modernization-planner.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-observability-planner.agent.md",
       "sha256": "6c92962bb7a1a6146f7acdac68c228f9355dafeab29d9b4fc6615044093c6cba",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-observability-planner.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-observability-planner.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-performance-planner.agent.md",
       "sha256": "e31e572e6108b9c9171d02d2bdec3b4f89ede512abae52b804f03a43dfb251bf",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-performance-planner.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-performance-planner.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-prompt-engineer.agent.md",
       "sha256": "875af7368469101415dbe03191af2387dea5dc5e373bcbb8984659bc43f17a48",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-prompt-engineer.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-prompt-engineer.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-researcher.agent.md",
       "sha256": "e1f083b092e967407ead751eae8730f9a0fd9ef0e0508f854d93285a4e163513",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-researcher.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-researcher.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-reviewer.agent.md",
       "sha256": "7e0dcbdaa5c70cfe6489fa125d18b35acfe56e7e3d8b02c2f5ac3046ad6c9d49",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-reviewer.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-reviewer.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-risk-manager.agent.md",
       "sha256": "8a700253dbcd58cd918988dc46a9e3540d01e03b253a2e8bb9cba75e2dfadc34",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-risk-manager.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-risk-manager.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-scribe.agent.md",
       "sha256": "b93064a81eaa2df6a9c5dd7f50a9b269fce477d0776de301c07646330723e519",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-scribe.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-scribe.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-sql-migration-advisor.agent.md",
       "sha256": "05819e8d44353706c73a69dde98b687a1fddb794459539328657928af4e07dd5",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-sql-migration-advisor.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-sql-migration-advisor.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-technical-writer.agent.md",
       "sha256": "412dbda42af6a906f1a8e566bd91c8677c0cb7c04b56051b21f8ebdee7a3bce6",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-technical-writer.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-technical-writer.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/squad/squad-vulnerability-manager.agent.md",
       "sha256": "e030238ebfd8f8cd78a5fe31950942afdc273c123db30b76f74131610595dbbe",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-vulnerability-manager.agent.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-vulnerability-manager.agent.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "agents/sssc-planner.agent.md",
       "sha256": "761c0199d88cb72ec51bbebe6c774593244f23d8e40bcd520ab9d7c136d98f71",
-      "source": "microsoft/hve-core/.github/agents/security/sssc-planner.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/security/sssc-planner.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/sssc-reviewer.agent.md",
       "sha256": "acff7159517bfc0aa537e5824a486fd154c7e178479c594fe659c8d82be4e38b",
-      "source": "microsoft/hve-core/.github/agents/security/sssc-reviewer.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/security/sssc-reviewer.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/supply-chain-reviewer.agent.md",
       "sha256": "c2384e63e0a62e8d827878ad979b1c3ba37fd1564a085fa5a3e49064f27026d9",
-      "source": "microsoft/hve-core/.github/agents/security/supply-chain-reviewer.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/security/supply-chain-reviewer.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/supply-chain-skill-assessor.agent.md",
       "sha256": "5682347db33db3b5f83a32e9f46ce28e3c4f8b2a205d9e9f232ca938fee1d3e0",
-      "source": "microsoft/hve-core/.github/agents/security/subagents/supply-chain-skill-assessor.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/security/subagents/supply-chain-skill-assessor.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/system-architecture-reviewer.agent.md",
       "sha256": "e1314563442c42781e16f308f4eca22b7e56585685249a07ac8e5580e7773f2e",
-      "source": "microsoft/hve-core/.github/agents/project-planning/system-architecture-reviewer.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/project-planning/system-architecture-reviewer.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/test-streamlit-dashboard.agent.md",
       "sha256": "087dd140ce6cfdc5960508b768994fd6b2a0453b696d7e41029a8a1151d2fd63",
-      "source": "microsoft/hve-core/.github/agents/data-science/test-streamlit-dashboard.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/data-science/test-streamlit-dashboard.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/ux-ui-designer.agent.md",
-      "sha256": "8eafed02e3670a0b25e89fee8549502765785f1ba571956bd4f95e7286ebc1ee",
-      "source": "microsoft/hve-core/.github/agents/project-planning/ux-ui-designer.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "sha256": "b8eb0f14563c74c8fd2edf62e371e6a25ec610ebd2777a8ece6a84a5733f3fc9",
+      "source": "microsoft/hve-core/.github/agents/project-planning/ux-ui-designer.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "agents/vally-test-author.agent.md",
       "sha256": "b1abd957308e7ac4252481c0713c3e6956bdaca5c98bc29130420bd5934fd019",
-      "source": "microsoft/hve-core/.github/agents/hve-core/subagents/vally-test-author.agent.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "source": "microsoft/hve-core/.github/agents/hve-core/subagents/vally-test-author.agent.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     },
     {
       "path": "instructions/squad/pptx-brand-template.instructions.md",
       "sha256": "e7823d066a909eb119c6506980d3406d74258e456b6fa7413eb1a5084596a515",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/pptx-brand-template.instructions.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/pptx-brand-template.instructions.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "instructions/squad/squad-autonomous.instructions.md",
       "sha256": "f7572596822c95dc558923b874f26eb112ef2908625cd5604e8076d5f7c87beb",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-autonomous.instructions.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-autonomous.instructions.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "instructions/squad/squad-autopilot.instructions.md",
       "sha256": "d9253d6e582ed5e1576e093712c22d5911c93d158193869924a047e2ad5ed27f",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-autopilot.instructions.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-autopilot.instructions.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "instructions/squad/squad-council.instructions.md",
       "sha256": "718ca3ede3cc28aa7bcb58c1f218b3e994db8e6047628226d95cd60ce2d06ef2",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-council.instructions.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-council.instructions.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "instructions/squad/squad-federation-autopilot.instructions.md",
       "sha256": "ce20727783f67ff6bcf2540045835b5415070034db87b0d84dcbec5118c195cd",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-federation-autopilot.instructions.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-federation-autopilot.instructions.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "instructions/squad/squad-federation.instructions.md",
       "sha256": "8c923b76a4ee5983740f963181b5dfd83ff472f63e1c94a3e12f18fb1760346e",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-federation.instructions.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-federation.instructions.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "instructions/squad/squad-intake-gate.instructions.md",
       "sha256": "6dbaf65037fd2cd13f8ca735eef2066c1ef33fa1785ea4ea3ab9a6ca440fa3cc",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-intake-gate.instructions.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-intake-gate.instructions.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "instructions/squad/squad-mcp-capability.instructions.md",
-      "sha256": "1ebe62a2bb1d8d0936693c615497168af9f76a7f334279f813cd11f327c75aa3",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-mcp-capability.instructions.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "sha256": "ccd09cb057ff98ef7d43a74041df6cb3d2ee25f22b405f42e08c58215e462fde",
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-mcp-capability.instructions.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "instructions/squad/squad-notifications.instructions.md",
       "sha256": "ae822f14f5da8667ba5c6cf48e7eaadfac1c2d5317ec499c89f13e172ffd4034",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-notifications.instructions.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-notifications.instructions.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "instructions/squad/squad-roster.instructions.md",
-      "sha256": "28c74628934bfacdadb86bb3b170faab508fab638cc2f8272c9ea6ffec34ec83",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-roster.instructions.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "sha256": "a242963dfd3c43c8b6a913ae74d2869c0ea61970492c4f3646c7b7c5f53ac9c9",
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-roster.instructions.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "instructions/squad/squad-routing.instructions.md",
-      "sha256": "0ed3e33c779e118657b500b32859aede2d9b98c18366637ab66fb3a7d49d4547",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-routing.instructions.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "sha256": "aa44aad790a77ca17da0a74625e94e985528729b8ddf70d626a82acb4ab1a35e",
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-routing.instructions.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "instructions/squad/squad-state.instructions.md",
       "sha256": "736a4924d3cbf9d54f96ff011c2d9707b69be7598c42190bc780d9ff56176cc7",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-state.instructions.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-state.instructions.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "instructions/squad/squad-watch-mode.instructions.md",
       "sha256": "d3c8e662ebc5245d256c63949277b32215e8ddff5d1619ba2b429f4945c364aa",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-watch-mode.instructions.md#3eec5a825e84121123b7c80bdf9db95c99840ac2"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-watch-mode.instructions.md#148e95d8b0f2d687da06b421acb8fc7f62e62673"
     },
     {
       "path": "instructions/untrusted-content-boundary.instructions.md",
-      "sha256": "09a2c29edfe72cb1148d0db0a54bb839fde57697a06a944102c849bc672beabe",
-      "source": "microsoft/hve-core/.github/instructions/shared/untrusted-content-boundary.instructions.md#db1be8f09a91525ff0412d38c581e1cd6922e01b"
+      "sha256": "bb69cfe487159c5b454a3cbef7808fce7e07ff9db5e94c676095689e6a86c884",
+      "source": "microsoft/hve-core/.github/instructions/shared/untrusted-content-boundary.instructions.md#3d681c92ff25fc307778f545446b54cf9b26a057"
     }
   ],
   "note": "Skill file trees are DEFERRED to the execution expansion; personas + squad/boundary instructions only."

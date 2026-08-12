@@ -337,7 +337,7 @@ export const SQUAD_MEMORY_SYNC_DESCRIPTOR = {
 /**
  * Synthetic `tools/list` descriptor for the BUSINESS-PLAN tool. Business-facing
  * counterpart of the engineering advisory tools: one embedded dispatch against the
- * Product Manager Advisor persona, returning a fixed-section business plan written
+ * BRD Builder persona, returning a fixed-section business plan written
  * for a non-technical stakeholder. Advisory only — no impactful action.
  */
 const SQUAD_BUSINESS_PLAN_DESCRIPTOR = {

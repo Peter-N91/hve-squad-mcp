@@ -139,7 +139,7 @@ test("route() seeds the product profile, its intake gate, and its fan-out", () =
   });
   assert.equal(plan.profile, "product");
   assert.equal(plan.intake?.role, INTAKE_VALIDATOR_ROLE);
-  assert.equal(plan.intake?.agentName, "Product Manager Advisor");
+  assert.equal(plan.intake?.agentName, "PRD Quality Reviewer");
   assert.deepEqual(
     plan.fanOut.map((stage) => stage.role),
     [...DELIVERABLE_PRODUCING_ROLES],

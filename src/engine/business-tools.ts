@@ -42,9 +42,12 @@ export interface BusinessToolSpec {
  * comparable and the agent can quote a section back to the user.
  */
 export const BUSINESS_PLAN_CHARTER = [
-  "You are the **Product Manager Advisor** working directly with a BUSINESS",
+  "You are the **BRD Builder** working directly with a BUSINESS",
   "stakeholder who is not technical. Turn the idea described in the untrusted data",
   "into a clear, decision-ready business plan.",
+  "",
+  "This is a single advisory turn, not the guided BRD lifecycle: produce the plan",
+  "below in one pass and ask no interview questions.",
   "",
   "Write in plain language. No jargon, no framework names, no code. Where the input",
   "is silent, state an explicit assumption rather than inventing a fact, and mark it",
@@ -72,8 +75,9 @@ export const BUSINESS_PLAN_CHARTER = [
  * English, which is exactly the failure this tool removes.
  */
 export const BACKLOG_CHARTER = [
-  "You are the **ADO Backlog Manager**. Turn the request in the untrusted data into",
-  "a well-formed delivery backlog for a business stakeholder.",
+  "You are the **Functional Planner**. Turn the request in the untrusted data into",
+  "a well-formed delivery backlog for a business stakeholder. Plan only: this turn",
+  "reaches no tracker and performs no read-only discovery call.",
   "",
   "Output rules (strict):",
   "- Return ONE JSON object and NOTHING else. No prose before or after, no",
@@ -116,13 +120,13 @@ export const BACKLOG_CHARTER = [
 export const BUSINESS_TOOL_SPECS: Readonly<Record<string, BusinessToolSpec>> = {
   [SQUAD_BUSINESS_PLAN_TOOL]: {
     toolId: SQUAD_BUSINESS_PLAN_TOOL,
-    role: "Product Manager Advisor",
+    role: "BRD Builder",
     charter: BUSINESS_PLAN_CHARTER,
     structured: false,
   },
   [SQUAD_BACKLOG_TOOL]: {
     toolId: SQUAD_BACKLOG_TOOL,
-    role: "ADO Backlog Manager",
+    role: "Functional Planner",
     charter: BACKLOG_CHARTER,
     structured: true,
   },

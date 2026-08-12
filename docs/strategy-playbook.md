@@ -282,8 +282,8 @@ start duplicate runs because a previous one is still held.
 
 - Scope: `Squad.Business`.
 - Availability: `SQUAD_MCP_ENABLE_BUSINESS_TOOLS=true`.
-- Persona: Product Manager Advisor plus a fixed output contract.
-- Canonical persona: `host/cast/.github/agents/product-manager-advisor.agent.md`.
+- Persona: BRD Builder plus a fixed output contract.
+- Canonical persona: `host/cast/.github/agents/brd-builder.agent.md`.
 - Workflow: one embedded model call. Produces exactly ten sections: Summary,
   Problem and Customer, Proposed Solution, Value and Success Measures, Scope,
   Go-to-Market, Cost and Effort Outline, Risks and Dependencies, Milestones,
@@ -304,8 +304,8 @@ Do not use it as an architecture design or detailed delivery plan.
 
 - Scope: `Squad.Backlog`.
 - Availability: `SQUAD_MCP_ENABLE_BUSINESS_TOOLS=true`.
-- Persona: ADO Backlog Manager plus a strict JSON output contract.
-- Canonical persona: `host/cast/.github/agents/ado-backlog-manager.agent.md`.
+- Persona: Functional Planner plus a strict JSON output contract.
+- Canonical persona: `host/cast/.github/agents/functional-planner.agent.md`.
 - Workflow: one embedded model call followed by server-side JSON extraction,
   validation, normalization, hard caps, and depth-first flattening.
 - Output: `summary`, hierarchical `epics`, and ordered `workItems` with stable

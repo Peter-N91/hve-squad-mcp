@@ -37,7 +37,7 @@ class EchoBackend implements ModelBackend {
   constructor(private readonly intakeVerdict = "Ready") {}
   complete(request: BackendRequest): Promise<BackendResult> {
     this.systems.push(request.system);
-    const isIntake = /Product Manager Advisor|PRD Quality Reviewer/i.test(request.system);
+    const isIntake = /PRD Quality Reviewer|BRD Quality Reviewer/i.test(request.system);
     const text = isIntake
       ? `Verdict: ${this.intakeVerdict}\n\nIntake assessed.`
       : `Deliverable body for ${request.system.slice(0, 40)}`;
