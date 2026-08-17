@@ -25,8 +25,9 @@
 #
 # Per-tool `input` mirrors the `/squad` prompt arguments
 # (squad-src/.github/prompts/squad/squad.prompt.md):
-#   request (required), profile, tier, owner, mode, context, and the optional
-#   federation `squad` sub-squad target (plus `init` on squad_federate).
+#   request (required), profile, tier, owner, mode, context, the optional
+#   discovery-gate depth on the two catch-all tools, and the optional federation
+#   `squad` sub-squad target (plus `init` on squad_federate).
 #
 # Execution model (Phase 0): DELEGATED. The tool returns the Coordinator
 # persona + matched routing + framed request; the calling host (VS Code GitHub
@@ -42,6 +43,10 @@ conventions:
   profiles: [default, full, security, design, architecture, azure, product]
   tiers: [fast, default]
   modes: [autonomous, autopilot]
+  # Discovery-gate depths, offered only on the attended (delegated) path — the
+  # gate interviews a human, so an unattended run ignores the input entirely.
+  # See squad-src/.github/instructions/squad/squad-discovery-gate.instructions.md.
+  discoveryDepths: [quick, standard, deep, skip]
   stateRoot: ".copilot-tracking/squad/"
   # Federation (opt-in): a repo may host several named sub-squads, each an
   # ordinary squad rooted at the sub-squad root below. The optional `squad`
@@ -309,6 +314,10 @@ tools:
           type: string
           enum: [autonomous, autopilot]
           description: "Optional autonomy mode: autonomous (bounded validator loop) or autopilot (full gated pipeline)."
+        discovery:
+          type: string
+          enum: [quick, standard, deep, skip]
+          description: "Optional discovery-gate depth for a request that states a goal with no requirement artifact behind it: quick (analyst), standard (designer then analyst), deep (designer, then challenger and experimenter, then analyst), or skip. An explicit depth beats the coordinator's one-time offer. Ignored on an unattended run, which has nobody for the gate to interview."
         context:
           type: string
           description: "Optional free-form context to frame the pipeline."
@@ -379,6 +388,10 @@ tools:
           type: string
           enum: [autonomous, autopilot]
           description: "Optional autonomy mode. With a single sub-squad target it is forwarded to that sub-squad's run; with mode=autopilot and no squad= target the Federation Coordinator runs the federation-level autopilot meta-pipeline (ordered sub-squad autopilot runs, aggregated federation gates, one consolidated final-outcome validation)."
+        discovery:
+          type: string
+          enum: [quick, standard, deep, skip]
+          description: "Optional discovery-gate depth, asked once at the federation level and applied per qualifying sub-squad: quick (analyst), standard (designer then analyst), deep (designer, then challenger and experimenter, then analyst), or skip. Each qualifying sub-squad runs its own session and writes its own brief and verdict under its own root. Ignored on an unattended run."
         context:
           type: string
           description: "Optional free-form context to frame the federation turn."

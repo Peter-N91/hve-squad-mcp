@@ -339,6 +339,16 @@
             ],
             "description": "Optional autonomy mode: autonomous (bounded validator loop) or autopilot (full gated pipeline)."
           },
+          "discovery": {
+            "type": "string",
+            "enum": [
+              "quick",
+              "standard",
+              "deep",
+              "skip"
+            ],
+            "description": "Optional discovery-gate depth for a request that states a goal with no requirement artifact behind it: quick (analyst), standard (designer then analyst), deep (designer, then challenger and experimenter, then analyst), or skip. An explicit depth beats the coordinator's one-time offer. Ignored on an unattended run, which has nobody for the gate to interview."
+          },
           "context": {
             "type": "string",
             "description": "Optional free-form context to frame the pipeline."
@@ -421,6 +431,16 @@
               "autopilot"
             ],
             "description": "Optional autonomy mode. With a single sub-squad target it is forwarded to that sub-squad's run; with mode=autopilot and no squad= target the Federation Coordinator runs the federation-level autopilot meta-pipeline (ordered sub-squad autopilot runs, aggregated federation gates, one consolidated final-outcome validation)."
+          },
+          "discovery": {
+            "type": "string",
+            "enum": [
+              "quick",
+              "standard",
+              "deep",
+              "skip"
+            ],
+            "description": "Optional discovery-gate depth, asked once at the federation level and applied per qualifying sub-squad: quick (analyst), standard (designer then analyst), deep (designer, then challenger and experimenter, then analyst), or skip. Each qualifying sub-squad runs its own session and writes its own brief and verdict under its own root. Ignored on an unattended run."
           },
           "context": {
             "type": "string",

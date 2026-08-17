@@ -79,6 +79,23 @@ The server surfaces the gate in the **delegated (local VS Code)** path: the coor
 
 The **embedded/advisory pipeline** (`squad_run`) now carries the gate too: `route()` prepends an intake stage for any profile that seeds `intake-validator` (`product`, `full`), and the pipeline records an `## Intake Readiness Verdict` before dispatching a downstream role. A `Not-Ready` verdict **halts the run** (`reason: "intake_not_ready"`) rather than letting the plan and deliverable stages build on inputs the validator just rejected; an unreadable verdict line degrades to `Ready-With-Gaps` rather than to `Ready`.
 
+### Discovery gate
+
+`hve-squad@0.15.0` added the intake gate's sibling, on the **inverse** trigger: the intake gate validates a requirement artifact when one exists, and the **discovery gate** fires when none does — a request that states a goal (`reduce onboarding drop-off`) rather than a settled task (`add a retry to the webhook client`). It brainstorms a **brief**, which the intake gate then validates, so the two chain rather than loop.
+
+The gate is **offered, never automatic**. Validating a document is something an agent can do alone; ideation is not, because the value of a brainstorm is the human's ideas. So the coordinator asks once per topic, and the depth scales the session to the decision:
+
+| `discovery=` | Dispatches | Produces |
+| --- | --- | --- |
+| `quick` | `analyst` | the brief (the recommended default) |
+| `standard` | `designer` (DT Coach), then `analyst` | framing, solution themes, brief |
+| `deep` | `designer`, then `challenger` and `experimenter`, then `analyst` | framing, themes, objections, riskiest assumption, brief |
+| `skip` | nothing | a `Depth: skip` verdict recording the declination |
+
+The server surfaces it on the two catch-all entry points — a `discovery` input on **`squad_run`** and **`squad_federate`**, mirroring the `/squad` and `/squad-federation` prompt arguments — and states the contract in the delegated gate context ahead of the Intake Gate: only `analyst` writes a file (the brief, in the `analyst` Deliverable Root, carrying every option considered **with the reason each was discarded**), every dispatched role interviews the user one question at a time and stops rather than inventing an answer it could not get, and the Scribe records a `## Discovery Verdict` in `decisions.md` **including on a decline** — which is what stops the gate re-offering the same topic.
+
+**The embedded path never runs it.** An unattended run has nobody to interview, so no offer is made, an explicit `discovery=` is ignored rather than honored (and logged as `discovery_ignored_unattended`), and the caller's payload becomes the intake gate's input instead. The unattended path is therefore never ungated — it is gated by validation rather than by ideation, the only one of the two it can honestly perform.
+
 ## Execution model — delegated (local VS Code)
 
 The Step 0.1 delegated-drive spike validated this path (Question A = PASS): VS Code Copilot auto-invokes the tool and drives its own in-host dispatch loop. The spike was a disposable de-risking exercise; it is **not** shipped with the package (it is git-ignored — see `.gitignore`). In the delegated (local) mode the server runs **no model**; it returns:

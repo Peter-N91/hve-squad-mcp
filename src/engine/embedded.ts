@@ -187,6 +187,7 @@ export class EmbeddedCoordinator {
   private readonly leaseMs?: number;
   private readonly autoMemory?: AutoMemory;
   private readonly runRecorder?: SquadRunRecorder;
+  private readonly logger?: RedactingLogger;
   /** Outstanding held runs per tenant, started via startHttpRun (MEDIUM-2). */
   private readonly heldCounts = new Map<string, number>();
 
@@ -203,6 +204,7 @@ export class EmbeddedCoordinator {
     this.leaseMs = deps.leaseMs;
     this.autoMemory = deps.autoMemory;
     this.runRecorder = deps.runRecorder;
+    this.logger = deps.logger;
   }
 
   /**
@@ -296,6 +298,13 @@ export class EmbeddedCoordinator {
   /**
    * Execute one hero-tool call server-side. Routing/scope/gate decisions are made
    * before any model call; on a hold or a quota denial NO backend call is made.
+   *
+   * `request.discovery` is deliberately not read here. The discovery gate
+   * interviews a human one question at a time, and this path has nobody to ask —
+   * so per `squad-discovery-gate.instructions.md` (*Unattended Runs*) no offer is
+   * made, an explicit depth is ignored rather than honored, and the caller's
+   * payload becomes the intake gate's input instead. An unattended run is gated by
+   * validation, not by ideation.
    */
   async handle(
     tool: CatalogTool,
@@ -304,6 +313,12 @@ export class EmbeddedCoordinator {
   ): Promise<EmbeddedResult> {
     const matchedRouting = toMatchedRouting(tool);
     const tenantId = ctx.auth.tenantId;
+    if (request.discovery) {
+      this.logger?.info("discovery_ignored_unattended", {
+        toolId: tool.id,
+        requested: request.discovery,
+      });
+    }
 
     // SEC-9 / COST-1 / COST-2 — admit under quota before any work.
     const admit = this.quota.acquire(tenantId);

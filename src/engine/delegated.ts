@@ -23,10 +23,12 @@ import type {
 } from "./coordinator-engine.js";
 import {
   COORDINATOR_PERSONA,
+  DISCOVERY_GATE_INSTRUCTIONS,
   FEDERATION_AUTOPILOT_NOTE,
   FEDERATION_COORDINATOR_PERSONA,
   FEDERATION_DETECTION_NOTE,
   GATE_INSTRUCTIONS,
+  discoveryInstructions,
   modeInstructions,
   squadStateRoot,
 } from "./persona.js";
@@ -54,8 +56,13 @@ function composeSystemPrompt(tool: CatalogTool, request: CoordinatorRequest): st
   const federation = isFederationTool(tool);
   const blocks: string[] = [federation ? FEDERATION_COORDINATOR_PERSONA : COORDINATOR_PERSONA];
   // Gating instructions are load-bearing only for the pipeline/council tools.
+  // Discovery precedes intake, which precedes implementation, so it leads.
   if (tool.gates || tool.council.length > 0) {
-    blocks.push(GATE_INSTRUCTIONS);
+    blocks.push(DISCOVERY_GATE_INSTRUCTIONS, GATE_INSTRUCTIONS);
+  }
+  const discoveryBlock = discoveryInstructions(request.discovery);
+  if (discoveryBlock.length > 0) {
+    blocks.push(discoveryBlock);
   }
   // Surface federation resolution for the federation tool, or for any tool that
   // did not pin a sub-squad (a plain repo ignores it; a federation repo needs it).
@@ -235,6 +242,7 @@ async function composeStateContext(
     `- tier: ${request.tier ?? "(cost-first default)"}`,
     `- owner: ${request.owner ?? "(role-only dispatch)"}`,
     `- mode: ${request.mode ?? "(interactive)"}`,
+    `- discovery: ${request.discovery ?? "(no explicit depth; offer once when the trigger holds)"}`,
   ];
   // Optional bounded prior-context digest (Step 4.1). With NO store injected the
   // block is never appended, so the output is BYTE-IDENTICAL to the advisory-only

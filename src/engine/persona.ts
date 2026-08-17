@@ -8,7 +8,9 @@
  *   * squad-src/.github/instructions/squad/squad-routing.instructions.md
  *     (Implementation Gate, Review Follow-Through);
  *   * squad-src/.github/instructions/squad/squad-intake-gate.instructions.md
- *     (Intake Gate, Intake Readiness Verdict).
+ *     (Intake Gate, Intake Readiness Verdict);
+ *   * squad-src/.github/instructions/squad/squad-discovery-gate.instructions.md
+ *     (Discovery Gate, depth tiers, Discovery Verdict).
  *
  * They are embedded (not copied verbatim) so the Phase 0 server is deterministic
  * and runnable without a deployed consumer on disk. In a deployed workspace the
@@ -158,6 +160,103 @@ export const GATE_INSTRUCTIONS = [
   "work complete, in every mode — so Research -> Plan -> Implement -> Review is",
   "enforced end-to-end.",
 ].join("\n");
+
+/** The depth tiers the discovery gate accepts, in the order the roster lists them. */
+export const DISCOVERY_DEPTHS = ["quick", "standard", "deep", "skip"] as const;
+
+export type DiscoveryDepth = (typeof DISCOVERY_DEPTHS)[number];
+
+/** The roles each depth dispatches, in dispatch order (`skip` dispatches none). */
+export const DISCOVERY_DEPTH_ROLES: Record<DiscoveryDepth, readonly string[]> = {
+  quick: ["analyst"],
+  standard: ["designer", "analyst"],
+  deep: ["designer", "challenger", "experimenter", "analyst"],
+  skip: [],
+};
+
+/**
+ * The Discovery Gate, paraphrased from squad-discovery-gate.instructions.md.
+ * Appended alongside {@link GATE_INSTRUCTIONS}, ahead of it in the prompt because
+ * the gates run in that order: discovery, then intake, then implementation.
+ */
+export const DISCOVERY_GATE_INSTRUCTIONS = [
+  "**Discovery Gate (opt-in).** When the turn advances toward a plan, a build, or",
+  "a deliverable and NO requirement or input artifact grounds it — the request",
+  "states a goal (`reduce onboarding drop-off`) rather than a settled task (`add a",
+  "retry to the webhook client`) — OFFER a discovery session once, then WAIT. This",
+  "is the exact inverse of the Intake Gate's trigger, so the two can never fire on",
+  "the same inputs; they chain rather than loop, because the brief discovery",
+  "produces is itself the artifact the intake gate then validates. Validation can",
+  "be automatic because assessing a document is something an agent does alone;",
+  "ideation cannot, because the value of a brainstorm is the human's ideas — so",
+  "this gate is never automatic and never runs unattended.",
+  "",
+  "Offer only where the roster carries the gate's roles (`analyst` writes the brief",
+  "at every depth, so in practice `product` and `full`). Elsewhere stay SILENT",
+  "rather than escalating — that is the deliberate difference from",
+  "`intake-validator`: an input that exists and goes unvalidated is a skipped check",
+  "worth interrupting for, an unrequested brainstorm is not. An explicit",
+  "`discovery=` input is still honored on any roster, with ONE combined escalation",
+  "naming every role it must add.",
+  "",
+  "**Depths.** `quick` dispatches `analyst` (recommend this by default);",
+  "`standard` runs `designer` (DT Coach) for How-Might-We framing and divergent",
+  "ideation, then `analyst`; `deep` runs `designer`, then `challenger` and",
+  "`experimenter`, then `analyst`; `skip` dispatches nothing. Offer once per TOPIC,",
+  "not once per turn.",
+  "",
+  "**The dispatched roles interview the user; they never answer for them.** Each",
+  "puts its questions through the question tool ONE question per turn, with a",
+  "multiple-choice answer list where the options are knowable, and waits for the",
+  "answer before asking the next. Never batch a questionnaire into one turn. A role",
+  "that cannot reach the user returns its outstanding questions instead of",
+  "inventing the answers, and the session STOPS — a brief built from an agent's",
+  "assumptions is the failure this gate exists to prevent.",
+  "",
+  "Only `analyst` writes a file: the brief, `<date>-<topic-id>-brief.md` in the",
+  "`analyst` Deliverable Root, carrying the problem, why now, in/out of scope, the",
+  "success measure, every option considered WITH the reason each was discarded, the",
+  "chosen direction, assumptions, and the open questions research inherits. Have",
+  "the Squad Scribe append a `## Discovery Verdict` to",
+  "`.copilot-tracking/squad/decisions.md` — INCLUDING on a decline (`Depth: skip`),",
+  "which is what stops the gate re-offering the same topic. When the intake gate",
+  "then assesses a brief the squad itself wrote, resolve `intake-validator` to an",
+  "agent other than the one that authored it; when no distinct validator exists,",
+  "say so in the verdict rather than presenting a self-review as an independent",
+  "one.",
+].join("\n");
+
+/**
+ * The per-turn discovery disposition, appended when the caller supplied an
+ * explicit `discovery=` input. An explicit input always beats the offer, so this
+ * block tells the host to run (or skip) that depth without asking first.
+ */
+export function discoveryInstructions(discovery: string | undefined): string {
+  const depth = (discovery ?? "").trim().toLowerCase() as DiscoveryDepth;
+  if (!DISCOVERY_DEPTHS.includes(depth)) {
+    return "";
+  }
+  if (depth === "skip") {
+    return [
+      "**Discovery = skip (explicit input).** Do NOT offer a discovery session this",
+      "turn. Have the Squad Scribe record a `## Discovery Verdict` with `Depth: skip`",
+      "and `Opt-In: explicit-input` so the declination is as auditable as a session",
+      "and the gate does not re-offer this topic, then proceed to the Intake Gate and",
+      "the normal routing table.",
+    ].join("\n");
+  }
+  const roles = DISCOVERY_DEPTH_ROLES[depth].map((role) => `\`${role}\``).join(" -> ");
+  return [
+    `**Discovery = ${depth} (explicit input).** Run the discovery gate BEFORE the`,
+    "Intake Gate, and do not ask whether to run it — the caller already chose.",
+    `Dispatch ${roles}, in that order, each told this is a DISCOVERY pass rather than`,
+    "the work itself, and each passed the original request plus the prior roles'",
+    "output. If the seeded roster is missing any of those roles, name them ALL in one",
+    "escalation, ask once, and proceed on acceptance — never silently drop a role from",
+    "the depth the caller chose, and never substitute your own reasoning for a role",
+    "you could not dispatch. Record the verdict with `Opt-In: explicit-input`.",
+  ].join("\n");
+}
 
 /**
  * Federation-level autopilot note, paraphrased from

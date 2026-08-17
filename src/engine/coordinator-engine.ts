@@ -23,6 +23,14 @@ export interface CoordinatorRequest {
   owner?: string;
   /** Optional autonomy mode (`autonomous` | `autopilot`). */
   mode?: string;
+  /**
+   * Optional discovery-gate depth (`quick` | `standard` | `deep` | `skip`).
+   *
+   * Honored only on the DELEGATED path, where the host has a human who can answer
+   * the gate's interview. The embedded engine is unattended by construction and
+   * ignores it (`squad-discovery-gate.instructions.md`, *Unattended Runs*).
+   */
+  discovery?: string;
   /** Optional free-form context. */
   context?: string;
   /** Optional federation sub-squad name to target (scopes state to members/<name>/). */
