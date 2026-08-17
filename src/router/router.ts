@@ -104,6 +104,7 @@ export class ToolRouter {
       tier: optionalString(record.tier),
       owner: optionalString(record.owner),
       mode: optionalString(record.mode),
+      discovery: optionalString(record.discovery),
       context: optionalString(record.context),
       squad: optionalString(record.squad),
       init: record.init === true,

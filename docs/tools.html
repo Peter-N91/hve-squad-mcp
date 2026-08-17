@@ -82,6 +82,38 @@
     prerequisites.
   </p>
 
+  <h3>The discovery gate</h3>
+  <p>
+    Both catch-all tools take an optional <code>discovery</code> depth, mirroring the <code>/squad</code> and
+    <code>/squad-federation</code> prompt arguments. It drives the gate <code>hve-squad@0.15.0</code> added on the
+    <em>inverse</em> trigger to the intake gate: the intake gate validates a requirement artifact when one exists, the
+    discovery gate fires when none does — a request that states a goal rather than a settled task — and brainstorms the
+    brief the intake gate then validates.
+  </p>
+
+  <table>
+    <thead>
+      <tr><th><code>discovery</code></th><th>Dispatches</th><th>Produces</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>quick</code></td><td><code>analyst</code></td><td>the brief (the recommended default)</td></tr>
+      <tr><td><code>standard</code></td><td><code>designer</code> (DT Coach), then <code>analyst</code></td><td>framing, solution themes, brief</td></tr>
+      <tr><td><code>deep</code></td><td><code>designer</code>, then <code>challenger</code> and <code>experimenter</code>, then <code>analyst</code></td><td>framing, themes, objections, riskiest assumption, brief</td></tr>
+      <tr><td><code>skip</code></td><td>nothing</td><td>a <code>Depth: skip</code> verdict recording the declination</td></tr>
+    </tbody>
+  </table>
+
+  <p>
+    The gate is <strong>offered, never automatic</strong>: validating a document is something an agent does alone, and
+    ideation is not. Every dispatched role interviews the user one question at a time and stops rather than inventing an
+    answer it could not get; only <code>analyst</code> writes a file, so one session leaves one artifact.
+  </p>
+  <p>
+    <strong>The remote path never runs it.</strong> An embedded run has nobody to interview, so no offer is made and an
+    explicit <code>discovery</code> is ignored rather than honoured — the caller's payload becomes the intake gate's
+    input instead. An unattended run is gated by validation, not by ideation.
+  </p>
+
   <h2>Utility tools</h2>
   <p>
     These are transport-level utilities, not routing intents, so they are not in the catalog and do not participate in
