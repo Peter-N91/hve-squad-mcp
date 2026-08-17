@@ -10,6 +10,31 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
+## [0.6.0] - 2026-08-17
+
+> Built against `Peter-N91/hve-squad@0.15.0` (see `host/cast/package-pin.json`).
+
+### Added
+
+- **The squad had a front door for weak inputs and none for absent ones.** The intake gate this server already surfaces validates a requirement artifact when one exists; a request with nothing written down went straight into research on framing nobody examined. `hve-squad@0.15.0` added the **discovery gate** on the inverse trigger — no input artifact, a goal rather than a settled task — and the delegated gate context now states it ahead of the Intake Gate, in the order the two actually run. They chain rather than loop: discovery produces a brief, the intake gate validates it (`src/engine/persona.ts`).
+- **A `discovery` depth on the two catch-all tools**, mirroring the `/squad` and `/squad-federation` prompt arguments: `quick` dispatches `analyst`, `standard` runs `designer` then `analyst`, `deep` runs `designer`, then `challenger` and `experimenter`, then `analyst`, and `skip` records the declination. An explicit depth beats the coordinator's one-time offer and is honoured on any roster, naming in one escalation every role it must add. The four narrower per-role tools do not take it — they mirror a single routing intent, not the `/squad` entry point (`tools.catalog.yml`, `src/router/router.ts`, `src/engine/coordinator-engine.ts`).
+- **The embedded path refuses it rather than faking it.** The gate interviews a human one question at a time, and a server-side run has nobody to ask, so per the gate's *Unattended Runs* rule no offer is made, an explicit depth is ignored rather than honoured (recorded as `discovery_ignored_unattended`), and the caller's payload becomes the intake gate's input instead. The depth is deliberately not persisted with a run, so a resumed run cannot appear to honour it. An unattended run stays gated — by validation, which it can perform honestly, rather than by ideation, which it cannot (`src/engine/embedded.ts`, `src/engine/run-params.ts`).
+- Drift cover for the parts that bind to the deployed roster: every depth role is a real Cast Catalog row, `DT Coach` is still the `designer` alternate the gate's Selection Cue resolves to, `analyst` is still seeded by `product` and `full` alone (which is what scopes the offer), and `challenger` is still the one role a `product` squad must add for `deep` (`test/discovery-gate.test.ts`).
+
+### Changed
+
+- **Bumped the bundled cast pin from `0.14.0` to `Peter-N91/hve-squad@0.15.0`** and refreshed `host/cast/` from that release's `apm.yml`. This tracks a minor release upstream, so it carries the same level here. The bundle gains a fifteenth squad instruction file, `squad-discovery-gate.instructions.md` — the opt-in discovery gate that fires on the inverse trigger to the intake gate (no input artifact, a goal rather than a settled task) and produces a brief the intake gate then validates. The hve-core pin moves to `26b9712`. No agent was added or retired and no roster table moved, so every tool binding and every parsed profile, cast, and deliverable-root row is unchanged.
+
+### Consumer install
+
+Pin to this version:
+
+```powershell
+npm install "Peter-N91/hve-squad-mcp#v0.6.0"
+```
+
+[0.6.0]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.6.0
+
 ## [0.5.0] - 2026-08-14
 
 > Built against `Peter-N91/hve-squad@0.14.0` (see `host/cast/package-pin.json`).
