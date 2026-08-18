@@ -288,9 +288,8 @@ async function resolveBundle(pin: Pin): Promise<Resolution> {
     );
   }
 
-  // Every entry must be reachable at a fixed commit. The package's own entries are
-  // unpinned by construction (they ship with the release being installed) and resolve
-  // at the tag; anything else unpinned would float and is refused.
+  // Every entry must be reachable at a fixed commit. The package's own entries resolve
+  // at the tag's commit; anything else unpinned would float and is refused.
   const upstreamCommits: Record<string, string> = { [pin.package]: sourceCommit };
   const planned: PlannedFile[] = [];
   const byDest = new Map<string, PlannedFile>();
@@ -302,6 +301,16 @@ async function resolveBundle(pin: Pin): Promise<Resolution> {
     }
     let commit: string;
     if (dep.slug === pin.package) {
+      // Package releases from v0.15.2 on rewrite the self-references to the tag being
+      // cut; earlier tags left them bare, which APM resolved against the default branch.
+      // Either way this bundle takes the tag's OWN commit, never `main` — so a
+      // self-reference naming some other release is a mis-cut tag, not a choice.
+      if (dep.ref && dep.ref !== tag && dep.ref !== sourceCommit) {
+        throw new Error(
+          `${pin.package}@${tag} self-references ${dep.path} at "${dep.ref}" rather than ${tag}. ` +
+            "A release tag's manifest must point at the release it ships.",
+        );
+      }
       commit = sourceCommit;
     } else if (dep.ref) {
       commit = dep.ref;
