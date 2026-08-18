@@ -1,15 +1,15 @@
 {
   "generatedBy": "host/snapshot-cast.ts",
   "sourcePackage": "Peter-N91/hve-squad",
-  "linkedPackageVersion": "0.15.0",
-  "sourceRef": "v0.15.0",
-  "sourceCommit": "ca406c8a39a1ca7b8813de36c03b2ea2265113d5",
-  "sourceManifestSha256": "d8780d1140948dd25f500ca64b354e0cae528936cbcb6d56b6084ac4c77288c9",
+  "linkedPackageVersion": "0.15.1",
+  "sourceRef": "v0.15.1",
+  "sourceCommit": "3933358da39cf2eae3db95d4a1e5987a8d03b645",
+  "sourceManifestSha256": "b611262a88e6dd3c5f6e764e25c43105a1a7a7251b30fd36d2c6a989fbbbf7f8",
   "upstreamCommits": {
     "microsoft/hve-core": "26b97122e19d6ff271b0b6f0401c92bb12eda03b",
-    "Peter-N91/hve-squad": "ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+    "Peter-N91/hve-squad": "3933358da39cf2eae3db95d4a1e5987a8d03b645"
   },
-  "generatedAt": "2026-08-17",
+  "generatedAt": "2026-08-18",
   "agentFileCount": 82,
   "instructionFileCount": 15,
   "agentNames": [
@@ -355,122 +355,122 @@
     {
       "path": "agents/squad/squad-asbuilt-author.agent.md",
       "sha256": "c71b5cba8e370016ad64afa7eee04902c4497d0cfbd36d285ece24eda242406b",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-asbuilt-author.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-asbuilt-author.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-azure-architect.agent.md",
       "sha256": "ff7993351407e2fd9ec80c9c215bceb7d6c21f870fdde0959fa7ada202918cb9",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-azure-architect.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-azure-architect.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-azure-diagnose.agent.md",
       "sha256": "8975b2d6f4d081045234e8c722eb29a1366c1ac9abeac39522c83ecd1aaec586",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-azure-diagnose.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-azure-diagnose.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-backlog-executor.agent.md",
       "sha256": "2f2756f60a0482508b15d5851f6388a68c4311bca20483e06f07ce701d784e53",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-backlog-executor.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-backlog-executor.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-challenger.agent.md",
       "sha256": "f5ba384afeb29aef3761d9216c65b7b4a569c02db25b038f68a504e3e07d7257",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-challenger.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-challenger.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-coordinator.agent.md",
       "sha256": "a9a0cb2a299b26c0c5ffacc601a9113f8a6d5482710fd02715360f708ba587a4",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-coordinator.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-coordinator.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-cost-manager.agent.md",
       "sha256": "3d68a1dba883d4a435df4a81db67518a4b17d4acedc58ab1691bcf74e058c1f2",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-cost-manager.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-cost-manager.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-data-scientist.agent.md",
       "sha256": "3f4815676fb19d95ef9396a26b2f5116946a4aadee4e3771ace9426b4d7f2fb5",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-data-scientist.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-data-scientist.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-deployer.agent.md",
       "sha256": "4a3cb3cc714a96ca6cb8d950594c573e1aac8345cfdf6e1081b4a58c954a616a",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-deployer.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-deployer.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-federation-coordinator.agent.md",
       "sha256": "1e6d50a4bcf58f5deb87b1899b9168f43a7f0edc4688971b5fcc3a6e7c9b91fe",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-federation-coordinator.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-federation-coordinator.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-iac-author.agent.md",
       "sha256": "537d7fb5ba649e80dde90ae2f0f4623432e2e13bf6d35eb457dc2982ca9a2469",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-iac-author.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-iac-author.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-implementor.agent.md",
       "sha256": "7491bed728870fa45902ad88445518d00e85b782b4ff1fb53ffacffa7c47c3d3",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-implementor.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-implementor.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-lead.agent.md",
       "sha256": "3774eed782f3a9c8ab925e94d083e080dd407c3c2ec71057a193f990ae8230d4",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-lead.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-lead.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-modernization-planner.agent.md",
       "sha256": "e166c26c2c96ae40fffa7f670dcbb6a99683fac1039dab77cf5bae0240c1cc05",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-modernization-planner.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-modernization-planner.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-observability-planner.agent.md",
       "sha256": "6c92962bb7a1a6146f7acdac68c228f9355dafeab29d9b4fc6615044093c6cba",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-observability-planner.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-observability-planner.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-performance-planner.agent.md",
       "sha256": "e31e572e6108b9c9171d02d2bdec3b4f89ede512abae52b804f03a43dfb251bf",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-performance-planner.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-performance-planner.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-prompt-engineer.agent.md",
       "sha256": "9719978fc983cd5ef48fa8b4770d76d7091736030823cd632c16179b41327c0e",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-prompt-engineer.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-prompt-engineer.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-researcher.agent.md",
       "sha256": "71fc445b003effec6940ea6b041c5ca294071422330d11e6edcb97486f8d8c6b",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-researcher.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-researcher.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-reviewer.agent.md",
       "sha256": "7e0dcbdaa5c70cfe6489fa125d18b35acfe56e7e3d8b02c2f5ac3046ad6c9d49",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-reviewer.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-reviewer.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-risk-manager.agent.md",
       "sha256": "8a700253dbcd58cd918988dc46a9e3540d01e03b253a2e8bb9cba75e2dfadc34",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-risk-manager.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-risk-manager.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-scribe.agent.md",
       "sha256": "23b170c0df9d32799e768946a33073cc66b7db91cb7b359a8169ba5691897b51",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-scribe.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-scribe.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-sql-migration-advisor.agent.md",
       "sha256": "05819e8d44353706c73a69dde98b687a1fddb794459539328657928af4e07dd5",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-sql-migration-advisor.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-sql-migration-advisor.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-technical-writer.agent.md",
       "sha256": "412dbda42af6a906f1a8e566bd91c8677c0cb7c04b56051b21f8ebdee7a3bce6",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-technical-writer.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-technical-writer.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/squad/squad-vulnerability-manager.agent.md",
       "sha256": "e030238ebfd8f8cd78a5fe31950942afdc273c123db30b76f74131610595dbbe",
-      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-vulnerability-manager.agent.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/agents/squad/squad-vulnerability-manager.agent.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "agents/sssc-planner.agent.md",
@@ -510,72 +510,72 @@
     {
       "path": "instructions/squad/pptx-brand-template.instructions.md",
       "sha256": "e7823d066a909eb119c6506980d3406d74258e456b6fa7413eb1a5084596a515",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/pptx-brand-template.instructions.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/pptx-brand-template.instructions.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "instructions/squad/squad-autonomous.instructions.md",
       "sha256": "f7572596822c95dc558923b874f26eb112ef2908625cd5604e8076d5f7c87beb",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-autonomous.instructions.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-autonomous.instructions.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "instructions/squad/squad-autopilot.instructions.md",
       "sha256": "1552988ace78af55ee38f57a5fb81a55bb41e8a8c579f0ee568e65f1a942b122",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-autopilot.instructions.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-autopilot.instructions.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "instructions/squad/squad-council.instructions.md",
       "sha256": "718ca3ede3cc28aa7bcb58c1f218b3e994db8e6047628226d95cd60ce2d06ef2",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-council.instructions.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-council.instructions.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "instructions/squad/squad-discovery-gate.instructions.md",
       "sha256": "fa4db6e88e8ace31dc73fedfb86bb05206171f1ce427f7f565225928da71fcef",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-discovery-gate.instructions.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-discovery-gate.instructions.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "instructions/squad/squad-federation-autopilot.instructions.md",
       "sha256": "aab909c5ea773ac9c226945726f158c6ee4c04cb3c4071eb3917706e34aac7fe",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-federation-autopilot.instructions.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-federation-autopilot.instructions.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "instructions/squad/squad-federation.instructions.md",
       "sha256": "edea3c351b88cd9d6c07227ca0ead4882cce79c0b4573fa3bd1048963e8f1e96",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-federation.instructions.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-federation.instructions.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "instructions/squad/squad-intake-gate.instructions.md",
       "sha256": "6dbaf65037fd2cd13f8ca735eef2066c1ef33fa1785ea4ea3ab9a6ca440fa3cc",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-intake-gate.instructions.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-intake-gate.instructions.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "instructions/squad/squad-mcp-capability.instructions.md",
       "sha256": "ccd09cb057ff98ef7d43a74041df6cb3d2ee25f22b405f42e08c58215e462fde",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-mcp-capability.instructions.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-mcp-capability.instructions.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "instructions/squad/squad-notifications.instructions.md",
       "sha256": "ae822f14f5da8667ba5c6cf48e7eaadfac1c2d5317ec499c89f13e172ffd4034",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-notifications.instructions.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-notifications.instructions.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "instructions/squad/squad-roster.instructions.md",
       "sha256": "ffdfad3c10935da9f5f5a2d6b576aa5660213995260205ec3f7042e454b4b19a",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-roster.instructions.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-roster.instructions.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "instructions/squad/squad-routing.instructions.md",
       "sha256": "f0619038369225dbf68d7ddc8f9258227258c3643c83e7106493bc8ee70815be",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-routing.instructions.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-routing.instructions.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "instructions/squad/squad-state.instructions.md",
       "sha256": "911a0af7aa22875b39c3d3c6c7d213407591869282da84f99e6c8bee636d29d7",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-state.instructions.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-state.instructions.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "instructions/squad/squad-watch-mode.instructions.md",
       "sha256": "b9031f533579a3c6b67a02afd7f4931daa057e1e5d1276b59b7fa9b39a4523cb",
-      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-watch-mode.instructions.md#ca406c8a39a1ca7b8813de36c03b2ea2265113d5"
+      "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/squad-watch-mode.instructions.md#3933358da39cf2eae3db95d4a1e5987a8d03b645"
     },
     {
       "path": "instructions/untrusted-content-boundary.instructions.md",
