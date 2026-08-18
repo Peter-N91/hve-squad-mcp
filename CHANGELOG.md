@@ -10,6 +10,36 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
+## [0.6.2] - 2026-08-18
+
+> Built against `Peter-N91/hve-squad@0.15.2` (see `host/cast/package-pin.json`).
+
+### Fixed
+
+- **The cast snapshot could have been resolved from the package's default branch
+  rather than from the release it claims.** `host/snapshot-cast.ts` already took
+  the tag's own commit for every `Peter-N91/hve-squad` entry, but it ignored
+  whatever ref the manifest declared, so a tag whose self-references named a
+  different release would have been snapshotted silently. The resolver now
+  rejects a self-reference pointing anywhere other than the tag being resolved,
+  which makes "the bundle is the tagged release, never `main`" a checked
+  invariant instead of an implicit one (`host/snapshot-cast.ts`).
+- **The bundled cast is re-pinned to hve-squad `v0.15.2`** (commit `c1a3947`),
+  which carries the upstream hve-core pin `594ee84` and the package-side fix that
+  makes a release tag serve its own squad files. The pre-release sitting on the
+  package's `main` is deliberately not picked up (`host/cast/package-pin.json`,
+  `host/cast/manifest.json`, `host/cast/.github`).
+
+### Consumer install
+
+Pin to this version:
+
+```powershell
+npm install "Peter-N91/hve-squad-mcp#v0.6.2"
+```
+
+[0.6.2]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.6.2
+
 ## [0.6.1] - 2026-08-18
 
 > Built against `Peter-N91/hve-squad@0.15.1` (see `host/cast/package-pin.json`).
