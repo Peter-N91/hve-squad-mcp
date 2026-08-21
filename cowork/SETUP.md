@@ -37,19 +37,23 @@ URIs**, add:
 https://teams.microsoft.com/api/platform/v1.0/oAuthConsentRedirect
 ```
 
-By CLI — note this **replaces** the list, so include every existing URI:
-
-```powershell
-az ad app update --id <CLIENT_ID> --web-redirect-uris `
-  "<existing-uri-1>" "<existing-uri-2>" `
-  "https://teams.microsoft.com/api/platform/v1.0/oAuthConsentRedirect"
-```
-
-Read the current list first with:
+By CLI — read the current list first, because the update **replaces** it:
 
 ```powershell
 az ad app show --id <CLIENT_ID> --query "web.redirectUris" -o json
 ```
+
+Then pass every URI you want to keep, plus the new one. Written on one line so it
+works in PowerShell and bash alike — a backtick continuation is PowerShell-only,
+and in bash it means command substitution, which makes the shell try to execute
+each URL:
+
+```text
+az ad app update --id <CLIENT_ID> --web-redirect-uris "<existing-1>" "<existing-2>" "https://teams.microsoft.com/api/platform/v1.0/oAuthConsentRedirect"
+```
+
+Quote every URI. One of the Copilot Studio redirect URIs ends in `*`, which an
+unquoted shell would try to expand as a glob.
 
 ## Step 2 — create the Entra SSO auth config
 
@@ -77,9 +81,10 @@ Saving returns two values. Keep both:
 
 ## Step 3 — add the Application ID URI to the app registration
 
-```powershell
-az ad app update --id <CLIENT_ID> `
-  --identifier-uris "api://<CLIENT_ID>" "<APP_ID_URI>"
+One line, so it works in PowerShell and bash alike:
+
+```text
+az ad app update --id <CLIENT_ID> --identifier-uris "api://<CLIENT_ID>" "<APP_ID_URI>"
 ```
 
 This replaces the list, so pass every URI you want to keep. The Entra portal UI
@@ -105,17 +110,15 @@ az ad app show --id <CLIENT_ID> --query "api.requestedAccessTokenVersion" -o tsv
 When you do need to add it, `SQUAD_MCP_AUDIENCE` takes a comma-separated list so
 the Copilot Studio connector keeps working:
 
-```powershell
-az containerapp update -n <app> -g <rg> `
-  --set-env-vars "SQUAD_MCP_AUDIENCE=api://<CLIENT_ID>,<APP_ID_URI>"
+```text
+az containerapp update -n <app> -g <rg> --set-env-vars "SQUAD_MCP_AUDIENCE=api://<CLIENT_ID>,<APP_ID_URI>"
 ```
 
 Update the ingress too — it rejects before the app is ever reached, and a
 mismatch there looks identical to an app-side audience bug:
 
-```powershell
-az containerapp auth update -n <app> -g <rg> `
-  --set identityProviders.azureActiveDirectory.validation.allowedAudiences="['api://<CLIENT_ID>','<APP_ID_URI>']"
+```text
+az containerapp auth update -n <app> -g <rg> --set identityProviders.azureActiveDirectory.validation.allowedAudiences="['api://<CLIENT_ID>','<APP_ID_URI>']"
 ```
 
 Container Apps' built-in auth also accepts the registered client id implicitly,
@@ -124,10 +127,11 @@ which is why a v2 deployment can work even when `allowedAudiences` lists only th
 
 ## Step 5 — pack with real values and upload
 
-```powershell
-pwsh -File cowork/pack.ps1 `
-  -Fqdn "<FQDN>" `
-  -OAuthReferenceId "<AUTH_CONFIG_ID>"
+`pack.ps1` is a PowerShell script, so run it with `pwsh` (this one line works
+from bash too):
+
+```text
+pwsh -File cowork/pack.ps1 -Fqdn "<FQDN>" -OAuthReferenceId "<AUTH_CONFIG_ID>"
 ```
 
 If the run prints a placeholder warning, stop — a package carrying placeholders
