@@ -16,7 +16,7 @@
 
 @description('Squad MCP application + security configuration (operator-controlled; never caller input).')
 type SquadConfig = {
-  @description('Token audience this resource server accepts (RFC 8707; SEC-1).')
+  @description('Token audience(s) this resource server accepts (RFC 8707; SEC-1). Comma-separate to serve several front doors, for example a Copilot Studio connector and a Cowork Entra SSO auth config.')
   audience: string
   @description('Comma-separated strict Origin allow-list (SEC-8). Never "*".')
   allowedOrigins: string
@@ -72,6 +72,11 @@ param minReplicas int = 0
 @minValue(1)
 @maxValue(30)
 param maxReplicas int = 5
+
+@description('Seconds of idle traffic before the app scales back to zero. The default 300 is tuned for cost; a longer window keeps the app warm across the pauses in an interactive session, which is what a Copilot Studio or Cowork user actually generates. Scale-to-zero still happens once the session ends.')
+@minValue(60)
+@maxValue(3600)
+param scaleCooldownSeconds int = 300
 
 @description('Monthly cost budget in USD for this resource group (COST-2).')
 param budgetAmountUsd int = 500
@@ -285,7 +290,10 @@ var businessEnv = enableBusinessTools
   ? [ { name: 'SQUAD_MCP_ENABLE_BUSINESS_TOOLS', value: 'true' } ]
   : []
 
-// Base web-app env; pipeline + encryption env are concatenated onto it below.
+// SEC-1: the accepted audiences, split from the operator's comma-separated value.
+// The app receives the raw string and parses it the same way, so the ingress and
+// the app can never disagree about which audiences are accepted.
+var squadAudiences = filter(map(split(squad.audience, ','), a => trim(a)), a => !empty(a))
 var webBaseEnv = [
   { name: 'PORT', value: '3000' }
   { name: 'SQUAD_MCP_AUDIENCE', value: squad.audience }
@@ -361,7 +369,7 @@ resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
   }
 }
 
-resource app 'Microsoft.App/containerApps@2024-03-01' = {
+resource app 'Microsoft.App/containerApps@2025-01-01' = {
   name: '${namePrefix}-app'
   location: location
   identity: {
@@ -405,6 +413,11 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
         // COST-3 / ARCH-2: scale-to-zero with HTTP-driven scale-out.
         minReplicas: minReplicas
         maxReplicas: maxReplicas
+        // An interactive caller pauses between turns to read the previous
+        // artifact. With the platform default (300s) the app sleeps inside those
+        // pauses and the next turn hits a cold start, which surfaces to the
+        // caller as an unreachable connector rather than as latency.
+        cooldownPeriod: scaleCooldownSeconds
         rules: [
           {
             name: 'http-concurrency'
@@ -441,9 +454,7 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-03-01' = {
           clientId: authClientId
         }
         validation: {
-          allowedAudiences: [
-            squad.audience
-          ]
+          allowedAudiences: squadAudiences
         }
       }
     }

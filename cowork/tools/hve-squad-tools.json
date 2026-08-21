@@ -1,0 +1,720 @@
+{
+  "name": "hve-squad",
+  "fidelityClaim": "squad-guided / embedded",
+  "generatedBy": "generators/build-cowork-plugin.ts",
+  "source": "tools.catalog.yml",
+  "tools": [
+    {
+      "name": "squad_research",
+      "title": "Squad Research",
+      "description": "Run the squad's research stage on a question or codebase. Routes to the Squad Researcher (squad `researcher` role) at the `auto`, parallel-eligible tier to investigate, explore, and gather evidence before any plan or change. Embedded execution (squad-guided / embedded): the server runs this squad stage under its gates and returns the finished artifact. Use for \"research\", \"investigate\", \"explore\", or \"find out\" requests.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The research question or topic for the squad this turn."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "default",
+              "full",
+              "security",
+              "design",
+              "architecture",
+              "azure",
+              "product"
+            ],
+            "description": "Optional squad profile to seed when the project has no squad yet."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "default"
+            ],
+            "description": "Optional model-tier hint overriding the coordinator's cost-first default."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Optional Member Name from team.md to pick a specific named member."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "autonomous",
+              "autopilot"
+            ],
+            "description": "Optional autonomy mode for the turn (autonomous validator loop or autopilot pipeline)."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional free-form context (files, constraints, prior findings) to frame the request."
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional federation sub-squad to target (state under .copilot-tracking/squad/members/<name>/); omit outside a federation."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Squad Research",
+        "readOnlyHint": true
+      },
+      "scope": "Squad.Research"
+    },
+    {
+      "name": "squad_plan",
+      "title": "Squad Plan",
+      "description": "Run the squad's planning stage. Routes to the Squad Lead (squad `lead` role) at the `confirm` tier to break a task down, sequence the work, and produce an implementation-ready plan. Planning is non-parallel and lands no change without confirmation. Embedded execution (squad-guided / embedded): the server runs this squad stage under its gates and returns the finished artifact. Use for \"plan\", \"break down\", \"sequence\", or \"design plan\" requests.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The work to plan this turn."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "default",
+              "full",
+              "security",
+              "design",
+              "architecture",
+              "azure",
+              "product"
+            ],
+            "description": "Optional squad profile to seed when the project has no squad yet."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "default"
+            ],
+            "description": "Optional model-tier hint overriding the coordinator's cost-first default."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Optional Member Name from team.md to pick a specific named member."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "autonomous",
+              "autopilot"
+            ],
+            "description": "Optional autonomy mode for the turn."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional free-form context (research artifacts, constraints) to frame the plan."
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional federation sub-squad to target (state under .copilot-tracking/squad/members/<name>/); omit outside a federation."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Squad Plan",
+        "readOnlyHint": true
+      },
+      "scope": "Squad.Plan"
+    },
+    {
+      "name": "squad_review",
+      "title": "Squad Review",
+      "description": "Run the squad's review stage. Routes to the Squad Reviewer (squad `tester` role) at the `auto` tier for quality, correctness, and standards review. When the request asks for a pre-implementation go/no-go or crosses two or more council domains, it engages the council row (architect, security, cost-manager, product-owner, and optionally rai) at the `confirm` tier. Embedded execution (squad-guided / embedded): the server runs the review stage under the squad's gates and returns a finished reviewer artifact (a single reviewer pass, not a convened council verdict). Use for \"review\", \"validate\", \"check quality\", \"council\", or \"go/no-go\" requests.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "What to review, validate, or take to council this turn."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "default",
+              "full",
+              "security",
+              "design",
+              "architecture",
+              "azure",
+              "product"
+            ],
+            "description": "Optional squad profile to seed when the project has no squad yet."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "default"
+            ],
+            "description": "Optional model-tier hint overriding the coordinator's cost-first default."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Optional Member Name from team.md to pick a specific named member."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "autonomous",
+              "autopilot"
+            ],
+            "description": "Optional autonomy mode for the turn."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional free-form context (the change, plan, or design under review)."
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional federation sub-squad to target (state under .copilot-tracking/squad/members/<name>/); omit outside a federation."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Squad Review",
+        "readOnlyHint": true
+      },
+      "scope": "Squad.Review"
+    },
+    {
+      "name": "squad_architect",
+      "title": "Squad Architect",
+      "description": "Run the squad's architecture stage. Routes to the System Architecture Reviewer (squad `architect` role) at the `auto`, parallel-eligible tier to review system design, component boundaries, and design tradeoffs (the Squad Azure Architect authors Azure HLD/LLD as the alternate). Embedded execution (squad-guided / embedded): the server runs this squad stage under its gates and returns the finished artifact. Use for \"architecture\", \"system design\", or \"components\" requests.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The architecture or system-design question this turn."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "default",
+              "full",
+              "security",
+              "design",
+              "architecture",
+              "azure",
+              "product"
+            ],
+            "description": "Optional squad profile to seed when the project has no squad yet."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "default"
+            ],
+            "description": "Optional model-tier hint overriding the coordinator's cost-first default."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Optional Member Name from team.md to pick a specific named member."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "autonomous",
+              "autopilot"
+            ],
+            "description": "Optional autonomy mode for the turn."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional free-form context (existing design, constraints, IaC) to frame the review."
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional federation sub-squad to target (state under .copilot-tracking/squad/members/<name>/); omit outside a federation."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Squad Architect",
+        "readOnlyHint": true
+      },
+      "scope": "Squad.Architect"
+    },
+    {
+      "name": "squad_run",
+      "title": "Squad Run",
+      "description": "Run the full squad pipeline for any request. Hands the request to the Squad Coordinator, which classifies it against the routing table and dispatches the matched roles through Research -> Plan -> Implement -> Review, carrying the council Implementation Gate, the autopilot/autonomous Human Gates, and the notification approval contract unchanged. This is the catch-all entry point and runs at the `confirm` tier with gates. Set `mode=autonomous` for the bounded validator loop or `mode=autopilot` for the full gated pipeline. Embedded execution (squad-guided / embedded): the server runs this server-side under its gates. Because it is gated, the call returns immediately with a run id and may PAUSE at the Human Gate; poll squad_status with that run id to advance the run after an out-of-band operator approval.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The work for the squad this turn (any intent; the Coordinator classifies it)."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "default",
+              "full",
+              "security",
+              "design",
+              "architecture",
+              "azure",
+              "product"
+            ],
+            "description": "Optional squad profile to seed when the project has no squad yet."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "default"
+            ],
+            "description": "Optional model-tier hint overriding the coordinator's cost-first default."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Optional Member Name from team.md to pick a specific named member."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "autonomous",
+              "autopilot"
+            ],
+            "description": "Optional autonomy mode: autonomous (bounded validator loop) or autopilot (full gated pipeline)."
+          },
+          "discovery": {
+            "type": "string",
+            "enum": [
+              "quick",
+              "standard",
+              "deep",
+              "skip"
+            ],
+            "description": "Optional discovery-gate depth for a request that states a goal with no requirement artifact behind it: quick (analyst), standard (designer then analyst), deep (designer, then challenger and experimenter, then analyst), or skip. An explicit depth beats the coordinator's one-time offer. Ignored on an unattended run, which has nobody for the gate to interview."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional free-form context to frame the pipeline."
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional federation sub-squad to target (state under .copilot-tracking/squad/members/<name>/); omit outside a federation."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Squad Run"
+      },
+      "scope": "Squad.Run"
+    },
+    {
+      "name": "squad_federate",
+      "title": "Squad Federate",
+      "description": "Run the squad **federation** meta layer for a repository that hosts several named sub-squads (for example a `product` sub-squad for the business team and an `azure` sub-squad for the architects). Hands the request to the Squad Federation Coordinator, which reads the federation registry (`federation.md`) and meta-routing (`meta-routing.md`), selects the target sub-squad(s) — or honors an explicit `squad=<name>` — and runs each sub-squad's normal per-turn protocol scoped to `.copilot-tracking/squad/members/<name>/`. Set `init` to build a federation (propose → confirm → create) on a fresh project, or `promote` to adopt an existing single squad (a top-level `team.md`) into a federation as its first sub-squad, relocating its state intact. This is the catch-all federation entry point and runs at the `confirm` tier with gates. Embedded execution (squad-guided / embedded): the server runs this server-side under its gates. Because it is gated, the call returns immediately with a run id and may PAUSE at the Human Gate; poll squad_status with that run id to advance the run after an out-of-band operator approval. Use for cross-sub-squad requests, an explicit sub-squad target, or federation setup.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The work for the federation this turn (routed to one or more sub-squads)."
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional sub-squad name to target directly, overriding meta-routing."
+          },
+          "init": {
+            "type": "boolean",
+            "description": "When true, run Federation Init Mode (propose → confirm → create) on a fresh project, or Federation Expansion Mode (add a new sub-squad and register it) when a federation already exists, before routing."
+          },
+          "promote": {
+            "type": "boolean",
+            "description": "When true on an existing single-squad project (a top-level team.md, no federation.md), run Federation Promotion Mode: adopt the existing squad into a federation as its first sub-squad, relocating its state intact, before routing."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "default",
+              "full",
+              "security",
+              "design",
+              "architecture",
+              "azure",
+              "product"
+            ],
+            "description": "Optional profile hint forwarded to a sub-squad's Init when it has no squad yet."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "default"
+            ],
+            "description": "Optional model-tier hint forwarded to the selected sub-squad's run."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Optional Member Name forwarded to the selected sub-squad's run."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "autonomous",
+              "autopilot"
+            ],
+            "description": "Optional autonomy mode. With a single sub-squad target it is forwarded to that sub-squad's run; with mode=autopilot and no squad= target the Federation Coordinator runs the federation-level autopilot meta-pipeline (ordered sub-squad autopilot runs, aggregated federation gates, one consolidated final-outcome validation)."
+          },
+          "discovery": {
+            "type": "string",
+            "enum": [
+              "quick",
+              "standard",
+              "deep",
+              "skip"
+            ],
+            "description": "Optional discovery-gate depth, asked once at the federation level and applied per qualifying sub-squad: quick (analyst), standard (designer then analyst), deep (designer, then challenger and experimenter, then analyst), or skip. Each qualifying sub-squad runs its own session and writes its own brief and verdict under its own root. Ignored on an unattended run."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional free-form context to frame the federation turn."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Squad Federate"
+      },
+      "scope": "Squad.Federate"
+    },
+    {
+      "name": "squad_status",
+      "title": "Squad Status",
+      "description": "Poll an async squad run by its run id and return its status; when the run is complete, return the finished squad-guided artifact. A held run stays paused until an operator approves it out-of-band — the squad never auto-releases a gate.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runId"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string",
+            "description": "The server-allocated run id returned by squad_run."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Squad Status",
+        "readOnlyHint": true
+      },
+      "scope": "Squad.Run"
+    },
+    {
+      "name": "squad_business_plan",
+      "title": "Squad Business Plan",
+      "description": "Turn an idea, opportunity, or rough brief into a sponsor-readable business plan (squad-guided / embedded) in exactly ten sections: Summary, Problem and Customer, Proposed Solution, Value and Success Measures, Scope, Go-to-Market, Cost and Effort Outline, Risks and Dependencies, Milestones, and Open Questions. Plans only: it reaches no tracker and writes to no business system. Served only when the operator has enabled the business tools.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The opportunity and the sponsor decision."
+          },
+          "context": {
+            "type": "string",
+            "description": "Evidence, customer, constraints, budget envelope."
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional sub-squad target."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Squad Business Plan",
+        "readOnlyHint": true
+      },
+      "scope": "Squad.Business"
+    },
+    {
+      "name": "squad_backlog",
+      "title": "Squad Backlog",
+      "description": "Turn approved scope into a structured delivery backlog (squad-guided / embedded) returned as JSON: epics, user stories with acceptance criteria, and tasks, plus a flattened 'workItems' array with stable 'ref'/'parentRef' ids. Create the items by calling the Azure DevOps or Jira connector once per element of 'workItems', parents first, linking children by 'parentRef'. This tool only plans — it writes nothing to Azure DevOps or Jira. Served only when the operator has enabled the business tools.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The outcome to decompose."
+          },
+          "context": {
+            "type": "string",
+            "description": "Approved plan, NFRs, definition of done, exclusions."
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional sub-squad target."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Squad Backlog",
+        "readOnlyHint": true
+      },
+      "scope": "Squad.Backlog"
+    },
+    {
+      "name": "squad_render_pptx",
+      "title": "Squad Render PPTX",
+      "description": "Render a PowerPoint deck from content YAML and style YAML and return a short-lived download link to the generated .pptx file. Deterministic: no model call. Creates a stored file as its only side effect. Served only when the operator has enabled rendering.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contentYaml",
+          "styleYaml"
+        ],
+        "properties": {
+          "contentYaml": {
+            "type": "string",
+            "description": "A YAML document with a top-level 'slides:' array; each item is one slide."
+          },
+          "styleYaml": {
+            "type": "string",
+            "description": "The global style.yaml body (dimensions, layouts, defaults)."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Render PowerPoint Deck"
+      },
+      "scope": "Squad.Render"
+    },
+    {
+      "name": "squad_memory_read",
+      "title": "Squad Memory Read",
+      "description": "Read one entry of the project's own squad memory and return its content and etag (the etag to pass as expectedEtag on a subsequent write). Deterministic: no model call, no impactful action.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project",
+          "path"
+        ],
+        "properties": {
+          "project": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "The project namespace within your tenant (lowercase dns-ish label)."
+          },
+          "path": {
+            "type": "string",
+            "description": "The logical memory path (e.g. 'state', 'decisions')."
+          },
+          "target": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+            "description": "Optional operator-declared storage destination to use. Omit to use the deployment's default."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Squad Memory Read",
+        "readOnlyHint": true
+      },
+      "scope": "Squad.Memory"
+    },
+    {
+      "name": "squad_memory_write",
+      "title": "Squad Memory Write",
+      "description": "Write (create or replace) one entry of the project's own squad memory under compare-and-swap and return the new etag. Pass the prior etag as expectedEtag to guard against clobbering a concurrent writer; omit it for a first write. Deterministic: no model call.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project",
+          "path",
+          "content"
+        ],
+        "properties": {
+          "project": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "The project namespace within your tenant (lowercase dns-ish label)."
+          },
+          "path": {
+            "type": "string",
+            "description": "The logical memory path (e.g. 'state', 'decisions')."
+          },
+          "content": {
+            "type": "string",
+            "description": "The full new content to persist at 'path'."
+          },
+          "expectedEtag": {
+            "type": "string",
+            "description": "The etag from the prior read; the write applies only if it matches."
+          },
+          "target": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+            "description": "Optional operator-declared storage destination to use. Omit to use the deployment's default."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Squad Memory Write",
+        "destructiveHint": true
+      },
+      "scope": "Squad.MemoryWrite"
+    },
+    {
+      "name": "squad_memory_sync",
+      "title": "Squad Memory Sync",
+      "description": "Flush a batch of the project's own squad-memory entries in one call. Each item is written under its own compare-and-swap; a stale expectedEtag on one item is reported as a conflict in the results without aborting the others. Returns a per-item result array. Deterministic: no model call.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project",
+          "items"
+        ],
+        "properties": {
+          "project": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "The project namespace within your tenant (lowercase dns-ish label)."
+          },
+          "items": {
+            "type": "array",
+            "description": "The entries to flush; each is applied under its own compare-and-swap.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "content"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "The logical memory path."
+                },
+                "content": {
+                  "type": "string",
+                  "description": "The full new content for this entry."
+                },
+                "expectedEtag": {
+                  "type": "string",
+                  "description": "The etag from the prior read of this entry."
+                }
+              }
+            }
+          },
+          "target": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+            "description": "Optional operator-declared storage destination to use. Omit to use the deployment's default."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Squad Memory Sync",
+        "destructiveHint": true
+      },
+      "scope": "Squad.MemoryWrite"
+    },
+    {
+      "name": "squad_history",
+      "title": "Squad History",
+      "description": "Browse and open what previous squad runs produced for a project: the squad state, each role's deliverables, and the per-agent history. Use op='index' for a compact picture of what exists, op='list' to enumerate a directory, and op='read' to open one artifact. Deterministic: no model call. Served only when the operator has enabled the squad ledger.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project"
+        ],
+        "properties": {
+          "project": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "The project namespace within your tenant (lowercase dns-ish label)."
+          },
+          "op": {
+            "type": "string",
+            "enum": [
+              "index",
+              "list",
+              "read"
+            ],
+            "description": "index (default) summarizes; list enumerates a prefix; read opens one path."
+          },
+          "prefix": {
+            "type": "string",
+            "description": "For op='list': a directory such as '.copilot-tracking/plans'."
+          },
+          "path": {
+            "type": "string",
+            "description": "For op='read': the artifact path from a list result."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Squad History",
+        "readOnlyHint": true
+      },
+      "scope": "Squad.Memory"
+    }
+  ]
+}
