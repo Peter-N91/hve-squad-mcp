@@ -88,7 +88,12 @@ characters, an oversized body, or a manifest folder that is not in the package.
 
 The plugin will install with placeholder values but **cannot connect** — the
 connector calls the literal host `<CONTAINER_APP_FQDN>` and fails with
-"HVE Squad couldn't complete the request." Complete all four steps below.
+"HVE Squad couldn't complete the request."
+
+**[SETUP.md](SETUP.md) is the step-by-step guide**: authorize the Enterprise
+Token Store on your Entra app, create the Entra SSO auth config, add the
+generated Application ID URI, check whether the audience needs changing, then
+pack with real values. The summary:
 
 ### 1. Create the auth config (Entra SSO)
 
@@ -122,21 +127,21 @@ All three are required, and the registration alone is not enough:
 - **identifierUris**: add the Application ID URI from step 1. The Entra admin UI
   shows only the first URI, so use the manifest editor to add a second.
 
-### 3. Accept the new audience on the server
+### 3. Check the audience
 
-Tokens Cowork sends carry the step-1 Application ID URI as their `aud`, which is
-**not** the audience a Copilot Studio connector uses. `SQUAD_MCP_AUDIENCE` takes
-a comma-separated list, so add it rather than replacing:
+Whether this needs changing depends on `api.requestedAccessTokenVersion` on the
+app registration. With **v2** the token's `aud` stays the bare client-id GUID no
+matter which identifier URI the scope was requested through, so usually nothing
+changes. With **v1** the `aud` is the requested identifier URI, so add it:
 
 ```text
-SQUAD_MCP_AUDIENCE=api://<client-id>,<application-id-uri-from-step-1>
+SQUAD_MCP_AUDIENCE=api://<client-id>,<application-id-uri>
 ```
 
-Entries are matched exactly — no prefixes, no wildcards. The same value feeds the
-Container Apps ingress `allowedAudiences`, so redeploy the Bicep (or update the
-container app's `authConfig`) as well as the app setting. Miss the ingress and
-every request is rejected before the app ever sees it, which looks identical to
-an app-side audience bug.
+The value is a comma-separated list precisely so the Copilot Studio connector
+keeps working alongside Cowork. Update the Container Apps ingress
+`allowedAudiences` as well — it rejects before the app is reached, and a mismatch
+there is indistinguishable from an app-side audience bug.
 
 ### 4. Pack with real values
 
