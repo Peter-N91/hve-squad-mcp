@@ -16,7 +16,7 @@
 
 @description('Squad MCP application + security configuration (operator-controlled; never caller input).')
 type SquadConfig = {
-  @description('Token audience this resource server accepts (RFC 8707; SEC-1).')
+  @description('Token audience(s) this resource server accepts (RFC 8707; SEC-1). Comma-separate to serve several front doors, for example a Copilot Studio connector and a Cowork Entra SSO auth config.')
   audience: string
   @description('Comma-separated strict Origin allow-list (SEC-8). Never "*".')
   allowedOrigins: string
@@ -285,7 +285,10 @@ var businessEnv = enableBusinessTools
   ? [ { name: 'SQUAD_MCP_ENABLE_BUSINESS_TOOLS', value: 'true' } ]
   : []
 
-// Base web-app env; pipeline + encryption env are concatenated onto it below.
+// SEC-1: the accepted audiences, split from the operator's comma-separated value.
+// The app receives the raw string and parses it the same way, so the ingress and
+// the app can never disagree about which audiences are accepted.
+var squadAudiences = filter(map(split(squad.audience, ','), a => trim(a)), a => !empty(a))
 var webBaseEnv = [
   { name: 'PORT', value: '3000' }
   { name: 'SQUAD_MCP_AUDIENCE', value: squad.audience }
@@ -441,9 +444,7 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-03-01' = {
           clientId: authClientId
         }
         validation: {
-          allowedAudiences: [
-            squad.audience
-          ]
+          allowedAudiences: squadAudiences
         }
       }
     }

@@ -60,7 +60,7 @@ export interface AuthContext {
   subject: string;
   /** The granted scopes parsed from the token. */
   scopes: string[];
-  /** The audience the token was bound to (this resource server). */
+  /** The audience the token was actually bound to (one of the configured set). */
   audience: string;
 }
 
@@ -77,8 +77,12 @@ export class AuthError extends Error {
 }
 
 export interface EntraAuthenticatorOptions {
-  /** The expected audience (this resource server; SEC-1, RFC 8707). */
-  audience: string;
+  /**
+   * The accepted audiences (this resource server; SEC-1, RFC 8707). Several are
+   * permitted so one deployment can serve front doors that mint tokens for
+   * different resource identifiers; each is matched exactly.
+   */
+  audiences: readonly string[];
   /** Permitted issuers; empty = accept any issuer the verifier already validated. */
   allowedIssuers?: string[];
   /** Permitted tenants; empty = any tenant whose token validates. */
@@ -89,14 +93,25 @@ export interface EntraAuthenticatorOptions {
   logger: RedactingLogger;
 }
 
-function audienceMatches(aud: string | string[] | undefined, expected: string): boolean {
-  if (typeof aud === "string") {
-    return aud === expected;
-  }
-  if (Array.isArray(aud)) {
-    return aud.includes(expected);
-  }
-  return false;
+/**
+ * Resolve which configured audience a token is bound to, or `undefined`.
+ *
+ * A deployment may serve several front doors that each mint tokens for their own
+ * resource identifier — a Copilot Studio connector bound to `api://<client-id>`
+ * and a Cowork Entra SSO auth config bound to the Application ID URI that
+ * registration generates. Accepting a SET does not weaken SEC-1: every entry is
+ * an operator-configured exact string, matched exactly, with no wildcard or
+ * prefix matching, so a token minted for any other resource is still rejected.
+ *
+ * Returns the matched value so the caller can record WHICH front door admitted
+ * the request rather than the whole configured set.
+ */
+function matchAudience(
+  aud: string | string[] | undefined,
+  expected: readonly string[],
+): string | undefined {
+  const presented = typeof aud === "string" ? [aud] : Array.isArray(aud) ? aud : [];
+  return expected.find((candidate) => presented.includes(candidate));
 }
 
 function parseScopes(claims: JwtClaims): string[] {
@@ -129,14 +144,19 @@ export function extractBearerToken(authorizationHeader: string | undefined): str
 
 /** Authenticates and authorizes remote callers against Entra/OAuth tokens. */
 export class EntraAuthenticator {
-  private readonly audience: string;
+  private readonly audiences: readonly string[];
   private readonly allowedIssuers: Set<string>;
   private readonly allowedTenants: Set<string>;
   private readonly verifier: JwtVerifier;
   private readonly logger: RedactingLogger;
 
   constructor(options: EntraAuthenticatorOptions) {
-    this.audience = options.audience;
+    // Fail fast rather than admit nothing: an empty set would reject every token
+    // with `wrong_audience`, which reads as a token problem instead of a config one.
+    if (options.audiences.length === 0) {
+      throw new Error("EntraAuthenticator requires at least one accepted audience (SEC-1).");
+    }
+    this.audiences = [...options.audiences];
     this.allowedIssuers = new Set(options.allowedIssuers ?? []);
     this.allowedTenants = new Set(options.allowedTenants ?? []);
     this.verifier = options.verifier;
@@ -168,7 +188,8 @@ export class EntraAuthenticator {
 
     // SEC-1: audience must be bound to THIS resource server (RFC 8707). A token
     // minted for a different resource (pass-through) is rejected outright.
-    if (!audienceMatches(claims.aud, this.audience)) {
+    const audience = matchAudience(claims.aud, this.audiences);
+    if (!audience) {
       throw new AuthError("Token audience is not bound to this resource.", 401, "wrong_audience");
     }
 
@@ -197,7 +218,7 @@ export class EntraAuthenticator {
       tenantId,
       subject,
       scopes: parseScopes(claims),
-      audience: this.audience,
+      audience,
     };
   }
 

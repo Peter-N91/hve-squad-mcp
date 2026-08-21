@@ -245,7 +245,7 @@ export function buildHttpHandler(
     throw new Error("SQUAD_MCP_JWKS_URI is required to validate Entra tokens (SEC-1).");
   }
   const authenticator = new EntraAuthenticator({
-    audience: config.audience,
+    audiences: config.audiences,
     allowedIssuers: config.allowedIssuers,
     allowedTenants: config.allowedTenants,
     verifier: createJoseVerifier({ jwksUri, issuer: config.allowedIssuers }),

@@ -141,6 +141,15 @@ Notes:
 - The **audience** the server checks is `api://$APP_ID` (the `SQUAD_MCP_AUDIENCE`
   value). Keep it consistent across the app registration, `main.bicepparam`, and the
   connector's `apiProperties.json`.
+- `SQUAD_MCP_AUDIENCE` accepts a **comma-separated list**, so one deployment can
+  serve front doors that mint tokens for different resource identifiers — for
+  example a Copilot Studio connector on `api://$APP_ID` alongside a Microsoft
+  Copilot Cowork Entra SSO auth config, whose registration generates its own
+  Application ID URI. Entries are trimmed, de-duplicated, and matched **exactly**
+  (never as a prefix or wildcard); a blank entry is dropped rather than becoming
+  an audience that matches nothing. The same value feeds the ingress
+  `allowedAudiences`, so the two layers cannot disagree. See
+  [`cowork/README.md`](../cowork/README.md) for the Cowork-side steps.
 - The **JWKS / issuer** the server trusts are your tenant's:
   - JWKS: `https://login.microsoftonline.com/$TENANT_ID/discovery/v2.0/keys`
   - Issuer: `https://login.microsoftonline.com/$TENANT_ID/v2.0`

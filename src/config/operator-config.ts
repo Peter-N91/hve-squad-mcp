@@ -63,8 +63,15 @@ export interface MemoryTargetConfig {
 }
 
 export interface OperatorConfig {
-  /** Expected token audience — this resource server's identifier (SEC-1, RFC 8707). */
-  audience: string;
+  /**
+   * Accepted token audiences — this resource server's identifiers (SEC-1,
+   * RFC 8707). Usually one; several are permitted so a single deployment can
+   * serve front doors that mint tokens for different resource identifiers (for
+   * example a Copilot Studio connector on `api://<client-id>` alongside a Cowork
+   * Entra SSO auth config on the Application ID URI that registration
+   * generates). Every entry is matched exactly — never as a prefix or wildcard.
+   */
+  audiences: string[];
   /** Entra issuer allow-list (e.g. `https://login.microsoftonline.com/<tenant>/v2.0`). */
   allowedIssuers: string[];
   /** Tenants permitted to call (empty = any tenant whose token validates). */
@@ -351,9 +358,23 @@ function parseMemoryTargets(value: string | undefined): MemoryTargetConfig[] {
  * deployment fails fast at boot rather than at first call.
  */
 export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): OperatorConfig {
-  const audience = (env.SQUAD_MCP_AUDIENCE ?? "").trim();
-  if (audience.length === 0) {
-    throw new Error("SQUAD_MCP_AUDIENCE is required (the resource-server token audience; SEC-1).");
+  // SEC-1: comma-separated so one deployment can serve several front doors, each
+  // minting tokens for its own resource identifier. Entries are trimmed and
+  // de-duplicated, and blanks are dropped so a stray comma can never introduce an
+  // empty audience (which a token with no `aud` would otherwise appear to match).
+  const audiences = [
+    ...new Set(
+      (env.SQUAD_MCP_AUDIENCE ?? "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
+    ),
+  ];
+  if (audiences.length === 0) {
+    throw new Error(
+      "SQUAD_MCP_AUDIENCE is required (the resource-server token audience; SEC-1). " +
+        "Provide one value, or several separated by commas.",
+    );
   }
 
   const allowedOrigins = splitList(env.SQUAD_MCP_ALLOWED_ORIGINS);
@@ -530,7 +551,7 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
   }
 
   return {
-    audience,
+    audiences,
     allowedIssuers: splitList(env.SQUAD_MCP_ALLOWED_ISSUERS),
     allowedTenants: splitList(env.SQUAD_MCP_ALLOWED_TENANTS),
     allowedOrigins,
