@@ -68,12 +68,11 @@ npm run generate:cowork
 npm run package:cowork
 ```
 
-To substitute your tenant values while packing:
+To substitute your tenant values while packing (one line, so it works from bash
+as well as PowerShell):
 
-```powershell
-pwsh -File cowork/pack.ps1 `
-  -Fqdn "squad.<your-container-app>.azurecontainerapps.io" `
-  -OAuthReferenceId "<oauth-client-registration-id>"
+```text
+pwsh -File cowork/pack.ps1 -Fqdn "<your-app>.<region>.azurecontainerapps.io" -OAuthReferenceId "<auth-config-id>"
 ```
 
 The result lands in `cowork/build/hve-squad-cowork.zip`, which is git-ignored
@@ -145,10 +144,8 @@ there is indistinguishable from an app-side audience bug.
 
 ### 4. Pack with real values
 
-```powershell
-pwsh -File cowork/pack.ps1 `
-  -Fqdn "<your-app>.<region>.azurecontainerapps.io" `
-  -OAuthReferenceId "<auth-config-id-from-step-1>"
+```text
+pwsh -File cowork/pack.ps1 -Fqdn "<your-app>.<region>.azurecontainerapps.io" -OAuthReferenceId "<auth-config-id-from-step-1>"
 ```
 
 `pack.ps1` warns if any `<PLACEHOLDER>` survives. Treat that warning as a
