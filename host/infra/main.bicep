@@ -73,6 +73,11 @@ param minReplicas int = 0
 @maxValue(30)
 param maxReplicas int = 5
 
+@description('Seconds of idle traffic before the app scales back to zero. The default 300 is tuned for cost; a longer window keeps the app warm across the pauses in an interactive session, which is what a Copilot Studio or Cowork user actually generates. Scale-to-zero still happens once the session ends.')
+@minValue(60)
+@maxValue(3600)
+param scaleCooldownSeconds int = 300
+
 @description('Monthly cost budget in USD for this resource group (COST-2).')
 param budgetAmountUsd int = 500
 
@@ -364,7 +369,7 @@ resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
   }
 }
 
-resource app 'Microsoft.App/containerApps@2024-03-01' = {
+resource app 'Microsoft.App/containerApps@2025-01-01' = {
   name: '${namePrefix}-app'
   location: location
   identity: {
@@ -408,6 +413,11 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
         // COST-3 / ARCH-2: scale-to-zero with HTTP-driven scale-out.
         minReplicas: minReplicas
         maxReplicas: maxReplicas
+        // An interactive caller pauses between turns to read the previous
+        // artifact. With the platform default (300s) the app sleeps inside those
+        // pauses and the next turn hits a cold start, which surfaces to the
+        // caller as an unreachable connector rather than as latency.
+        cooldownPeriod: scaleCooldownSeconds
         rules: [
           {
             name: 'http-concurrency'
