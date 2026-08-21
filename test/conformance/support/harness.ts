@@ -40,6 +40,8 @@ export interface HarnessOptions {
   /** Captured log lines paired with `logger`; defaults to the harness sink. */
   lines?: string[];
   audience?: string;
+  /** Accept several audiences; overrides `audience` when supplied. */
+  audiences?: string[];
   allowedIssuers?: string[];
   allowedTenants?: string[];
   allowedOrigins?: string[];
@@ -92,7 +94,7 @@ export function buildHarness(options: HarnessOptions = {}): Harness {
   const router = new ToolRouter(loadCatalog());
 
   const authenticator = new EntraAuthenticator({
-    audience: options.audience ?? TEST_AUDIENCE,
+    audiences: options.audiences ?? [options.audience ?? TEST_AUDIENCE],
     allowedIssuers: options.allowedIssuers ?? [TEST_ISSUER],
     allowedTenants: options.allowedTenants ?? [],
     verifier,

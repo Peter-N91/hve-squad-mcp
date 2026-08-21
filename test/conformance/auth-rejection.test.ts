@@ -81,8 +81,52 @@ test("SEC-1: a token whose AUDIENCE does not match this resource server is rejec
   assert.equal(backend.callCount, 0);
 });
 
-test("SEC-1: a token from an UNTRUSTED issuer is rejected 401", async () => {
+test("SEC-1: with SEVERAL accepted audiences, each is admitted and a fourth is still rejected", async () => {
+  // One deployment can front a Copilot Studio connector and a Cowork Entra SSO
+  // auth config, which mint tokens for different resource identifiers. Accepting
+  // a set must not become "accept anything": the negative case below is the point.
+  const studio = "api://11111111-1111-4111-8111-111111111111";
+  const cowork = "api://cowork-auth-config-id";
   const verifier = new FakeJwtVerifier();
+  const { handler, backend } = buildHarness({ verifier, audiences: [studio, cowork] });
+
+  for (const audience of [studio, cowork]) {
+    verifier.register({
+      token: `token-for-${audience}`,
+      tenantId: TENANT,
+      subject: "user-multi-oid",
+      scopes: ["Squad.Research"],
+      audience,
+    });
+    const res = await handler.handle({
+      method: "POST",
+      path: "/mcp",
+      headers: { origin: ORIGIN, authorization: bearer(`token-for-${audience}`), ...JSON_HEADERS },
+      body: { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+    });
+    assert.equal(res.status, 200, `a token bound to ${audience} must be admitted`);
+  }
+
+  // A third resource is still a pass-through token and must fail closed.
+  verifier.register({
+    token: "token-for-elsewhere",
+    tenantId: TENANT,
+    subject: "user-multi-oid",
+    scopes: ["Squad.Research"],
+    audience: "api://some-other-resource-server",
+  });
+  const rejected = await handler.handle({
+    method: "POST",
+    path: "/mcp",
+    headers: { origin: ORIGIN, authorization: bearer("token-for-elsewhere"), ...JSON_HEADERS },
+    body: { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+  });
+  assert.equal(rejected.status, 401, "an audience outside the configured set must still be 401");
+  assert.equal(reasonOf(rejected), "wrong_audience");
+  assert.equal(backend.callCount, 0);
+});
+
+test("SEC-1: a token from an UNTRUSTED issuer is rejected 401", async () => {  const verifier = new FakeJwtVerifier();
   const { handler, backend } = buildHarness({ verifier, allowedIssuers: [TEST_ISSUER] });
   verifier.register({
     token: "untrusted-issuer",

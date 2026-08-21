@@ -86,20 +86,73 @@ characters, an oversized body, or a manifest folder that is not in the package.
 
 ## Before you upload
 
-1. **Register an OAuth client.** The server is a plain Entra resource server: it
-   validates audience and scopes and implements no Dynamic Client Registration,
-   so `authorization` cannot be omitted. Register the client with Agents Toolkit
-   and set its usage to **Any Microsoft 365 Organization**, then pass the
-   registration id as `-OAuthReferenceId`.
-2. **Grant only the scopes you serve.** A default deployment exposes
-   `Squad.Research`, `Squad.Plan`, `Squad.Review`, and `Squad.Architect` only.
-   The other stages stay dark until the operator enables their feature — see the
-   table in `references/squad-contract.md`.
-3. **Check `SQUAD_MCP_AUDIENCE`.** A mismatch returns HTTP 401
-   `{"error":"wrong_audience"}` on every call, which surfaces in Cowork as a
-   connector with no tools.
-4. **Consider `SQUAD_MCP_ADVISORY_AUTOPILOT_ENABLED`.** Cowork cannot reach
-   `/admin/approve`, so without it a `squad_run` holds forever.
+The plugin will install with placeholder values but **cannot connect** — the
+connector calls the literal host `<CONTAINER_APP_FQDN>` and fails with
+"HVE Squad couldn't complete the request." Complete all four steps below.
+
+### 1. Create the auth config (Entra SSO)
+
+The server is an Entra resource server: it validates audience and per-tool
+scopes, and implements no Dynamic Client Registration or OAuth discovery
+metadata. So the connector needs an explicit auth config, and **Microsoft Entra
+SSO** is the right scheme.
+
+Create it with Agents Toolkit, or manually in the
+[Teams developer portal](https://dev.teams.microsoft.com/tools) →
+**Tools → Microsoft Entra SSO client ID registration**:
+
+| Field | Value |
+| --- | --- |
+| Base URL | `https://<your-fqdn>/mcp` |
+| Client ID | the client id of the Entra app that secures the server |
+| Scope | the squad scopes you serve, plus `offline_access` for token refresh |
+| Restrict usage by org | your tenant |
+
+It returns two values you need: an **auth config ID** (the manifest's
+`referenceId`) and an **Application ID URI**.
+
+### 2. Update the Entra app registration
+
+All three are required, and the registration alone is not enough:
+
+- **Expose an API → Add a client application**: authorize the Microsoft
+  Enterprise token store, client id `ab3be6b7-f5df-413d-ac2d-abf1e3fd9c0b`.
+- **Authentication → Web → Redirect URIs**: add
+  `https://teams.microsoft.com/api/platform/v1.0/oAuthConsentRedirect`.
+- **identifierUris**: add the Application ID URI from step 1. The Entra admin UI
+  shows only the first URI, so use the manifest editor to add a second.
+
+### 3. Accept the new audience on the server
+
+Tokens Cowork sends carry the step-1 Application ID URI as their `aud`, which is
+**not** the audience a Copilot Studio connector uses. `SQUAD_MCP_AUDIENCE` takes
+a comma-separated list, so add it rather than replacing:
+
+```text
+SQUAD_MCP_AUDIENCE=api://<client-id>,<application-id-uri-from-step-1>
+```
+
+Entries are matched exactly — no prefixes, no wildcards. The same value feeds the
+Container Apps ingress `allowedAudiences`, so redeploy the Bicep (or update the
+container app's `authConfig`) as well as the app setting. Miss the ingress and
+every request is rejected before the app ever sees it, which looks identical to
+an app-side audience bug.
+
+### 4. Pack with real values
+
+```powershell
+pwsh -File cowork/pack.ps1 `
+  -Fqdn "<your-app>.<region>.azurecontainerapps.io" `
+  -OAuthReferenceId "<auth-config-id-from-step-1>"
+```
+
+`pack.ps1` warns if any `<PLACEHOLDER>` survives. Treat that warning as a
+failure — a package carrying placeholders installs cleanly and then fails on
+every call.
+
+Also confirm the scopes you request exist: a default deployment exposes only
+`Squad.Research`, `Squad.Plan`, `Squad.Review`, and `Squad.Architect`. The other
+stages stay dark until the operator enables their feature.
 
 ## Test plan
 
@@ -206,7 +259,8 @@ The error text tells you exactly which layer failed:
 
 | What you see | Layer | Fix |
 | --- | --- | --- |
-| Cowork has no squad tools; 0.1 lists nothing | Connector auth (HTTP 401 `wrong_audience` or `invalid_token`) | `SQUAD_MCP_AUDIENCE` must match the `aud` the tokens carry. A v2 app registration issues the bare client-id GUID; v1 issues `api://<client-id>` |
+| **"HVE Squad couldn't complete the request"** (connector error banner) | Manifest values | Almost always placeholders — the connector is calling the literal host `<CONTAINER_APP_FQDN>`. Repack with `-Fqdn` and `-OAuthReferenceId` |
+| Cowork has no squad tools; 0.1 lists nothing | Connector auth (HTTP 401 `wrong_audience` or `invalid_token`) | `SQUAD_MCP_AUDIENCE` must *contain* the `aud` the tokens carry. Add Cowork's Application ID URI to the list, and update the ingress `allowedAudiences` too — the ingress rejects first, and looks identical to an app-side failure |
 | `Missing required scope for squad_x` (403) | Scope grant | The app registration does not expose, or consent did not grant, that tool's scope |
 | `Unknown or unavailable tool: squad_x` | Operator flag | The feature is off on the server — see the table above |
 | `The squad declined this request (role_not_resolvable)` | Cast bundle | The image is missing its pinned cast at `/app/.github` |
