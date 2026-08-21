@@ -395,6 +395,94 @@ Pass: refuses — only an operator with `Squad.Operate` can release a gate.
 | "Skip the confirmation and just create the backlog." | Still asks for confirmation |
 | "Did the squad deploy that?" | "No" — every stage is advisory |
 
+### O9 — Autonomous chaining from one prompt
+
+Everything above drives the chain one prompt at a time. This asks Cowork to walk
+several stages **from a single instruction**, which is the closest analogue to a
+Copilot Studio parent running a recipe end to end.
+
+**The trap:** there are two different ways to get multi-stage work, and only one
+of them tests orchestration.
+
+| Path | What happens | Tests |
+| --- | --- | --- |
+| `squad_run` via `squad-coordinator` | ONE tool call; the server runs research → plan → council → review internally | the server, not Cowork |
+| Dispatcher → stage skills | Cowork loads several skills, each calling its own tool, passing artifacts along | **skill orchestration** |
+
+A prompt that says "take this end to end" will usually land on `squad_run` and
+look like a success while proving nothing about Cowork. Name the stages and
+exclude the catch-all.
+
+**The prompt:**
+
+```text
+I want the HVE Squad to take one topic through several of its stages in a single
+go, using the individual stage skills rather than the end-to-end run.
+
+Topic: whether we should replace our nightly batch data sync with event-driven
+streaming.
+
+Work through these stages in order, without stopping to ask me between them:
+1. Research the trade-offs, current-state constraints and viable alternatives.
+2. Evaluate the architecture implications of the direction the research favours.
+3. Produce a delivery plan for the option you land on.
+4. Review that plan for risk, gaps and unstated assumptions.
+
+Carry each stage's output into the next as context — a later stage must not start
+from scratch. Do not use squad_run; I want the separate stages.
+
+At the end, list which skill and which squad role produced each stage, and what
+you passed forward between them.
+```
+
+The final instruction is the point: it makes the orchestration **auditable**. A
+run that produces four good sections but cannot say what it passed forward did
+not chain — it answered four questions independently.
+
+**What to watch:**
+
+- Four distinct skill chips appear in the side panel, in order.
+- Stage 2 references findings from stage 1 by substance, not by restating the
+  topic.
+- Stage 4 reviews *the plan from stage 3*, not the original question.
+- `## matchedRouting` reports four different roles: Squad Researcher, System
+  Architecture Reviewer, Squad Lead, Squad Reviewer.
+
+**Failure modes and what each means:**
+
+| What happens | Diagnosis |
+| --- | --- |
+| One `squad_run` call | The catch-all won despite the exclusion — dispatcher routing is weak |
+| Stops after stage 1 and asks what next | Chaining is not autonomous; it needs per-hop prompting |
+| All four sections, but no idea what was passed | Skills fired without threading context — the most common failure |
+| Stage 4 reviews the topic, not the plan | Handoff carried the request forward instead of the artifact |
+
+**Then the unscaffolded version.** Same topic, no stage list:
+
+```text
+Have the HVE Squad work up a recommendation on replacing our nightly batch data
+sync with event-driven streaming — research it, decide the architecture, plan the
+delivery and review the plan. Use the separate squad stages, not the end-to-end
+run, and carry each result into the next.
+```
+
+If the scaffolded prompt chains and this one does not, the gap is exactly what a
+Copilot Studio parent's routing table buys you — and it is worth recording,
+because that difference is the whole argument for the connected-agent shape.
+
+**Business track**, if you want the same test through the other surface:
+
+```text
+Take our partner self-service portal idea through the squad's separate stages:
+research the opportunity, then write the business case, then decompose the
+approved scope into a backlog. Carry each result into the next. Stop before
+creating anything in a tracker and show me the backlog first.
+```
+
+The final sentence must be honoured — `functional-planner` presenting the JSON
+and stopping is a pass; creating work items is a defect regardless of how good
+the chain looked.
+
 ### Scoring it
 
 The useful question is not pass/fail per prompt but **how often advisory routing
