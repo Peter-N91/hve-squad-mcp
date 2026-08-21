@@ -12,6 +12,13 @@
             "api://<ENTRA_CLIENT_ID>/Squad.Plan",
             "api://<ENTRA_CLIENT_ID>/Squad.Review",
             "api://<ENTRA_CLIENT_ID>/Squad.Architect",
+            "api://<ENTRA_CLIENT_ID>/Squad.Run",
+            "api://<ENTRA_CLIENT_ID>/Squad.Federate",
+            "api://<ENTRA_CLIENT_ID>/Squad.Business",
+            "api://<ENTRA_CLIENT_ID>/Squad.Backlog",
+            "api://<ENTRA_CLIENT_ID>/Squad.Memory",
+            "api://<ENTRA_CLIENT_ID>/Squad.MemoryWrite",
+            "api://<ENTRA_CLIENT_ID>/Squad.Render",
             "offline_access"
           ],
           "properties": {
