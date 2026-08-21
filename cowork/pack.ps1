@@ -60,8 +60,39 @@ try {
 
     Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $OutputPath -Force
 
+    # Verify every manifest-declared path resolves to a real archive entry.
+    # The publish service matches these LITERALLY against zip entry names, so a
+    # path that is valid on disk (for example "./tools/x.json") can still fail at
+    # publish with "not found in the app package". Assert against the built zip.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $OutputPath))
+    try {
+        $entries = $zip.Entries | ForEach-Object { $_.FullName }
+        $declared = @($manifest | ConvertFrom-Json)
+        $problems = @()
+
+        $toolsFile = $declared.agentConnectors.toolSource.remoteMcpServer.mcpToolDescription.file
+        foreach ($file in @($toolsFile)) {
+            if ($file -and $entries -notcontains $file) {
+                $problems += "mcpToolDescription.file '$file' is not an entry in the archive."
+            }
+        }
+        foreach ($folder in @($declared.agentSkills.folder)) {
+            if ($folder -and -not ($entries | Where-Object { $_ -like "$folder/*" })) {
+                $problems += "agentSkills folder '$folder' has no entries in the archive."
+            }
+        }
+        if ($problems) {
+            throw "Packaged zip does not match manifest:`n  - $($problems -join "`n  - ")"
+        }
+    }
+    finally {
+        $zip.Dispose()
+    }
+
     $size = [math]::Round((Get-Item $OutputPath).Length / 1KB, 1)
     Write-Host "Packed $OutputPath ($size KB)."
+    Write-Host "Verified every manifest-declared path resolves to an archive entry."
     Write-Host "Upload it in Cowork: Customize > Plugins > Upload plugin."
 }
 finally {

@@ -493,14 +493,42 @@ interface CoworkManifest {
   }[];
 }
 
-/** Validate the manifest's own constraints and its references into the package. */
+/**
+ * Validate the manifest's own constraints and its references into the package.
+ *
+ * Paths are checked as ARCHIVE ENTRY NAMES, not just as filesystem paths. The
+ * packaging service resolves `mcpToolDescription.file` and each skill `folder`
+ * by literal lookup against the zip's entry names, which carry no `./` prefix
+ * and no backslashes. A `./tools/x.json` that resolves perfectly well on disk is
+ * therefore reported at publish time as "not found in the app package" — so a
+ * path that would not match an entry is an error here, not a style preference.
+ */
 export function validateManifest(coworkRoot: string, manifest: CoworkManifest): string[] {
   const problems: string[] = [];
+
+  /** Reject any path shape a zip entry name can never take. */
+  const checkEntryPath = (value: string, field: string): void => {
+    if (value.startsWith("./") || value.startsWith("../")) {
+      problems.push(
+        `${field} is "${value}"; the package service matches archive entry names literally and those ` +
+          `carry no "./" prefix. Use "${value.replace(/^\.\.?\//, "")}".`,
+      );
+    }
+    if (value.includes("\\")) {
+      problems.push(`${field} is "${value}"; archive entry names use forward slashes only.`);
+    }
+    if (value.startsWith("/")) {
+      problems.push(`${field} is "${value}"; the path must be relative to the package root.`);
+    }
+  };
+
   const skills = manifest.agentSkills ?? [];
   for (const entry of skills) {
     if (!entry.folder) {
       problems.push("ASKILL-M001: every agentSkills entry needs a 'folder'.");
+      continue;
     }
+    checkEntryPath(entry.folder, `agentSkills folder`);
   }
   const connectors = manifest.agentConnectors ?? [];
   if (connectors.length > MAX_CONNECTORS) {
@@ -515,6 +543,7 @@ export function validateManifest(coworkRoot: string, manifest: CoworkManifest): 
       );
       continue;
     }
+    checkEntryPath(file, "mcpToolDescription.file");
     if (!existsSync(join(coworkRoot, file))) {
       problems.push(`mcpToolDescription.file points at ${file}, which is not in the package.`);
     }

@@ -23,17 +23,17 @@
   },
   "accentColor": "#0B5394",
   "agentSkills": [
-    { "folder": "./skills/hve-squad-orchestrator" },
-    { "folder": "./skills/squad-researcher" },
-    { "folder": "./skills/system-architecture-reviewer" },
-    { "folder": "./skills/squad-lead" },
-    { "folder": "./skills/squad-reviewer" },
-    { "folder": "./skills/brd-builder" },
-    { "folder": "./skills/functional-planner" },
-    { "folder": "./skills/squad-coordinator" },
-    { "folder": "./skills/squad-federation-coordinator" },
-    { "folder": "./skills/memory-curator" },
-    { "folder": "./skills/deck-renderer" }
+    { "folder": "skills/hve-squad-orchestrator" },
+    { "folder": "skills/squad-researcher" },
+    { "folder": "skills/system-architecture-reviewer" },
+    { "folder": "skills/squad-lead" },
+    { "folder": "skills/squad-reviewer" },
+    { "folder": "skills/brd-builder" },
+    { "folder": "skills/functional-planner" },
+    { "folder": "skills/squad-coordinator" },
+    { "folder": "skills/squad-federation-coordinator" },
+    { "folder": "skills/memory-curator" },
+    { "folder": "skills/deck-renderer" }
   ],
   "agentConnectors": [
     {
@@ -44,7 +44,7 @@
         "remoteMcpServer": {
           "mcpServerUrl": "https://<CONTAINER_APP_FQDN>/mcp",
           "mcpToolDescription": {
-            "file": "./tools/hve-squad-tools.json"
+            "file": "tools/hve-squad-tools.json"
           },
           "authorization": {
             "type": "OAuthPluginVault",
