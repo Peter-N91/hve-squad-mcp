@@ -139,6 +139,76 @@ installs cleanly and then fails on every call with "couldn't complete the
 request." Then in Cowork: **Customize → Plugins**, remove the old version, and
 **Upload plugin** with `cowork/build/hve-squad-cowork.zip`.
 
+## Cross-tenant: the Cowork user is in a different directory
+
+If the account you use Cowork with lives in a **different tenant** from the app
+registration, sign-in fails before any token is minted:
+
+```text
+AADSTS700016: Application with identifier '<CLIENT_ID>' was not found in the
+directory '<COWORK_TENANT_ID>'.
+```
+
+A single-tenant app (`signInAudience: AzureADMyOrg`) has no service principal in
+a foreign directory. There are two walls here, and both must come down.
+
+**Wall 1 — the app must be multi-tenant and provisioned in that directory.**
+
+```text
+az ad app update --id <CLIENT_ID> --sign-in-audience AzureADMultipleOrgs
+```
+
+Then an administrator **of the Cowork tenant** must consent, which is what
+creates the service principal there:
+
+```text
+https://login.microsoftonline.com/<COWORK_TENANT_ID>/adminconsent?client_id=<CLIENT_ID>
+```
+
+This is a governance step, not a technical one. Consenting an externally
+registered app into a managed corporate directory usually goes through that
+organization's app-approval process, and may be refused. Nothing else in this
+guide can substitute for it.
+
+**Wall 2 — the server must accept that tenant's tokens.** All four values are
+plain strings in `main.bicepparam`, and `allowedIssuers` / `allowedTenants`
+accept comma-separated lists:
+
+| Setting | Value |
+| --- | --- |
+| `SQUAD_MCP_ALLOWED_TENANTS` | `<HOME_TENANT>,<COWORK_TENANT>` |
+| `SQUAD_MCP_ALLOWED_ISSUERS` | both `https://login.microsoftonline.com/<tenant>/v2.0` |
+| `SQUAD_MCP_JWKS_URI` | `https://login.microsoftonline.com/common/discovery/v2.0/keys` |
+| ingress `openIdIssuer` | `https://login.microsoftonline.com/common/v2.0` |
+
+The `common` endpoints are what make a multi-tenant deployment possible at all,
+and they deliberately widen only the *signature* check. Trust stays bounded by
+three allow-lists that are still exact: the issuer list, the `tid` tenant list,
+and the audience. Losing any one of those would matter; `common` on its own does
+not admit a foreign tenant.
+
+Be aware this weakens the ingress specifically: with `common`, Container Apps
+built-in auth no longer binds a tenant, so the app's `allowedTenants` check
+becomes the only tenant boundary. That check is enforced server-side and covered
+by conformance tests, but it is now load-bearing on its own rather than as
+defence-in-depth.
+
+Applying these with `az` **drifts from the Bicep** — a later
+`az deployment group create` reverts them. Put the same values in
+`main.bicepparam` so the deployment is the source of truth:
+
+```bicep
+param authOpenIdIssuer = 'https://login.microsoftonline.com/common/v2.0'
+  allowedIssuers: 'https://login.microsoftonline.com/<HOME_TENANT>/v2.0,https://login.microsoftonline.com/<COWORK_TENANT>/v2.0'
+  allowedTenants: '<HOME_TENANT>,<COWORK_TENANT>'
+  jwksUri: 'https://login.microsoftonline.com/common/discovery/v2.0/keys'
+```
+
+**The simpler alternative**, when it is available to you: use Cowork with an
+account in the same tenant as the app registration. That needs a Microsoft 365
+Copilot licence in that tenant and no changes at all to the app, the server, or
+the package.
+
 ## Verifying
 
 Run Phase 0 of the test plan in [README.md](README.md). If it still fails, the
