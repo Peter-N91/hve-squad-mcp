@@ -26,6 +26,11 @@ host/infra/main.json
 copilot-studio/connector/apiDefinition.swagger.json
 copilot-studio/connector/apiProperties.json
 
+# The packed Cowork plugin carries whatever host and OAuth client registration id
+# were substituted into manifest.json at pack time. The tracked sources under
+# cowork/ keep the placeholders; only the build output is ignored.
+cowork/build/
+
 # Bicep parameter files completed with real tenant/subscription values.
 host/infra/*.local.bicepparam
 

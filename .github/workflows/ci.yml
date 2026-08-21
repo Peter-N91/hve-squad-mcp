@@ -24,6 +24,9 @@
 #                             retired, plus a council seat that `runSubagent` cannot
 #                             reach.
 #   generate:connector:check— the five Copilot Studio connector artifacts are current.
+#   generate:cowork:check   — the Cowork plugin's mcpToolDescription file is current
+#                             AND every authored Agent Skill passes the ASKILL
+#                             packaging rules Cowork enforces at upload.
 #   snapshot:cast:check     — re-resolves host/cast/package-pin.json against the
 #                             hve-squad tag and FAILS when the committed bundle is
 #                             not what that tag produces. This is the check whose
@@ -89,6 +92,13 @@ jobs:
       - name: Copilot Studio connector artifacts are current
         if: ${{ !cancelled() }}
         run: npm run generate:connector:check
+
+      # Also validates the authored Agent Skills against every ASKILL packaging
+      # rule, so a package that Cowork would reject with an HTTP 400 fails here
+      # instead of at upload.
+      - name: Cowork plugin package is current and valid
+        if: ${{ !cancelled() }}
+        run: npm run generate:cowork:check
 
       # Last, and the only step that needs the network. It re-resolves the pinned
       # hve-squad tag and its apm.yml deployment manifest, then compares every

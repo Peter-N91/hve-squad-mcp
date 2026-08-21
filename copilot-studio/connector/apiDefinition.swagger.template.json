@@ -2,7 +2,7 @@
   "swagger": "2.0",
   "info": {
     "title": "hve-squad (squad-guided / embedded)",
-    "description": "Calls the hve-squad MCP server (squad-guided / embedded). The squad runs server-side under its gates and methodology. This template exposes the four advisory tools served by a default deployment: squad_research, squad_plan, squad_review, and squad_architect.",
+    "description": "Calls the hve-squad MCP server (squad-guided / embedded). The squad runs server-side under its gates and methodology. This template requests every scope the server can serve: the four advisory tools of a default deployment (squad_research, squad_plan, squad_review, squad_architect) plus the opt-in gated pipeline, federation, business, memory, and render surfaces. Remove any scope your app registration does not expose — asking for one it does not expose fails consent.",
     "version": "1.0"
   },
   "host": "<CONTAINER_APP_FQDN>",
@@ -41,7 +41,14 @@
         "api://<ENTRA_CLIENT_ID>/Squad.Research": "Invoke squad_research",
         "api://<ENTRA_CLIENT_ID>/Squad.Plan": "Invoke squad_plan",
         "api://<ENTRA_CLIENT_ID>/Squad.Review": "Invoke squad_review",
-        "api://<ENTRA_CLIENT_ID>/Squad.Architect": "Invoke squad_architect"
+        "api://<ENTRA_CLIENT_ID>/Squad.Architect": "Invoke squad_architect",
+        "api://<ENTRA_CLIENT_ID>/Squad.Run": "Invoke squad_run and squad_status",
+        "api://<ENTRA_CLIENT_ID>/Squad.Federate": "Invoke squad_federate",
+        "api://<ENTRA_CLIENT_ID>/Squad.Business": "Invoke squad_business_plan",
+        "api://<ENTRA_CLIENT_ID>/Squad.Backlog": "Invoke squad_backlog",
+        "api://<ENTRA_CLIENT_ID>/Squad.Memory": "Invoke squad_memory_read and squad_history",
+        "api://<ENTRA_CLIENT_ID>/Squad.MemoryWrite": "Invoke squad_memory_write and squad_memory_sync",
+        "api://<ENTRA_CLIENT_ID>/Squad.Render": "Invoke squad_render_pptx"
       }
     }
   },
