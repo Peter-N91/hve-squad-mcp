@@ -94,6 +94,8 @@ Every move in steps 2 and 4 is a **copy → verify → delete-source** sequence,
 
 Deleting first is the one failure mode this contract exists to prevent: a relocation that clears the source and then cannot find the files to move has destroyed append-only decision and history logs that no later step can reconstruct. When a destination write fails, stop and escalate with the source still intact; a partially relocated tree with an intact source is recoverable, and a deleted source is not.
 
+**Every destination path is written from the project root, including the parent directories the move creates**, and the promotion creates nothing outside `.copilot-tracking/squad/`. `.copilot-tracking/squad/members/<name>/plans/` is the whole path, not a segment to append to wherever the last step was working. The observed failure created its destinations from inside `.copilot-tracking/` and left `.copilot-tracking/.copilot-tracking/squad/members/<name>/` behind — empty, so no file was lost and no step reported a failure, while the tree gained a second tracking directory that every later path resolution has to step around. Before the promotion is confirmed, list `.copilot-tracking/` and remove anything the move created by accident, along with any directory the move emptied.
+
 ### Guards
 
 * **Idempotency.** When a top-level `federation.md` already exists, the project is already a federation — the coordinator does not promote; it routes the request (or runs Federation Init to add a sub-squad) instead.
@@ -123,7 +125,7 @@ The Squad Federation Coordinator runs Expansion when a top-level `federation.md`
 ### Steps
 
 1. **Propose the new sub-squad(s).** Each is a unique lower-kebab-case name, a profile (or a custom roster), an optional owner, and a one-line description, proposed from the repo and request exactly as Init proposes a sub-squad. Validate each name per *Sub-Squad Naming and Uniqueness*, comparing it against the existing `federation.md` rows and the `members/` directories.
-2. **Seed the new sub-squad's tree** under `members/<new>/` via the standard Squad Coordinator Init scoped to that root (its `team.md`, `routing.md`, `decisions.md`, `notifications.md`, `state.json`, and `history/`), exactly as Federation Init Phase 2 seeds each sub-squad.
+2. **Seed the new sub-squad's tree** under `members/<new>/` via the standard Squad Coordinator Init scoped to that root (its `team.md`, `routing.md`, `decisions.md`, `notifications.md`, `state.json`, `consumption.md`, `consumption-rates.md`, and `history/`), exactly as Federation Init Phase 2 seeds each sub-squad.
 3. **Register it (Scribe-performed, preserve-on-replace).** `federation.md` and `meta-routing.md` use replace semantics, so the Scribe **read-merge-writes** them: it appends the new sub-squad's registry row to `federation.md` and its pattern → sub-squad route to `meta-routing.md`, preserving every existing row and route. It appends a federation-level `decisions.md` entry recording the addition and creates `history/<new>.md`. Existing sub-squad rows, routes, decisions, and history are never edited or removed.
 
 ### Guards
