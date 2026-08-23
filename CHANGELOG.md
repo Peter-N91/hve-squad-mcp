@@ -10,6 +10,24 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
+## [0.7.1] - 2026-08-23
+
+> Built against `Peter-N91/hve-squad@0.16.1` (see `host/cast/package-pin.json`).
+
+### Changed
+
+- **The bundled cast lagged behind HVE Squad 0.16.1.** Re-pinned and regenerated the cast so autopilot derives multi-artifact fan-out from artifact-owning roster entries and records a Scribe handoff for every stage (`host/cast/package-pin.json`, `host/cast/.github/`).
+
+### Consumer install
+
+Pin to this version:
+
+```powershell
+npm install "Peter-N91/hve-squad-mcp#v0.7.1"
+```
+
+[0.7.1]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.7.1
+
 ## [0.7.0] - 2026-08-23
 
 > Built against `Peter-N91/hve-squad@0.16.0` (see `host/cast/package-pin.json`).
