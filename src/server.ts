@@ -52,7 +52,7 @@ export const SERVER_NAME = "hve-squad-mcp";
  * image than in development. A constant plus a failing test is the cheaper and
  * more honest guarantee.
  */
-export const SERVER_VERSION = "0.6.3";
+export const SERVER_VERSION = "0.7.0";
 
 export interface CreateServerOptions {
   catalog?: ToolCatalog;
