@@ -8,7 +8,7 @@ An outbound [Model Context Protocol (MCP)](https://modelcontextprotocol.io) serv
 
 This is the outbound inverse of the squad's existing inbound MCP template (`squad-src/.github/skills/squad/mcp.template.json`, which registers servers the squad *consumes*). This package ships the squad's *own* server, which other hosts consume.
 
-**Documentation:** <https://peter-n91.github.io/hve-squad-mcp/> · **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md) · **License:** [MIT](LICENSE)
+**Documentation:** <https://peter-n91.github.io/hve-squad-mcp/> · **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md) · **License:** [MIT](LICENSE) · <a href="https://m8ven.ai/mcp/peter-n91-hve-squad-mcp-5uglug"><img src="https://m8ven.ai/badge/mcp/peter-n91-hve-squad-mcp-5uglug" alt="m8ven badge"></a>
 
 ## Status — what works today (read this first)
 
