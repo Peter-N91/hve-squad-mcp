@@ -24,9 +24,9 @@
 #                             retired, plus a council seat that `runSubagent` cannot
 #                             reach.
 #   generate:connector:check— the five Copilot Studio connector artifacts are current.
-#   generate:cowork:check   — the Cowork plugin's mcpToolDescription file is current
-#                             AND every authored Agent Skill passes the ASKILL
-#                             packaging rules Cowork enforces at upload.
+#   generate:cowork:check   — the Cowork v1.29 package remains connector-only:
+#                             no pinned tool description or Agent Skills can
+#                             displace runtime initialize + tools/list discovery.
 #   snapshot:cast:check     — re-resolves host/cast/package-pin.json against the
 #                             hve-squad tag and FAILS when the committed bundle is
 #                             not what that tag produces. This is the check whose

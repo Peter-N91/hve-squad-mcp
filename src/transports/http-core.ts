@@ -56,6 +56,7 @@ import { businessToolSpec } from "../engine/business-tools.js";
 import { BacklogContractError, parseBacklog } from "../engine/backlog-contract.js";
 import type { RedactingLogger } from "../observability/logger.js";
 import type { SessionStore } from "./session-store.js";
+import { projectRemoteToolDescriptor } from "./remote-tool-metadata.js";
 
 /** The MCP protocol revision this server speaks. */
 export const MCP_PROTOCOL_VERSION = "2025-06-18";
@@ -690,39 +691,36 @@ export class HttpMcpHandler {
     switch (message.method) {
       case "ping":
         return { status: 200, headers: baseHeaders, body: rpcResult(message.id, {}) };
-      case "tools/list":
+      case "tools/list": {
+        const tools = [
+          ...this.router.listToolDescriptors().filter((descriptor) => this.isExposed(descriptor.name)),
+          ...(this.pipelineExposed ? [SQUAD_STATUS_DESCRIPTOR] : []),
+          ...(this.renderService ? [SQUAD_RENDER_PPTX_DESCRIPTOR] : []),
+          ...(this.memoryBrokerEnabled
+            ? [
+                SQUAD_MEMORY_READ_DESCRIPTOR,
+                SQUAD_MEMORY_WRITE_DESCRIPTOR,
+                SQUAD_MEMORY_SYNC_DESCRIPTOR,
+                ...(this.history ? [SQUAD_HISTORY_DESCRIPTOR] : []),
+              ].filter((descriptor) => isMemoryExposed(descriptor.name))
+            : []),
+          ...(this.businessToolsExposed
+            ? [SQUAD_BUSINESS_PLAN_DESCRIPTOR, SQUAD_BACKLOG_DESCRIPTOR].filter((descriptor) =>
+                isBusinessExposed(descriptor.name),
+              )
+            : []),
+        ].map((descriptor) => projectRemoteToolDescriptor(descriptor));
         return {
           status: 200,
           headers: baseHeaders,
           body: rpcResult(message.id, {
-            // PROD-1: the advisory tools always; the gated async pipeline (squad_run +
-            // squad_status) only when the operator enabled it (pipelineExposed).
-            tools: [
-              ...this.router.listToolDescriptors().filter((descriptor) => this.isExposed(descriptor.name)),
-              ...(this.pipelineExposed ? [SQUAD_STATUS_DESCRIPTOR] : []),
-              ...(this.renderService ? [SQUAD_RENDER_PPTX_DESCRIPTOR] : []),
-              // The memory broker tools appear ONLY when the operator enabled the
-              // feature (a backing store injected); `isMemoryExposed` keeps the
-              // projection to the classified memory tools (advisory-only default
-              // is byte-identical to before).
-              ...(this.memoryBrokerEnabled
-                ? [
-                    SQUAD_MEMORY_READ_DESCRIPTOR,
-                    SQUAD_MEMORY_WRITE_DESCRIPTOR,
-                    SQUAD_MEMORY_SYNC_DESCRIPTOR,
-                    ...(this.history ? [SQUAD_HISTORY_DESCRIPTOR] : []),
-                  ].filter((descriptor) => isMemoryExposed(descriptor.name))
-                : []),
-              // The business-facing tools appear ONLY when the operator enabled
-              // them; the default remote surface is unchanged.
-              ...(this.businessToolsExposed
-                ? [SQUAD_BUSINESS_PLAN_DESCRIPTOR, SQUAD_BACKLOG_DESCRIPTOR].filter((descriptor) =>
-                    isBusinessExposed(descriptor.name),
-                  )
-                : []),
-            ],
+            // Cowork and Copilot Studio discover this live surface. Descriptions
+            // must describe embedded execution, and annotations preserve the
+            // confirmation hints formerly carried by pinned Cowork metadata.
+            tools,
           }),
         };
+      }
       case "tools/call":
         return this.handleToolCall(message, auth, baseHeaders);
       case "resources/list":

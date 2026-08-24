@@ -3,21 +3,14 @@ bump: patch
 type: Changed
 ---
 
-- **The Copilot Studio agent package named roles the squad no longer has, and
-  covered four of the fourteen served tools.** `copilot-studio/` now tracks the
-  current cast and its ten connected children are each **named for the squad role
-  their tool routes to** — `Squad Researcher`, `System Architecture Reviewer`,
-  `Squad Lead`, `Squad Reviewer`, `BRD Builder`, `Functional Planner`,
-  `Squad Coordinator`, and `Squad Federation Coordinator` replace the invented
-  advisor names, so the package introduces no persona of its own. Six of those
-  children are new, covering the business, gated-pipeline, federation,
-  memory/ledger, and render surfaces (`copilot-studio/parent/`,
-  `copilot-studio/child/`). `Memory Curator` and `Deck Renderer` keep functional
-  names and say plainly that their deterministic tools dispatch no role.
-- **The package documented a Human Gate no Copilot Studio agent could release,
-  and a discovery gate the remote path ignores.** `copilot-studio/README.md` now
-  records `SQUAD_MCP_ADVISORY_AUTOPILOT_ENABLED` and `SQUAD_MCP_ENABLE_ARTIFACTS`,
-  states that `discovery` is accepted but discarded on the unattended HTTP path,
-  and maps every child to the operator flag and scope that serve it. The
-  connector templates request the full scope surface
-  (`copilot-studio/connector/*.template.json`).
+- **The hand-maintained Copilot Studio parent and ten connected children became
+  redundant once the single-agent generative-orchestration setup proved the full
+  MCP surface could be selected directly.** The active authoring path is now the
+  generated `generated/copilot-studio-connector/agent-instructions.md`; the
+  superseded parent, children, skills, descriptions, and per-agent instructions
+  remain available under `archive/copilot-studio-parent-child/` as historical
+  reference but are no longer generated, tested, packaged, or supported.
+- **`copilot-studio/` now documents only the supported single-agent workflow.**
+  Its connector templates remain active, while the README directs makers to
+  enable generative orchestration and paste the generated instructions block
+  rather than creating and wiring eleven agents.

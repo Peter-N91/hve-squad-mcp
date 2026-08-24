@@ -1,7 +1,8 @@
-# Connecting the Cowork plugin to your server
+# Connecting the dynamic Cowork MCP plugin to your server
 
-The plugin installs with placeholder values but cannot connect until the Entra
-app, the auth config, and the package all agree. Work through these in order.
+The connector-only plugin discovers tools from the server's `tools/list` response,
+but it cannot connect until the Entra app, auth config, and package all agree.
+Work through these steps in order.
 
 Placeholders used below:
 
@@ -211,12 +212,14 @@ the package.
 
 ## Verifying
 
-Run Phase 0 of the test plan in [README.md](README.md). If it still fails, the
-error text identifies the layer — see *Reading failures* there. The three most
-common causes, in order:
+Run Phase 0 of the test plan in [README.md](README.md). Confirm that the server
+receives `initialize`, `tools/list`, and then the expected `tools/call`. The most
+common causes of an empty or unavailable tool surface are:
 
 1. The package still carries placeholders.
 2. The token store was never pre-authorized (step 1a), so consent cannot complete.
 3. The scopes requested in the auth config are not all exposed by the app
    registration. A default deployment exposes only `Squad.Research`,
    `Squad.Plan`, `Squad.Review`, and `Squad.Architect`.
+4. The server returned an invalid `tools/list` descriptor or runtime validation
+   rejected a newly added or modified tool.

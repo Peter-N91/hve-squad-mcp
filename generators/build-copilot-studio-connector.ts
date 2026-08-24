@@ -34,6 +34,7 @@ import {
   SQUAD_STATUS_TOOL,
 } from "../src/auth/scopes.js";
 import { SQUAD_GUIDED_BANNER } from "../src/engine/render-embedded.js";
+import { toRemoteToolDescription } from "../src/transports/remote-tool-metadata.js";
 import { packageRoot } from "../src/paths.js";
 
 const FORBIDDEN_CLAIM = "squad-executed";
@@ -42,54 +43,11 @@ const TARGET = "copilot-studio";
 const PROTOCOL = "mcp-streamable-1.0";
 
 /**
- * The authored catalog describes the Phase 0 DELEGATED surface (VS Code stdio):
- * the tool returns a charter and the calling host runs the subagent loop. The
- * Copilot Studio connector is the EMBEDDED surface — the server runs the squad
- * stage and returns a finished artifact — so projecting the catalog copy verbatim
- * would tell a maker the wrong thing about where execution happens (MINOR-1) and
- * undercut the locked "squad-guided / embedded" claim (PROD-2). We rewrite the
- * catalog's "Delegated execution: …" sentence into the embedded banner here, in
- * the connector projection only; the catalog (the delegated truth) is untouched.
- */
-const DELEGATED_SENTENCE = /\s*Delegated execution:.*?(?=\s+Use for\b|$)/i;
-
-function embeddedExecutionSentence(toolId: string): string {
-  if (toolId === "squad_review") {
-    return (
-      ` Embedded execution (${SQUAD_GUIDED_BANNER}): the server runs the review stage under the squad's ` +
-      "gates and methodology and returns a finished reviewer artifact (a single reviewer pass, not a convened council verdict)."
-    );
-  }
-  if (toolId === "squad_federate") {
-    return (
-      ` Embedded execution (${SQUAD_GUIDED_BANNER}): the server runs the federation meta layer server-side ` +
-      "under its gates and methodology. Because the federation layer is gated, the call returns immediately " +
-      "with a run id and PAUSES at the Human Gate; poll squad_status with that run id to advance the run after " +
-      "an out-of-band approval and to retrieve the finished federation decision."
-    );
-  }
-  if (toolId === "squad_run") {
-    return (
-      ` Embedded execution (${SQUAD_GUIDED_BANNER}): the server runs the full squad pipeline server-side ` +
-      "under its gates and methodology. Because the pipeline is gated, the call returns immediately with a " +
-      "run id and PAUSES at the Human Gate; poll squad_status with that run id to advance the run after an " +
-      "out-of-band approval and to retrieve the finished artifact."
-    );
-  }
-  return (
-    ` Embedded execution (${SQUAD_GUIDED_BANNER}): the server runs this squad stage under its gates and ` +
-    "methodology and returns the finished artifact."
-  );
-}
-
-/**
  * Project a hero tool's connector description with embedded (not delegated)
  * execution copy. Exported for direct unit assertion.
  */
 export function toConnectorDescription(toolId: string, description: string): string {
-  const normalized = description.replace(/\s+/g, " ").trim();
-  const rewritten = normalized.replace(DELEGATED_SENTENCE, embeddedExecutionSentence(toolId));
-  return rewritten.replace(/\s+/g, " ").trim();
+  return toRemoteToolDescription(toolId, description);
 }
 
 export interface ConnectorHeroTool {
