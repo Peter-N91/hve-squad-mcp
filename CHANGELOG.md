@@ -10,6 +10,24 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
+## [0.7.2] - 2026-08-25
+
+> Built against `Peter-N91/hve-squad@0.16.2` (see `host/cast/package-pin.json`).
+
+### Fixed
+
+- **The bundled researcher cited an instruction path that does not exist.** Re-pinned the cast to HVE Squad 0.16.2 and regenerated it so the researcher resolves the root-level untrusted-content boundary instruction (`host/cast/package-pin.json`, `host/cast/.github/`).
+
+### Consumer install
+
+Pin to this version:
+
+```powershell
+npm install "Peter-N91/hve-squad-mcp#v0.7.2"
+```
+
+[0.7.2]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.7.2
+
 ## [0.7.1] - 2026-08-23
 
 > Built against `Peter-N91/hve-squad@0.16.1` (see `host/cast/package-pin.json`).
