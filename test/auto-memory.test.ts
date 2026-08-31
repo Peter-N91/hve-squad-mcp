@@ -37,11 +37,20 @@ function tempStore(): { store: FileSquadMemoryStore; cleanup: () => void } {
   };
 }
 
-test("resolveProject prefers a pinned sub-squad and otherwise the operator default", () => {
+test("resolveProject prefers an explicit project, then a sub-squad, then the operator default", () => {
   const { store, cleanup } = tempStore();
   try {
     const auto = new AutoMemory({ store, defaultProject: "acme" });
     assert.equal(auto.resolveProject({ toolId: "squad_plan", request: "x" }), "acme");
+    assert.equal(
+      auto.resolveProject({
+        toolId: "squad_plan",
+        request: "x",
+        project: "legora-storyboard",
+        squad: "azure",
+      }),
+      "legora-storyboard",
+    );
     assert.equal(
       auto.resolveProject({ toolId: "squad_plan", request: "x", squad: "azure" }),
       "azure",
@@ -49,6 +58,10 @@ test("resolveProject prefers a pinned sub-squad and otherwise the operator defau
     // A hostile sub-squad name must never become a partition segment (SEC-4).
     assert.equal(
       auto.resolveProject({ toolId: "squad_plan", request: "x", squad: "../escape" }),
+      "acme",
+    );
+    assert.equal(
+      auto.resolveProject({ toolId: "squad_plan", request: "x", project: "../escape" }),
       "acme",
     );
   } finally {

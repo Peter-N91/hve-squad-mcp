@@ -20,6 +20,8 @@ This server has **two execution modes**, at different maturity levels. Be precis
 | **Embedded advisory hero tools** (`squad_research`, `squad_review`, `squad_plan`, `squad_architect`) | Copilot Studio (remote HTTP) | Works, deployable via [host/RUNBOOK.md](host/RUNBOOK.md) | **Advisory parity.** Each runs one server-side dispatch via Azure OpenAI, resolving the **real from-disk persona from the full bundled cast** (98 agents), under Entra auth, gates, tenant isolation and cost caps. Advisory (text) output only — no code execution or deploy. |
 | **Embedded async advisory pipeline** (`squad_run`, `squad_status`) | Copilot Studio (remote HTTP) | **Works end-to-end; single-replica (file) or multi-replica (Azure Table)** | **Advisory parity — full cast, full advisory stages.** Data-driven routing runs research → plan → council → review → backlog over the real cast. Advisory (text) only; code-executing implement/deploy is a deferred execution expansion. |
 | **Deterministic render** (`squad_render_pptx`) | Copilot Studio (remote HTTP) | Opt-in (`SQUAD_MCP_ENABLE_RENDER_PPTX=true`) | **First file-output tool.** Renders content YAML to a `.pptx` with in-image `python-pptx` and returns a short-lived Azure Blob **user-delegation SAS** download link (tenant-scoped path, SAS never logged, `Squad.Render` fail-closed scope, caller YAML is DATA). No model call. |
+| **Zero-configuration OAuth** | Generic MCP HTTP clients | Opt-in (`SQUAD_MCP_SIMPLE_OAUTH_ENABLED=true`) | Server-owned OAuth 2.1 authority with RFC 9728/8414 discovery, RFC 7591 registration, loopback-only redirects, PKCE S256, operator-issued one-time browser codes, short-lived local JWTs, and rotating one-time refresh tokens. Existing Entra auth remains available. |
+| **MISE Container v2 validation** | Azure Container Apps (remote HTTP) | Opt-in (`SQUAD_MCP_MISE_ENABLED=true`) | Entra tokens are validated by a pod-local Microsoft Identity Service Essentials sidecar before the existing exact audience, issuer, tenant, and per-tool scope checks. The endpoint is restricted to loopback, failures are fail-closed, and local simple-OAuth HS256 tokens never leave the application container. |
 
 **The async pipeline (`squad_run`) runs the full advisory squad** — data-driven routing over the full bundled cast, sequencing research → plan → (council) → review → backlog-handoff and producing a finished, sectioned advisory artifact. It is **advisory parity**: finished text deliverables, not code-executing implement/deploy (that is a separate, deferred execution expansion). Specifics:
 
@@ -115,6 +117,30 @@ Over the remote Streamable HTTP `/mcp` boundary the server runs the squad stage 
 - **Async pipeline** (`squad_run` → held run id; `squad_status` → poll) — exposed only when the operator sets `SQUAD_MCP_REMOTE_PIPELINE_ENABLED=true` with a durable run-state backend (`file` local dir, or `table` = Azure Table Storage for multi-replica). `squad_run` holds at a non-bypassable Human Gate; an operator releases a held run out-of-band via `POST /admin/approve` (distinct `Squad.Operate` role), then `squad_status` drives it to completion. Cross-replica release uses the Table backend's ETag compare-and-swap + a store-backed approval record; long runs (>240s) are driven by an optional worker ACA Job (`SQUAD_MCP_WORKER_ENABLED=true`). See the [status section](#status--what-works-today-read-this-first) for the remaining limit (2-stage slice).
 
 The embedded and delegated modes share the same router, tool schema, and persona source of truth behind one `CoordinatorEngine` seam; the security model is enforced in `src/transports/http-core.ts`, `src/auth/`, and `src/engine/` and proven by the conformance suites under `test/conformance/`.
+
+### Optional zero-configuration OAuth for generic MCP clients
+
+Entra remains the default remote identity provider. When tenant policy prevents
+each desktop/CLI MCP client from registering an Entra application, an operator may
+enable the server-owned OAuth authority instead:
+
+- `/mcp` returns an RFC 9728 `WWW-Authenticate` challenge.
+- `/.well-known/oauth-protected-resource/mcp` and
+  `/.well-known/oauth-authorization-server` provide discovery.
+- `/oauth/register` dynamically registers public clients without a secret.
+- `/oauth/authorize` requires a short-lived, single-use code issued inside the
+  running container and accepts only loopback HTTP redirects.
+- `/oauth/token` requires PKCE S256, consumes authorization codes once, rotates
+  refresh tokens on every use, and returns an access token valid for at most one
+  hour.
+
+The local issuer can grant ordinary tool scopes only. It never grants
+`Squad.Operate`, so it cannot release a Human Gate or call `/admin/approve`.
+One-time code and grant records are indexed only by SHA-256 and their payloads are
+encrypted before Azure Table Storage. The signing key is stored in Key Vault and
+supports current-plus-previous key rotation. See
+[host/RUNBOOK.md](host/RUNBOOK.md#optional-zero-configuration-oauth-no-entra-client-registration)
+for deployment and code issuance.
 
 ## Squad memory — automatic, and portable beyond Azure
 

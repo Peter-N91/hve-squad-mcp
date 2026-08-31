@@ -23,6 +23,10 @@
  * would imply a resumed run might honor it.
  */
 import type { CoordinatorRequest } from "./coordinator-engine.js";
+import {
+  parseProjectContextEnvelope,
+  type ProjectContextEnvelope,
+} from "./project-context-bridge.js";
 
 /** The subset of {@link CoordinatorRequest} persisted alongside request/context. */
 export interface PersistedRunParams {
@@ -30,6 +34,8 @@ export interface PersistedRunParams {
   tier?: string;
   owner?: string;
   mode?: string;
+  project?: string;
+  projectContext?: ProjectContextEnvelope;
   squad?: string;
   init?: boolean;
   promote?: boolean;
@@ -49,6 +55,8 @@ export function encodeRunParams(request: CoordinatorRequest): string | undefined
   if (request.tier) params.tier = request.tier;
   if (request.owner) params.owner = request.owner;
   if (request.mode) params.mode = request.mode;
+  if (request.project) params.project = request.project;
+  if (request.projectContext) params.projectContext = request.projectContext;
   if (request.squad) params.squad = request.squad;
   if (request.init === true) params.init = true;
   if (request.promote === true) params.promote = true;
@@ -75,6 +83,14 @@ export function decodeRunParams(blob: string | undefined): PersistedRunParams {
     tier: optionalString(record.tier),
     owner: optionalString(record.owner),
     mode: optionalString(record.mode),
+    project: optionalString(record.project),
+    projectContext: (() => {
+      try {
+        return parseProjectContextEnvelope(record.projectContext);
+      } catch {
+        return undefined;
+      }
+    })(),
     squad: optionalString(record.squad),
     init: record.init === true,
     promote: record.promote === true,
@@ -100,6 +116,8 @@ export function coordinatorRequestFromRun(run: {
     tier: params.tier,
     owner: params.owner,
     mode: params.mode,
+    project: params.project,
+    projectContext: params.projectContext,
     squad: params.squad,
     init: params.init,
     promote: params.promote,

@@ -15,6 +15,7 @@ import { Ajv, type ValidateFunction } from "ajv";
 
 import type { CatalogTool, ToolCatalog } from "../catalog/catalog.js";
 import type { CoordinatorRequest } from "../engine/coordinator-engine.js";
+import { parseProjectContextEnvelope } from "../engine/project-context-bridge.js";
 
 /** Thrown when a tool-call input fails JSON Schema validation. */
 export class ToolInputError extends Error {
@@ -106,6 +107,8 @@ export class ToolRouter {
       mode: optionalString(record.mode),
       discovery: optionalString(record.discovery),
       context: optionalString(record.context),
+      project: optionalString(record.project),
+      projectContext: parseProjectContextEnvelope(record.projectContext),
       squad: optionalString(record.squad),
       init: record.init === true,
       promote: record.promote === true,

@@ -48,6 +48,10 @@
       <tr><td><code>SQUAD_MCP_ALLOWED_ISSUERS</code></td><td>—</td><td>Comma-separated issuer allow-list.</td></tr>
       <tr><td><code>SQUAD_MCP_ALLOWED_TENANTS</code></td><td>—</td><td>Comma-separated tenant allow-list.</td></tr>
       <tr><td><code>SQUAD_MCP_ALLOWED_ORIGINS</code></td><td>—</td><td>Strict allow-list. A literal <code>*</code> is rejected at startup.</td></tr>
+      <tr><td><code>SQUAD_MCP_JWKS_URI</code></td><td>when MISE is off</td><td>Legacy <code>jose</code> signing-key endpoint. Not required when MISE performs Entra validation.</td></tr>
+      <tr><td><code>SQUAD_MCP_MISE_ENABLED</code></td><td>—</td><td>Defaults to <code>false</code>. When enabled, Entra tokens must pass the pod-local MISE Container before application authorization. Local HS256 OAuth tokens stay local.</td></tr>
+      <tr><td><code>SQUAD_MCP_MISE_ENDPOINT</code></td><td>—</td><td>Defaults to <code>http://127.0.0.1:5000/ValidateRequest</code>. Any non-loopback host, other port/path, credentials, query, or fragment is rejected at startup.</td></tr>
+      <tr><td><code>SQUAD_MCP_MISE_TIMEOUT_MS</code></td><td>—</td><td>Defaults to <code>10000</code>; allowed range 100–60000 ms. Timeout, redirect, non-200, or malformed-success responses fail closed.</td></tr>
     </tbody>
   </table>
 
@@ -58,10 +62,36 @@
       <tr><td><code>SQUAD_MCP_MODEL_ENDPOINT</code></td><td>—</td><td>Must also appear in the allow-list below, or startup fails.</td></tr>
       <tr><td><code>SQUAD_MCP_ALLOWED_MODEL_ENDPOINTS</code></td><td>—</td><td>The endpoints this server may ever call. Exfiltration defence.</td></tr>
       <tr><td><code>SQUAD_MCP_MODEL_DEPLOYMENT</code></td><td>—</td><td>The Azure OpenAI deployment name.</td></tr>
-      <tr><td><code>SQUAD_MCP_MODEL_API_VERSION</code></td><td><code>2024-10-21</code></td><td></td></tr>
+      <tr><td><code>SQUAD_MCP_MODEL_API</code></td><td><code>chat-completions</code></td><td>Use <code>responses</code> for GPT-5 reasoning deployments. The legacy default preserves existing operators.</td></tr>
+      <tr><td><code>SQUAD_MCP_MODEL_API_VERSION</code></td><td><code>2024-10-21</code></td><td>Used only by legacy Chat Completions mode; the Responses API uses <code>/openai/v1/responses</code>.</td></tr>
+      <tr><td><code>SQUAD_MCP_MODEL_MAX_OUTPUT_TOKENS</code></td><td><code>1500</code> (Chat Completions) / <code>32768</code> (Responses)</td><td>Includes hidden reasoning tokens for GPT-5 reasoning models. The Responses default exceeds Microsoft's initial 25,000-token reserve without using the 128,000 model maximum for every rate-limit estimate.</td></tr>
+      <tr><td><code>SQUAD_MCP_MODEL_REASONING_EFFORT</code></td><td>model default</td><td>Responses API only. The Cowork deployment uses <code>medium</code> for balanced planning and judgment.</td></tr>
+      <tr><td><code>SQUAD_MCP_MODEL_VERBOSITY</code></td><td>model default</td><td>Responses API only. The Cowork deployment uses <code>medium</code> to avoid excessively long synchronous tool calls.</td></tr>
       <tr><td><code>SQUAD_MCP_TENANT_CONCURRENCY</code></td><td>built-in</td><td>Per-tenant concurrent run cap.</td></tr>
       <tr><td><code>SQUAD_MCP_TENANT_COST_CEILING_USD</code></td><td>built-in</td><td>Per-tenant spend ceiling. Set this before real users.</td></tr>
       <tr><td><code>SQUAD_MCP_SESSION_IDLE_MS</code></td><td>built-in</td><td>Idle session eviction.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Zero-configuration OAuth</h2>
+  <p>
+    Entra remains the default. This optional local issuer is for generic MCP clients that cannot register an Entra
+    application. It implements protected-resource and authorization-server discovery, dynamic public-client
+    registration, loopback-only redirects, PKCE S256, operator-issued one-time browser codes, and rotating refresh
+    tokens. It can never grant <code>Squad.Operate</code>.
+  </p>
+  <table>
+    <thead><tr><th>Variable</th><th>Default</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>SQUAD_MCP_SIMPLE_OAUTH_ENABLED</code></td><td><code>false</code></td><td>Opt-in master switch. Existing Entra tokens continue to work.</td></tr>
+      <tr><td><code>SQUAD_MCP_SIMPLE_OAUTH_EXTERNAL_URL</code></td><td>—</td><td>Public HTTPS origin, with no path/query/fragment.</td></tr>
+      <tr><td><code>SQUAD_MCP_SIMPLE_OAUTH_SIGNING_KEYS_B64</code></td><td>—</td><td>Required. Comma-separated base64 32-byte keys; current first, previous keys retained for rotation.</td></tr>
+      <tr><td><code>SQUAD_MCP_SIMPLE_OAUTH_TABLE_NAME</code></td><td><code>squadoauth</code></td><td>Azure Table holding hashed, encrypted, one-time grants.</td></tr>
+      <tr><td><code>SQUAD_MCP_SIMPLE_OAUTH_ALLOWED_SCOPES</code></td><td>ordinary tool scopes</td><td>Optional comma-separated subset. <code>Squad.Operate</code> is always rejected.</td></tr>
+      <tr><td><code>SQUAD_MCP_SIMPLE_OAUTH_ACCESS_TOKEN_TTL_SECONDS</code></td><td><code>3600</code></td><td>300-3600 seconds.</td></tr>
+      <tr><td><code>SQUAD_MCP_SIMPLE_OAUTH_AUTH_CODE_TTL_SECONDS</code></td><td><code>300</code></td><td>60-600 seconds; authorization codes are one-time.</td></tr>
+      <tr><td><code>SQUAD_MCP_SIMPLE_OAUTH_REFRESH_TOKEN_TTL_SECONDS</code></td><td><code>2592000</code></td><td>Refresh tokens rotate on every use.</td></tr>
+      <tr><td><code>SQUAD_MCP_SIMPLE_OAUTH_LOGIN_CODE_MAX_TTL_SECONDS</code></td><td><code>900</code></td><td>Upper bound for container-local operator-issued codes.</td></tr>
     </tbody>
   </table>
 
@@ -72,7 +102,7 @@
       <tr><td><code>SQUAD_MCP_REMOTE_PIPELINE_ENABLED</code></td><td><code>false</code></td><td>Off by default. The default remote surface is the advisory tools.</td></tr>
       <tr><td><code>SQUAD_MCP_RUN_STATE_BACKEND</code></td><td><code>file</code></td><td><code>file</code> (single replica) or <code>table</code> (Azure Table, cross-replica CAS).</td></tr>
       <tr><td><code>SQUAD_MCP_RUN_STATE_DIR</code></td><td>—</td><td>Required for the <code>file</code> backend.</td></tr>
-      <tr><td><code>SQUAD_MCP_STORAGE_ACCOUNT</code></td><td>—</td><td>Required for the <code>table</code> backend, renders, memory, and overflow.</td></tr>
+      <tr><td><code>SQUAD_MCP_STORAGE_ACCOUNT</code></td><td>—</td><td>Required for the <code>table</code> backend, simple OAuth grants, renders, memory, and overflow.</td></tr>
       <tr><td><code>SQUAD_MCP_RUN_TABLE_NAME</code></td><td><code>squadruns</code></td><td></td></tr>
       <tr><td><code>SQUAD_MCP_WORKER_ENABLED</code></td><td><code>false</code></td><td>Background worker for runs over ~4 minutes. Requires the <code>table</code> backend.</td></tr>
       <tr><td><code>SQUAD_MCP_RUN_ENCRYPTION_KEY_B64</code></td><td>—</td><td>Base64 key. When set, per-stage artifacts, the Council Verdict, and caller <code>request</code>/<code>context</code> are AES-256-GCM encrypted at rest.</td></tr>
@@ -110,6 +140,17 @@
       <tr><td><code>SQUAD_MCP_ENABLE_ARTIFACTS</code></td><td><code>false</code></td><td>Persist the squad ledger — <code>team.md</code>, <code>routing.md</code>, <code>state.json</code>, and the append-only logs. Requires memory.</td></tr>
     </tbody>
   </table>
+
+  <h3>Cowork project context bridge</h3>
+  <p>
+    Project-aware squad calls can carry a lower-kebab <code>project</code> and a schema-1
+    <code>projectContext</code> checkpoint (immutable project UUID, manifest revision/sequence,
+    optional digest, and stable M365 drive/folder ids). The server binds that identity inside the
+    authenticated tenant partition, rejects stale or colliding checkpoints before inference, and
+    returns an acknowledgment plus changed <code>.copilot-tracking</code> files in
+    <code>structuredContent.contextBridge</code>. Enable automatic memory, artifacts, and overflow
+    for the complete bridge; the M365 folder remains authoritative.
+  </p>
 
   <h3>Several destinations at once</h3>
   <p>
