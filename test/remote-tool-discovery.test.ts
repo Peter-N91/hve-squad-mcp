@@ -75,7 +75,6 @@ test("HTTP tools/list serves embedded descriptions and runtime safety annotation
   assert.doesNotMatch(research.description, /Delegated execution/i);
   assert.deepEqual(research.annotations, {
     title: "Squad Research",
-    readOnlyHint: true,
   });
 
   const run = byName.get("squad_run");

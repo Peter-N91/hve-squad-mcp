@@ -4,7 +4,17 @@ const DELEGATED_SENTENCE = /\s*Delegated execution:.*?(?=\s+Use for\b|$)/i;
 const DELEGATED_PIPELINE = /Research -> Plan -> Implement -> Review/gi;
 
 const MUTATING_TOOLS = new Set(["squad_memory_write", "squad_memory_sync"]);
-const STATEFUL_TOOLS = new Set(["squad_run", "squad_federate", "squad_render_pptx"]);
+const STATEFUL_TOOLS = new Set([
+  "squad_research",
+  "squad_plan",
+  "squad_review",
+  "squad_architect",
+  "squad_run",
+  "squad_federate",
+  "squad_business_plan",
+  "squad_backlog",
+  "squad_render_pptx",
+]);
 
 export interface RemoteToolAnnotations {
   title: string;

@@ -13,8 +13,9 @@
  *   * SEC-3 — tenant resolution. The resolved tenant/identity is the single root
  *     for all downstream authorization in the embedded engine; no ambient server
  *     identity satisfies a caller request.
- *   * SEC-10 — the raw token is registered with the logger for redaction and is
- *     NEVER logged or surfaced; failure reasons never echo the token or claims.
+ *   * SEC-10 — a cryptographically valid token is registered with the bounded
+ *     redaction set and is NEVER logged or surfaced; invalid attacker input is
+ *     never retained, and failure reasons never echo the token or claims.
  *
  * The cryptographic verification (signature + issuer + expiry) is delegated to a
  * pluggable {@link JwtVerifier} so this authorization logic is unit-testable
@@ -43,13 +44,23 @@ export interface JwtClaims {
   [key: string]: unknown;
 }
 
+/** Original request metadata required by the MISE sidecar validation contract. */
+export interface JwtVerificationContext {
+  /** Absolute URI received by the protected web API, including its query string. */
+  originalUri: string;
+  /** HTTP method received by the protected web API. */
+  originalMethod: string;
+  /** Trusted ingress sender IP supplied to MISE as `X-Forwarded-For`. */
+  forwardedFor: string;
+}
+
 /**
  * Verifies a token's signature, issuer, and expiry and returns its claims.
  * Throws on any cryptographic or temporal failure. Audience, tenant, and scope
  * checks are intentionally NOT done here — the authenticator owns authorization.
  */
 export interface JwtVerifier {
-  verify(token: string): Promise<JwtClaims>;
+  verify(token: string, context?: JwtVerificationContext): Promise<JwtClaims>;
 }
 
 /** The resolved caller identity — the single root for downstream authorization (SEC-3). */
@@ -166,25 +177,27 @@ export class EntraAuthenticator {
   /**
    * Authenticate one request. On success returns the resolved {@link AuthContext};
    * on any failure throws {@link AuthError} with the HTTP status. The token is
-   * registered as a secret BEFORE any other work so it can never be logged
-   * (SEC-10), and failure paths never include the token or claim values.
+   * registered as a secret only AFTER cryptographic verification so attacker-
+   * supplied junk cannot exhaust the bounded redaction set. Failure paths never
+   * include the token or claim values.
    */
-  async authenticate(authorizationHeader: string | undefined): Promise<AuthContext> {
+  async authenticate(
+    authorizationHeader: string | undefined,
+    verificationContext?: JwtVerificationContext,
+  ): Promise<AuthContext> {
     const token = extractBearerToken(authorizationHeader);
     if (!token) {
       // SEC-1: no anonymous access.
       throw new AuthError("Missing bearer token.", 401, "missing_token");
     }
-    // SEC-10: register the raw token so it is redacted everywhere, immediately.
-    this.logger.registerSecret(token);
-
     let claims: JwtClaims;
     try {
-      claims = await this.verifier.verify(token);
+      claims = await this.verifier.verify(token, verificationContext);
     } catch {
       // Never echo the token or the underlying crypto error detail.
       throw new AuthError("Token verification failed.", 401, "invalid_token");
     }
+    this.logger.registerSecret(token);
 
     // SEC-1: audience must be bound to THIS resource server (RFC 8707). A token
     // minted for a different resource (pass-through) is rejected outright.

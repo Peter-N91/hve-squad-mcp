@@ -13,6 +13,7 @@
  *   * denied — a quota/cost or unsupported-role refusal, surfaced as an error.
  */
 import type { EmbeddedResult } from "./embedded.js";
+import type { ProjectContextAcknowledgement } from "./project-context-bridge.js";
 
 /** The locked fidelity claim (PROD-2). */
 export const SQUAD_GUIDED_BANNER = "squad-guided / embedded";
@@ -20,6 +21,7 @@ export const SQUAD_GUIDED_BANNER = "squad-guided / embedded";
 export interface RenderedToolResult {
   content: { type: "text"; text: string }[];
   isError?: boolean;
+  structuredContent?: Record<string, unknown>;
 }
 
 function routingLines(result: EmbeddedResult): string[] {
@@ -34,7 +36,23 @@ function routingLines(result: EmbeddedResult): string[] {
   ];
 }
 
-export function renderEmbeddedResult(result: EmbeddedResult): RenderedToolResult {
+function bridgeSummary(
+  bridge: ProjectContextAcknowledgement | undefined,
+): Record<string, unknown> | undefined {
+  if (!bridge) {
+    return undefined;
+  }
+  const { trackingUpdates, ...summary } = bridge;
+  return {
+    ...summary,
+    trackingUpdatePaths: (trackingUpdates ?? []).map((update) => update.path),
+  };
+}
+
+export function renderEmbeddedResult(
+  result: EmbeddedResult,
+  contextBridge?: ProjectContextAcknowledgement,
+): RenderedToolResult {
   if (result.outcome === "denied") {
     return {
       isError: true,
@@ -46,6 +64,7 @@ export function renderEmbeddedResult(result: EmbeddedResult): RenderedToolResult
             "No model call was made.",
         },
       ],
+      structuredContent: contextBridge ? { contextBridge } : undefined,
     };
   }
 
@@ -64,13 +83,22 @@ export function renderEmbeddedResult(result: EmbeddedResult): RenderedToolResult
       "",
       "```json",
       JSON.stringify(
-        { mode: "embedded", outcome: "held", reason: result.reason, runId: result.runId },
+        {
+          mode: "embedded",
+          outcome: "held",
+          reason: result.reason,
+          runId: result.runId,
+          contextBridge: bridgeSummary(contextBridge),
+        },
         null,
         2,
       ),
       "```",
     ].join("\n");
-    return { content: [{ type: "text", text }] };
+    return {
+      content: [{ type: "text", text }],
+      structuredContent: contextBridge ? { contextBridge } : undefined,
+    };
   }
 
   // completed
@@ -93,11 +121,15 @@ export function renderEmbeddedResult(result: EmbeddedResult): RenderedToolResult
         backendId: result.backendId,
         runId: result.runId,
         usage: result.usage,
+        contextBridge: bridgeSummary(contextBridge),
       },
       null,
       2,
     ),
     "```",
   ].join("\n");
-  return { content: [{ type: "text", text }] };
+  return {
+    content: [{ type: "text", text }],
+    structuredContent: contextBridge ? { contextBridge } : undefined,
+  };
 }

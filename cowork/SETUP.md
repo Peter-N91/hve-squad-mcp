@@ -1,8 +1,8 @@
-# Connecting the dynamic Cowork MCP plugin to your server
+# Connecting the HVE project-management Cowork plugin to your server
 
-The connector-only plugin discovers tools from the server's `tools/list` response,
-but it cannot connect until the Entra app, auth config, and package all agree.
-Work through these steps in order.
+The plugin combines an Agent Skill with a connector that discovers tools from
+the server's `tools/list` response. It cannot connect until the Entra app, auth
+config, and package all agree. Work through these steps in order.
 
 Placeholders used below:
 
@@ -139,6 +139,68 @@ If the run prints a placeholder warning, stop — a package carrying placeholder
 installs cleanly and then fails on every call with "couldn't complete the
 request." Then in Cowork: **Customize → Plugins**, remove the old version, and
 **Upload plugin** with `cowork/build/hve-squad-cowork.zip`.
+
+## Step 6 — enable the project context bridge
+
+Keep the selected OneDrive or SharePoint folder authoritative, while enabling
+tenant/project-partitioned continuity and the server's `.copilot-tracking`
+ledger:
+
+```text
+SQUAD_MCP_ENABLE_MEMORY=true
+SQUAD_MCP_MEMORY_BACKEND=table
+SQUAD_MCP_MEMORY_AUTO_ENABLED=true
+SQUAD_MCP_ENABLE_ARTIFACTS=true
+SQUAD_MCP_MEMORY_OVERFLOW_ENABLED=true
+```
+
+Plugin 1.2.2 sends an explicit lower-kebab `project` plus a versioned
+`projectContext` envelope on every managed call. The server binds that slug to
+the manifest's immutable project UUID and stable M365 folder identifiers,
+rejects collisions/stale revisions, and returns changed tracking files through
+`structuredContent.contextBridge.trackingUpdates`.
+
+Never reuse `squad` as the project key; it selects a federation sub-squad.
+
+Start a new Cowork session and ask the HVE project-manager skill to create or
+open a project. Confirm that its schema-2 `hve-project.json`, activity record,
+first artifact, and `.copilot-tracking/squad/` projection appear in the selected
+folder before testing a second session.
+
+## Step 7 — keep the session alive across turns
+
+Two independent timers must both outlast the think-time between turns. Setting
+only one of them still breaks a conversation mid-session:
+
+| Setting | Where | What it protects |
+| --- | --- | --- |
+| `scaleCooldownSeconds` (1800) | `main.local.bicepparam` | Keeps the replica from scaling to zero while the user reads the previous artifact. |
+| `sessionIdleSeconds` (1800) → `SQUAD_MCP_SESSION_IDLE_MS` | `main.local.bicepparam` | Keeps the MCP session id valid. Sessions are held in the replica's memory. |
+
+The failure mode when the session timer is too short is easy to misread as a
+cold start, but it is the opposite: the app is awake and answering in
+milliseconds while rejecting `POST /mcp` with **404 — "Missing or invalid
+session; re-initialize."** Cowork surfaces that as every HVE tool disappearing
+at once, part-way through a working session.
+
+This is exactly what happened on 2026-08-26: the last good turn was 14:37:37Z
+and the next turn at 14:43:44Z was refused 6m07s later, just past the
+**5-minute** `DEFAULT_SESSION_IDLE_MS`, even though the 30-minute cooldown had
+kept the container running.
+
+To confirm which timer fired, check whether the container was awake at the time
+of the failure:
+
+```bash
+az monitor log-analytics query --workspace <workspace-guid> --analytics-query \
+  'ContainerAppConsoleLogs_CL | where TimeGenerated > ago(1h) | where Log_s has "Request finished" | project TimeGenerated, Log_s | order by TimeGenerated desc'
+```
+
+A 404 with millisecond latency means the session expired. No log line at all
+means the replica was asleep and it really is a cold start.
+
+Because a session can never outlive the replica holding it, keep
+`sessionIdleSeconds` less than or equal to `scaleCooldownSeconds`.
 
 ## Cross-tenant: the Cowork user is in a different directory
 

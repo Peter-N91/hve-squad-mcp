@@ -82,6 +82,15 @@ export type SquadMemoryWriteResult = SquadMemoryWriteOk | SquadMemoryWriteConfli
 export interface SquadMemoryStore {
   /** List every entry for a `tenantId:project` partition (empty when none). */
   list(tenantId: string, project: string): Promise<SquadMemoryEntry[]>;
+  /**
+   * Optionally list entries updated at or after an epoch-millisecond boundary.
+   * Decorators can use this to avoid rehydrating old overflow payloads.
+   */
+  listUpdatedSince?(
+    tenantId: string,
+    project: string,
+    updatedAt: number,
+  ): Promise<SquadMemoryEntry[]>;
   /** Read a single entry, or `undefined` when it does not exist. */
   read(tenantId: string, project: string, path: string): Promise<SquadMemoryEntry | undefined>;
   /**

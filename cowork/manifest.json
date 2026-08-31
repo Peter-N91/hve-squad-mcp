@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.29/MicrosoftTeams.schema.json",
   "manifestVersion": "1.29",
-  "version": "1.1.0",
+  "version": "1.2.3",
   "id": "3f6b0c74-9d2a-5e18-b7c3-1a4e8d905f62",
   "developer": {
     "name": "hve-squad",
@@ -14,14 +14,19 @@
     "full": "HVE Squad for Copilot Cowork"
   },
   "description": {
-    "short": "Dynamically discovered tools for governed squad planning and delivery",
-    "full": "Connects Copilot Cowork to the HVE Squad MCP server. Cowork discovers the server's current tools at runtime, including enabled research, architecture, planning, review, business, backlog, federation, memory, history, run-status, and rendering capabilities. The squad runs server-side under its own gates and returns finished artifacts (squad-guided / embedded)."
+    "short": "Project-managed HVE Squad planning and delivery in Cowork",
+    "full": "Adds an HVE project-management workflow to Copilot Cowork and connects it to the HVE Squad MCP server. The skill creates or opens a OneDrive or SharePoint project folder, carries project context across stages, saves returned artifacts, and checkpoints each HVE-managed interaction. Cowork discovers the server's enabled tools at runtime; squad work remains server-side, governed, and advisory."
   },
   "icons": {
     "color": "color.png",
     "outline": "outline.png"
   },
   "accentColor": "#0B5394",
+  "agentSkills": [
+    {
+      "folder": "./skills/hve-project-manager"
+    }
+  ],
   "agentConnectors": [
     {
       "id": "hve-squad-mcp",
