@@ -34,9 +34,18 @@ cowork/build/
 # Bicep parameter files completed with real tenant/subscription values.
 host/infra/*.local.bicepparam
 
+# Internal compliance evidence can contain private review records, personal links,
+# customer context, and live deployment identifiers. Keep it outside public Git.
+/docs/compliance/
+
+# Local troubleshooting captures; never repository content.
+/_mcp_research_dump.txt
+/console.log(r.status
+
 # Environment files and credential material.
 .env
 .env.*
+copilot-studio/key.md
 *.pem
 *.pfx
 *.p12
