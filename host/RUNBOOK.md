@@ -141,6 +141,15 @@ Notes:
 - The **audience** the server checks is `api://$APP_ID` (the `SQUAD_MCP_AUDIENCE`
   value). Keep it consistent across the app registration, `main.bicepparam`, and the
   connector's `apiProperties.json`.
+- `SQUAD_MCP_AUDIENCE` accepts a **comma-separated list**, so one deployment can
+  serve front doors that mint tokens for different resource identifiers — for
+  example a Copilot Studio connector on `api://$APP_ID` alongside a Microsoft
+  Copilot Cowork Entra SSO auth config, whose registration generates its own
+  Application ID URI. Entries are trimmed, de-duplicated, and matched **exactly**
+  (never as a prefix or wildcard); a blank entry is dropped rather than becoming
+  an audience that matches nothing. The same value feeds the ingress
+  `allowedAudiences`, so the two layers cannot disagree. See
+  [`cowork/README.md`](../cowork/README.md) for the Cowork-side steps.
 - The **JWKS / issuer** the server trusts are your tenant's:
   - JWKS: `https://login.microsoftonline.com/$TENANT_ID/discovery/v2.0/keys`
   - Issuer: `https://login.microsoftonline.com/$TENANT_ID/v2.0`
@@ -189,6 +198,9 @@ param containerImage = '<REGISTRY>.azurecr.io/hve-squad-mcp:latest'
 param containerRegistryServer = '<REGISTRY>.azurecr.io'
 param authClientId = '<ENTRA_CLIENT_ID>'      // the APP_ID from Step 2
 param authOpenIdIssuer = 'https://login.microsoftonline.com/<ENTRA_TENANT_ID>/v2.0'
+param enableMise = false
+param miseContainerImage = '<REGISTRY>.azurecr.io/mise/mise-1p-container@sha256:<MISE_IMAGE_DIGEST>'
+param miseClientId = '<PROTECTED_RESOURCE_ENTRA_CLIENT_ID>'
 
 param squad = {
   audience: 'api://<ENTRA_CLIENT_ID>'
@@ -198,8 +210,12 @@ param squad = {
   jwksUri: 'https://login.microsoftonline.com/<ENTRA_TENANT_ID>/discovery/v2.0/keys'
   modelEndpoint: 'https://<AOAI_RESOURCE>.openai.azure.com'
   allowedModelEndpoints: 'https://<AOAI_RESOURCE>.openai.azure.com'  // SEC-3 allow-list
-  modelDeployment: '<AOAI_DEPLOYMENT>'
+  modelDeployment: 'gpt-5.6-sol'
+  modelApi: 'responses'
   modelApiVersion: '2024-10-21'
+  modelMaxOutputTokens: 32768
+  modelReasoningEffort: 'medium'
+  modelVerbosity: 'medium'
   tenantConcurrency: 4      // SEC-9 / COST-1
   tenantCostCeilingUsd: 500 // COST-2 (hard per-tenant monthly ceiling)
 }
@@ -209,9 +225,47 @@ param budgetAlertEmails = [ '<ALERT_EMAIL>' ]
 ```
 
 These map 1:1 to the server's environment contract (`SQUAD_MCP_AUDIENCE`,
-`SQUAD_MCP_ALLOWED_ORIGINS`, `SQUAD_MCP_JWKS_URI`, `SQUAD_MCP_MODEL_ENDPOINT`, …);
-the Container App sets them for you. No secret belongs in this file — the model
+`SQUAD_MCP_ALLOWED_ORIGINS`, `SQUAD_MCP_JWKS_URI`, `SQUAD_MCP_MODEL_ENDPOINT`, …).
+Current GPT-5 reasoning deployments should use `modelApi: 'responses'`;
+`modelApiVersion` is retained only for legacy Chat Completions mode. The
+`modelMaxOutputTokens` budget includes both visible output and reasoning tokens.
+For GPT-5.6 Sol, 32,768 gives the model more than Microsoft's initial 25,000-token
+reasoning/output reserve while leaving throughput headroom under the deployment's
+TPM limit. Do not set the 128,000 model maximum as the routine default: Azure's
+rate-limit estimate includes the configured maximum, even when actual output is
+shorter. Explicit medium reasoning and medium verbosity avoid the model's
+occasionally very long default response path while retaining balanced
+planning/judgment quality for synchronous Cowork tools.
+The Container App sets them for you. No secret belongs in this file — the model
 token comes from managed identity at runtime (SEC-10).
+
+### Optional: Microsoft Identity Service Essentials (MISE) Container v2
+
+Set `enableMise=true` only after an approved MISE 2.4.1+ Linux x64 image is in a
+registry the Container App identity can pull from. Pin `miseContainerImage` by
+digest (preferred) or by a source-commit-specific immutable tag. Microsoft-only
+MCR images can require ACR Artifact Sync; where the official MISE guidance permits
+a source build, pin the published release tag and do not build a moving branch.
+
+`miseClientId` identifies the **protected MCP resource** in MISE telemetry. It is
+normally the same as `authClientId`, but it must be set explicitly when ACA Easy
+Auth uses one client registration and the protected resource/S360 action tracks
+another. MISE receives the exact audiences and tenant allow-list from `squad`:
+
+- one allowed tenant uses that tenant as the authority;
+- several allowed tenants use the `common` authority plus explicit
+  `ValidTenantIds`; and
+- an empty application tenant allow-list maps to MISE's explicit `*` behavior.
+
+The application sends only Entra tokens to
+`http://127.0.0.1:5000/ValidateRequest`, including the original method, absolute
+URI, and ACA-provided rightmost sender IP required by MISE. Client-prepended
+`X-Forwarded-For` values and `X-Forwarded-Host` are not trusted. The endpoint
+configuration rejects every
+non-loopback host, other port/path, credential, query, or fragment. MISE must
+return exactly HTTP 200; timeout, redirect, non-200, or claim-decode failure is a
+401 at the application boundary. Local simple-OAuth HS256 tokens continue to use
+the local verifier and are never forwarded to MISE.
 
 ## Step 5 — build the image in ACR (real, small spend)
 
@@ -246,6 +300,9 @@ az deployment group create \
   assignment so the app identity can read secrets (SEC-10);
 - **ACA built-in Entra auth** in front of the app's own audience-bound validation
   (defense-in-depth; SEC-1); and
+- when `enableMise=true`, the **MISE Container v2 sidecar**, with `/readyz` and
+  `/healthz` probes, loopback-only application calls, and the same replica
+  lifecycle as the application; and
 - a **monthly budget** with 70 / 90 / 100% alerts (COST-2).
 
 Capture the outputs:
@@ -296,6 +353,103 @@ curl -sS "https://<mcpFqdn>/mcp" \
 A successful response returns `serverInfo.name = hve-squad-mcp` and an
 `Mcp-Session-Id` header. A `401` means the token audience/issuer is not accepted;
 a `403 origin_not_allowed` means the `Origin` is not on the allow-list.
+
+For MISE, also verify that every live replica reports both `hve-squad-mcp` and
+`mise` ready, that the sidecar fetched signing-key metadata, and that real
+authenticated traffic reached `/ValidateRequest`. Keep the previous application
+image reference. In this template's single-revision mode, rollback means
+redeploying that known-good image with `enableMise=false`; do not weaken auth or
+add a fallback from a MISE rejection to the legacy JWKS verifier. MISE/S360
+telemetry normally needs 2–3 days after every validating replica emits compliant
+signals before the KPI auto-resolves.
+
+### Optional: zero-configuration OAuth (no Entra client registration)
+
+The default Entra resource-server path above remains the recommended path for
+Copilot Studio and governed Microsoft 365 clients. For a generic desktop or CLI
+MCP client that cannot register an Entra application, set
+`enableSimpleOAuth=true`. The server then becomes an additional OAuth issuer:
+
+- RFC 9728 protected-resource metadata and `WWW-Authenticate` discovery;
+- RFC 8414 authorization-server metadata;
+- RFC 7591 dynamic public-client registration;
+- authorization code flow with mandatory PKCE S256;
+- loopback redirects only (`localhost`, `127.0.0.1`, or `[::1]`);
+- operator-issued, single-use browser codes;
+- short-lived signed access tokens and one-time rotating refresh tokens.
+
+This path does **not** weaken or replace Entra. Entra bearer tokens continue to
+work, and `/admin/approve` remains behind Container Apps Easy Auth plus the
+distinct `Squad.Operate` role. The local issuer cannot grant `Squad.Operate`.
+
+1. Generate a 32-byte signing key. Keep the current key first and retain the prior
+   key after rotation until existing client registrations and refresh grants have
+   expired. The deployment uses a versionless Key Vault reference, so Container
+   Apps refreshes the secret and restarts active replicas after rotation:
+
+   ```powershell
+   $oauthKey = [Convert]::ToBase64String(
+     [Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
+   )
+   ```
+
+2. Set these Bicep parameters and deploy:
+
+   ```bicep
+   param enableSimpleOAuth = true
+   param simpleOAuthSigningKeysBase64 = '<BASE64_32_BYTE_KEY>'
+   // Optional: restrict the ordinary tool scopes a local token may receive.
+   param simpleOAuthAllowedScopes = 'Squad.Research,Squad.Plan,Squad.Review,Squad.Architect,Squad.Run,Squad.Memory,Squad.Backlog'
+   ```
+
+   The template stores the signing-key value in Key Vault, creates the
+   `squadoauth` Azure Table, grants the app identity Table access, and excludes
+   only `/mcp` plus the public OAuth/discovery routes from Easy Auth. Application
+   JWT verification remains the authorization boundary on `/mcp`.
+
+3. Issue a code from **inside the running container**. There is deliberately no
+   remote code-issuance endpoint:
+
+   ```bash
+   az containerapp exec \
+     --resource-group "$RESOURCE_GROUP" \
+     --name "${NAME_PREFIX:-squadmcp}-app" \
+     --command "node dist/src/oauth-cli.js issue-code \
+       --tenant-id <TENANT_PARTITION_UUID> \
+       --subject <STABLE_USER_ID> \
+       --scopes Squad.Run,Squad.Architect,Squad.Memory,Squad.Backlog \
+       --ttl-seconds 600"
+   ```
+
+   `tenant-id` is the tenant partition the resulting token may address and must be
+   present in `SQUAD_MCP_ALLOWED_TENANTS` when that allow-list is configured. The
+   CLI prints the browser code once; Azure Table stores only its SHA-256 index and
+   encrypted payload.
+
+   Issuing a code performs a bounded expired-grant sweep. Operators can also run
+   cleanup explicitly (for example from a scheduled Container Apps Job):
+
+   ```bash
+   node dist/src/oauth-cli.js sweep --limit 500
+   ```
+
+4. Give the user the code and add `https://<mcpFqdn>/mcp` to an OAuth-capable MCP
+   client. The client discovers, registers, and opens `/oauth/authorize`; the user
+   enters the code. No Entra application id or client secret is supplied to the
+   MCP client.
+
+5. Verify discovery without a credential:
+
+   ```bash
+   curl -sS "https://<mcpFqdn>/.well-known/oauth-protected-resource/mcp"
+   curl -sS "https://<mcpFqdn>/.well-known/oauth-authorization-server"
+   ```
+
+Security properties: login and authorization codes are one-time; refresh tokens
+rotate on every use; grant payloads are encrypted at rest; client registrations
+and authorization forms are signed; access tokens last no more than one hour;
+redirects are loopback-only; PKCE S256 is mandatory; client secrets and
+anonymous/self-service token issuance are unsupported.
 
 ## Step 8 — import the connector into Copilot Studio (PROD-1)
 

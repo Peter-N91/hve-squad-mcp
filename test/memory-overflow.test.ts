@@ -170,3 +170,21 @@ test("overflow list rehydrates pointer entries and passes small entries through"
     cleanup();
   }
 });
+
+test("updated-since listing rehydrates only recent overflow pointers", async () => {
+  const { store, blob, cleanup } = buildStack(128);
+  try {
+    const oldWrite = await store.write("tenant-a", "alpha", "old", "O".repeat(5000));
+    assert.ok(oldWrite.ok);
+    const cutoff = oldWrite.ok ? oldWrite.entry.updatedAt + 1 : Date.now();
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    await store.write("tenant-a", "alpha", "new", "N".repeat(5000));
+    blob.gets = 0;
+
+    const listed = await store.listUpdatedSince("tenant-a", "alpha", cutoff);
+    assert.deepEqual(listed.map((entry) => entry.path), ["new"]);
+    assert.equal(blob.gets, 1, "the old overflow blob is not rehydrated");
+  } finally {
+    cleanup();
+  }
+});

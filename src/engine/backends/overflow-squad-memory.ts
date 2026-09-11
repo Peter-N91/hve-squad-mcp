@@ -136,6 +136,19 @@ export class OverflowSquadMemoryStore implements SquadMemoryStore {
     return Promise.all(entries.map((entry) => this.rehydrateEntry(entry)));
   }
 
+  async listUpdatedSince(
+    tenantId: string,
+    project: string,
+    updatedAt: number,
+  ): Promise<SquadMemoryEntry[]> {
+    const entries = this.primary.listUpdatedSince
+      ? await this.primary.listUpdatedSince(tenantId, project, updatedAt)
+      : (await this.primary.list(tenantId, project)).filter(
+          (entry) => entry.updatedAt >= updatedAt,
+        );
+    return Promise.all(entries.map((entry) => this.rehydrateEntry(entry)));
+  }
+
   async read(tenantId: string, project: string, path: string): Promise<SquadMemoryEntry | undefined> {
     const entry = await this.primary.read(tenantId, project, path);
     return entry ? this.rehydrateEntry(entry) : undefined;

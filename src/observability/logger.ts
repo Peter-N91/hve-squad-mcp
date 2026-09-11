@@ -30,6 +30,8 @@ export interface LoggerOptions {
   sink?: LogSink;
   /** A name prefixed to every line. */
   name?: string;
+  /** Maximum exact secrets retained for redaction (default 256). */
+  maxSecrets?: number;
 }
 
 /**
@@ -42,11 +44,13 @@ export class RedactingLogger {
   private readonly level: LogLevel;
   private readonly sink: LogSink;
   private readonly name: string;
+  private readonly maxSecrets: number;
 
   constructor(options: LoggerOptions = {}) {
     this.level = options.level ?? "info";
     this.sink = options.sink ?? ((line) => process.stderr.write(`${line}\n`));
     this.name = options.name ?? "hve-squad-mcp";
+    this.maxSecrets = Math.max(1, Math.floor(options.maxSecrets ?? 256));
   }
 
   /**
@@ -56,7 +60,17 @@ export class RedactingLogger {
    */
   registerSecret(value: string | undefined | null): void {
     if (typeof value === "string" && value.length >= 8) {
+      // Keep insertion order as an LRU approximation. The cap prevents an
+      // attacker from growing redaction work without bound with unique tokens.
+      this.secrets.delete(value);
       this.secrets.add(value);
+      while (this.secrets.size > this.maxSecrets) {
+        const oldest = this.secrets.values().next().value as string | undefined;
+        if (oldest === undefined) {
+          break;
+        }
+        this.secrets.delete(oldest);
+      }
     }
   }
 
