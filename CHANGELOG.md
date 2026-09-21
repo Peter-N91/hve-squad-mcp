@@ -10,6 +10,30 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
+## [0.8.0] - 2026-09-21
+
+> Built against `Peter-N91/hve-squad@0.17.0` (see `host/cast/package-pin.json`).
+
+### Changed
+
+- **The bundled cast lagged behind HVE Squad 0.17.0.** Re-pinned and regenerated
+  the cast from the immutable `v0.17.0` tag. The MCP bundle now carries the
+  renamed data science and engineering surfaces, drops the retired `RPI
+  Planner`, `Code Review PR`, and `Supply Chain Reviewer` agents, and inherits
+  the release's conservative cost preflight, sequential ceiling enforcement,
+  roster updates, and refreshed squad operating instructions
+  (`host/cast/package-pin.json`, `host/cast/.github/`, `host/cast/manifest.json`).
+
+### Consumer install
+
+Pin to this version:
+
+```powershell
+npm install "Peter-N91/hve-squad-mcp#v0.8.0"
+```
+
+[0.8.0]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.8.0
+
 ## [0.7.2] - 2026-08-25
 
 > Built against `Peter-N91/hve-squad@0.16.2` (see `host/cast/package-pin.json`).
