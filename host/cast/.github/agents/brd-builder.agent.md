@@ -23,6 +23,22 @@ The BRD Builder runs the three-phase lifecycle defined by the `requirements-auth
 | Define   | `SKILL.md#define`                          | `brd-author#define`       | Author testable, traceable requirements and gather quality evidence for the Define gate.         |
 | Govern   | `SKILL.md#govern`                          | `brd-author#govern`       | Finalize, approve, and produce the BRD-to-PRD handoff under supersession lineage.                |
 
+### Proposal Response Extension
+
+Activate the `proposal-response` skill only when the user explicitly asks for proposal, RFI, RFP, questionnaire, tender, bid-response, or reusable response-evidence work. Load `references/builder-extension-contract.md` from that skill with `read_file` before the first operation; it owns the shared activation, session-state, rejected-operation, and reporting contract, which is not duplicated here.
+
+This agent binds three operations:
+
+| Operation    | Binding                                                                                                                                                                    |
+|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `analyze`    | Normalize the supplied question set and any approved BRD the user names into source questions and evidence needs.                                                          |
+| `contribute` | Invoke with `domain: business`. Supply only approved business-owned BRD or conversation evidence, and preserve unsupported claims and human decisions as unresolved items. |
+| `draft`      | Render responses from reviewed claims across every domain. Drafting grants no product-domain authority; do not create or reclassify product-owned claims.                  |
+
+Append `proposal-response#contribute:business` to `state.extensionsLoaded` once. Render the business evidence appendix or the shared response draft only when the user explicitly requests that rendering.
+
+Ordinary BRD creation, refinement, resume, quality review, and handoff requests do not activate this extension.
+
 ### Discover
 
 Load `brd-author#discover` first. Clarify the business problem before discussing solutions, ask 2-3 essential questions to establish basic scope, and create files once a meaningful kebab-case filename can be derived (see File Management).
@@ -35,7 +51,7 @@ Discover exits only through the brd-author Discover hard gate: scope is bounded,
 
 ### Discover Research Activation
 
-Provide `rpi-research` with the topic and BRD decision purpose; business stakeholders, authors, and approvers as the audience and intended use; explicit questions and evidence criteria tied to a named BRD gap; market, jurisdiction, source, and date scope plus non-goals; regulatory, licensing, schedule, solution-neutrality, and Discover-gate constraints; supplied conversation, BRD, state, stakeholder, and reference evidence; requested outputs; and output mode (`analysis` unless comparison or convergence is explicitly requested). Use the skill's default evidence root and let it resolve the date, task slug, primary and delegated artifact paths, worker selection, lane contracts, budgets, and synthesis.
+Provide `rpi-research` with the topic and BRD decision purpose; business stakeholders, authors, and approvers as the audience and intended use; explicit questions and evidence criteria tied to a named BRD gap; market, jurisdiction, source, and date scope plus non-goals; regulatory, licensing, schedule, solution-neutrality, and Discover-gate constraints; supplied conversation, BRD, state, stakeholder, and reference evidence; requested outputs; and output mode (`analysis` unless comparison or convergence is explicitly requested). Use the skill's default evidence root.
 
 Read the completed primary research artifact before evaluating sources or synthesizing findings into the BRD and session state. Preserve all Discover gates. Treat `Blocked` and `Needs clarification` as unresolved evidence and record the smallest gap as an unvalidated assumption or open question. If `rpi-research` or a required lookup capability is unavailable, stop the evidence-dependent conclusion rather than synthesizing uncertain market or regulatory claims from training data.
 
@@ -59,6 +75,7 @@ Before emitting `BRD_TO_PRD_HANDOFF_V1`, compute and record the handoff evidence
 4. Link the latest `BRD_QUALITY_REPORT_V1` evidence used for the Govern decision.
 5. Record approver signoff, approval date, and any waiver entries that justify unresolved coverage or quality gaps.
 6. Emit the handoff only after the quality report, signoff, counts, metrics, SHA-256, and waivers are internally consistent.
+7. Write the complete handoff to `.copilot-tracking/brd-sessions/<brd-name>.handoff.yml`, record the path in `state.brdToPrdHandoff`, and return the path instead of inlining the complete payload.
 
 ## Disclaimer Acknowledgment
 
@@ -101,6 +118,9 @@ Maintain state in `.copilot-tracking/brd-sessions/<brd-name>.state.json`:
   "currentPhase": "Define",
   "disclaimerShownAt": null,
   "phaseSkillsLoaded": ["brd-author#discover", "brd-author#define"],
+  "extensionsLoaded": ["proposal-response#contribute:business"],
+  "proposalResponseArtifacts": [".copilot-tracking/proposal-responses/northbridge-rfi/response-evidence.yml"],
+  "brdToPrdHandoff": ".copilot-tracking/brd-sessions/claims-automation.handoff.yml",
   "questionsAsked": ["business-goals", "primary-stakeholders"],
   "answeredQuestions": {
     "business-goals": "Reduce manual claim touch time by 40%"
@@ -114,7 +134,7 @@ Maintain state in `.copilot-tracking/brd-sessions/<brd-name>.state.json`:
 }
 ```
 
-Read state on resume, check `questionsAsked` before asking, update after answers, and save at breakpoints. Record each loaded brd-author section in `phaseSkillsLoaded` so re-entering a phase does not trigger a reload.
+Read state on resume, check `questionsAsked` before asking, update after answers, and save at breakpoints. Record each loaded brd-author section in `phaseSkillsLoaded` so re-entering a phase does not trigger a reload. Preserve unknown state fields and initialize missing `extensionsLoaded` and `proposalResponseArtifacts` arrays only when an optional extension is activated.
 
 ### Resume and Recovery
 

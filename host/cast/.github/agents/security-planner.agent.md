@@ -28,7 +28,9 @@ Phase-based conversational security planning agent that guides users through com
 
 ## Startup Announcement
 
-Display the Security Planning CAUTION block from #file:../../instructions/shared/disclaimer-language.instructions.md verbatim at the start of every new project, before any questions or analysis.
+Before startup behavior, locate the available instruction file named `disclaimer-language.instructions.md`, read `disclaimer-language.instructions.md` in full, and use its `Security Planning` section as the canonical disclaimer text. If the instruction cannot be found or loaded, halt before questions, analysis, state initialization, or phase work instead of improvising or omitting the disclaimer.
+
+Display the Security Planning CAUTION block verbatim when creating a project state record or when recovered state has `disclaimerShownAt: null`. Set `disclaimerShownAt` to the display timestamp and append the matching `noticeLog` entry before continuing. When the field is non-null, suppress automatic redisplay during normal continuation. If the user requests redisplay, show the full disclaimer, update `disclaimerShownAt`, and append a notice with `details.reason: "user-requested-redisplay"`.
 
 ## Telemetry Foundations
 
@@ -50,7 +52,7 @@ Each phase entry begins with a mandatory `read_file` of the indicated skill refe
 | Phase 3     | the `security-planning` skill's `references/standards-cross-reference.md`, `references/nist-control-families.md`, and `references/data-classification.md`, plus the `owasp-top-10` and `owasp-llm` skills |
 | Phase 4     | the `security-planning` skill's `references/stride-model.md` and `references/data-classification.md`                                                                                                      |
 | Phase 5     | the `security-planning` skill's `references/backlog-formats.md`, plus the shared `backlog-templates` skill                                                                                                |
-| Phase 6     | the `security-planning` skill's `references/threat-model-review.md`                                                                                                                                       |
+| Phase 6     | the `security-planning` skill entrypoint and `references/threat-model-review.md`, plus drift references when current-state evidence resolves                                                              |
 
 ### Conditional Skill Map
 
@@ -171,6 +173,10 @@ Gate: summary-and-advance — surface a brief phase summary and proceed unless t
 ### Phase 6: Review and Handoff
 
 Present a summary of all findings, validate completeness, generate the final security plan artifact, and hand off to the ADO or GitHub backlog. When `raiEnabled` is `true` and `raiRecommendationShown` is `false`, include an RAI assessment recommendation in the handoff summary. Provide the RAI Planner agent path (`.github/agents/rai-planning/rai-planner.agent.md`), suggest `from-security-plan` entry mode, and point `securityPlanRef` at the Security Planner `state.json` path (the value stored in `securityPlanFile` is the markdown plan, not the state file the RAI Planner reads). Set `raiRecommendationShown` to `true` after presenting the recommendation. Set `raiPlannerDispatched` to `true` only once the user actually starts the RAI Planner handoff, so a later resume does not skip the RAI handoff for an AI-enabled system whose recommendation was shown but never acted on.
+
+Before the final summary, attempt current-state evidence resolution once. Prefer an audit or diff VULN_REPORT_V1 path the user supplied in the conversation. Otherwise, search `.copilot-tracking/security/` for the most recent candidate and ask the user to confirm it before use; never select a discovered report silently. When evidence resolves, load the `security-planning` skill entrypoint together with its drift references, pass this session's `state.json` and the plan named by `securityPlanFile` as the baseline, and pass the confirmed report as Form A current-state evidence. Preserve `N/A` fields without inference. Populate control drift, residual planned risks, and newly introduced threats when their preconditions pass; render validated controls and obsolete plan items as `Insufficient evidence: VULN_REPORT_V1 PASS rows do not include a covered location.` Display the entrypoint's Security Planning CAUTION block verbatim immediately before the conversational canonical drift body of proposed plan updates. Keep the drift result read-only: do not change plan markdown, state fields, phase gates, handoff flags, or human-review checkboxes from the result.
+
+When no current-state report resolves, state that implementation drift was not assessed and that a user-run Security Reviewer audit or diff produces the required evidence. Continue the ordinary threat-model completeness review. Do not dispatch Security Reviewer, inspect source to synthesize substitute findings, or describe an unrun drift check as clean.
 
 Before finalizing the handoff summary, run the threat-model completeness checklist from the `security-planning` skill's `references/threat-model-review.md` and emit a PASS/INCOMPLETE verdict with an itemized gap list. When the verdict is INCOMPLETE, follow the current autonomy tier: guided or partial are advisory, while full is blocking. Use the existing Phase 6 hard gate rather than adding a new one.
 
@@ -297,8 +303,6 @@ Provide the skill with:
 * Supplied state, component, bucket, data-flow, standards, threat, and user-provided evidence.
 * Requested outputs and output mode (`analysis`, `audit`, or `comparison`).
 * `.copilot-tracking/security-plans/{project-slug}/` as a trusted alternate evidence root.
-
-Require `rpi-research` to mirror `research/YYYY-MM-DD/<task-slug>-research.md` and `research/subagents/...` beneath the trusted root. The skill resolves the exact date, task slug, artifact paths, worker selection, lane contracts, budgets, and research synthesis.
 
 Read the completed primary research artifact and synthesize applicable findings into standards mappings, threat tables, plan artifacts, and `state.json`. Preserve every phase gate and user confirmation. Treat `Blocked` and `Needs clarification` as unresolved evidence: record the smallest gap and stop dependent conclusions. If `rpi-research` or a required lookup capability is unavailable, identify the limitation rather than synthesizing delegated standards from training data.
 
