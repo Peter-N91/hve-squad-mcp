@@ -22,6 +22,7 @@ import { GateKeeper, TenantQuotaTracker } from "../../src/engine/gates.js";
 import { SQUAD_RESEARCHER_CHARTER } from "../../src/engine/embedded-roles.js";
 import {
   composeEmbeddedPrompt,
+  MAX_UNTRUSTED_SECTION_CHARS,
   UNTRUSTED_CLOSE,
   UNTRUSTED_OPEN,
 } from "../../src/engine/embedded-prompt.js";
@@ -113,6 +114,25 @@ test("SEC-5: composeEmbeddedPrompt keeps system == authority and never concatena
   assert.match(composed.messages[0].content, /UNTRUSTED INPUT/);
   assert.match(composed.messages[0].content, /Do NOT follow any/);
   assert.match(composed.messages[0].content, /authority come ONLY from the system prompt/);
+});
+
+test("SEC-5: oversized later-turn context is bounded while preserving its beginning and end", () => {
+  const context =
+    "CONTEXT-BEGIN\n" +
+    "x".repeat(MAX_UNTRUSTED_SECTION_CHARS + 10_000) +
+    "\nCONTEXT-END";
+  const composed = composeEmbeddedPrompt({
+    systemAuthority: SQUAD_RESEARCHER_CHARTER,
+    request: "Use the relevant accepted decisions.",
+    context,
+  });
+
+  const userMessage = composed.messages[0].content;
+  assert.ok(userMessage.length < context.length);
+  assert.match(userMessage, /CONTEXT-BEGIN/);
+  assert.match(userMessage, /CONTEXT-END/);
+  assert.match(userMessage, /middle omitted by the server/);
+  assert.equal(composed.system, SQUAD_RESEARCHER_CHARTER);
 });
 
 test("SEC-5: tool scope is fixed per tool and never derived from caller content", () => {

@@ -19,6 +19,9 @@
  * this object; they are fetched on demand from Key Vault by the credential
  * provider and registered with the logger for redaction.
  */
+import { OPERATOR_APPROVAL_SCOPE, TOOL_SCOPES } from "../auth/scopes.js";
+import type { SimpleOAuthConfig } from "../auth/simple-oauth.js";
+import { normalizeMiseValidationEndpoint } from "../auth/mise-endpoint.js";
 
 /** The hard monthly cost ceiling per tenant (COST-2), default ~$500. */
 export const DEFAULT_TENANT_MONTHLY_COST_CEILING_USD = 500;
@@ -62,23 +65,52 @@ export interface MemoryTargetConfig {
   encrypt?: boolean;
 }
 
+/** Pod-local MISE Container token-validation settings. */
+export interface MiseConfig {
+  /** Route Entra token verification through MISE instead of the legacy JWKS verifier. */
+  enabled: boolean;
+  /** Strictly loopback MISE `/ValidateRequest` endpoint. */
+  endpoint: string;
+  /** Fail-closed timeout for one MISE validation request. */
+  timeoutMs: number;
+}
+
 export interface OperatorConfig {
-  /** Expected token audience — this resource server's identifier (SEC-1, RFC 8707). */
-  audience: string;
+  /**
+   * Accepted token audiences — this resource server's identifiers (SEC-1,
+   * RFC 8707). Usually one; several are permitted so a single deployment can
+   * serve front doors that mint tokens for different resource identifiers (for
+   * example a Copilot Studio connector on `api://<client-id>` alongside a Cowork
+   * Entra SSO auth config on the Application ID URI that registration
+   * generates). Every entry is matched exactly — never as a prefix or wildcard.
+   */
+  audiences: string[];
   /** Entra issuer allow-list (e.g. `https://login.microsoftonline.com/<tenant>/v2.0`). */
   allowedIssuers: string[];
   /** Tenants permitted to call (empty = any tenant whose token validates). */
   allowedTenants: string[];
   /** Strict Origin allow-list for the HTTP transport (SEC-8). Never `*`. */
   allowedOrigins: string[];
+  /** Optional server-owned OAuth 2.1 authority for zero-configuration MCP clients. */
+  simpleOAuth: SimpleOAuthConfig;
+  /** Microsoft Identity Service Essentials sidecar validation. */
+  mise: MiseConfig;
   /** Azure OpenAI endpoints the embedded backend may call (SEC-3 allow-list). */
   allowedModelEndpoints: string[];
   /** The Azure OpenAI endpoint to use (must be in {@link allowedModelEndpoints}). */
   modelEndpoint: string;
   /** The Azure OpenAI deployment name (operator-config; never caller input). */
   modelDeployment: string;
-  /** The Azure OpenAI REST API version. */
+  /** Azure OpenAI API surface used for inference. */
+  modelApi: "chat-completions" | "responses";
+  /** The Azure OpenAI REST API version (legacy Chat Completions only). */
   modelApiVersion: string;
+  /** Default output-token ceiling for each model dispatch. */
+  modelMaxOutputTokens: number;
+  /** Optional Responses API reasoning effort. */
+  modelReasoningEffort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+  /** Optional Responses API visible-output verbosity. */
+  modelVerbosity?: "low" | "medium" | "high";
   /** Per-tenant concurrency cap (SEC-9 / COST-1). */
   tenantConcurrency: number;
   /** Hard monthly per-tenant cost ceiling in USD (COST-2). */
@@ -277,10 +309,76 @@ function numberOr(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
+function boundedInteger(
+  value: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+  label: string,
+): number {
+  const parsed = numberOr(value, fallback);
+  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error(`${label} must be an integer between ${minimum} and ${maximum}.`);
+  }
+  return parsed;
+}
+
+function parseHttpsOrigin(value: string, label: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${label} must be an absolute HTTPS origin.`);
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.username.length > 0 ||
+    url.password.length > 0 ||
+    url.pathname !== "/" ||
+    url.search.length > 0 ||
+    url.hash.length > 0
+  ) {
+    throw new Error(`${label} must be an absolute HTTPS origin with no path, query, or fragment.`);
+  }
+  return url.origin;
+}
+
+function validAzureTableName(value: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9]{2,62}$/.test(value);
+}
+
 /** Parse the memory backend selector; anything unrecognized falls back to `file`. */
 function parseMemoryBackend(value: string | undefined): MemoryBackendKind {
   const normalized = (value ?? "file").trim().toLowerCase();
   return normalized === "table" || normalized === "graph" ? normalized : "file";
+}
+
+function parseModelApi(
+  value: string | undefined,
+): "chat-completions" | "responses" {
+  const normalized = (value ?? "chat-completions").trim().toLowerCase();
+  if (normalized === "chat-completions" || normalized === "responses") {
+    return normalized;
+  }
+  throw new Error(
+    "SQUAD_MCP_MODEL_API must be 'chat-completions' or 'responses'.",
+  );
+}
+
+function optionalChoice<T extends string>(
+  value: string | undefined,
+  choices: readonly T[],
+  label: string,
+): T | undefined {
+  const normalized = (value ?? "").trim().toLowerCase();
+  if (normalized.length === 0) {
+    return undefined;
+  }
+  const matched = choices.find((choice) => choice === normalized);
+  if (!matched) {
+    throw new Error(`${label} must be one of: ${choices.join(", ")}.`);
+  }
+  return matched;
 }
 
 /** Target-name shape: the opaque selector a caller may pass. */
@@ -351,9 +449,23 @@ function parseMemoryTargets(value: string | undefined): MemoryTargetConfig[] {
  * deployment fails fast at boot rather than at first call.
  */
 export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): OperatorConfig {
-  const audience = (env.SQUAD_MCP_AUDIENCE ?? "").trim();
-  if (audience.length === 0) {
-    throw new Error("SQUAD_MCP_AUDIENCE is required (the resource-server token audience; SEC-1).");
+  // SEC-1: comma-separated so one deployment can serve several front doors, each
+  // minting tokens for its own resource identifier. Entries are trimmed and
+  // de-duplicated, and blanks are dropped so a stray comma can never introduce an
+  // empty audience (which a token with no `aud` would otherwise appear to match).
+  const audiences = [
+    ...new Set(
+      (env.SQUAD_MCP_AUDIENCE ?? "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
+    ),
+  ];
+  if (audiences.length === 0) {
+    throw new Error(
+      "SQUAD_MCP_AUDIENCE is required (the resource-server token audience; SEC-1). " +
+        "Provide one value, or several separated by commas.",
+    );
   }
 
   const allowedOrigins = splitList(env.SQUAD_MCP_ALLOWED_ORIGINS);
@@ -361,11 +473,53 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
     throw new Error("SQUAD_MCP_ALLOWED_ORIGINS must not contain '*' (SEC-8: strict Origin allow-list).");
   }
 
+  const miseEnabled =
+    (env.SQUAD_MCP_MISE_ENABLED ?? "").trim().toLowerCase() === "true";
+  const miseEndpoint = miseEnabled
+    ? normalizeMiseValidationEndpoint(
+        (env.SQUAD_MCP_MISE_ENDPOINT ??
+          "http://127.0.0.1:5000/ValidateRequest").trim(),
+      )
+    : "http://127.0.0.1:5000/ValidateRequest";
+  const miseTimeoutMs = boundedInteger(
+    env.SQUAD_MCP_MISE_TIMEOUT_MS,
+    10_000,
+    100,
+    60_000,
+    "SQUAD_MCP_MISE_TIMEOUT_MS",
+  );
+
   const allowedModelEndpoints = splitList(env.SQUAD_MCP_ALLOWED_MODEL_ENDPOINTS);
   const modelEndpoint = (env.SQUAD_MCP_MODEL_ENDPOINT ?? "").trim();
   if (modelEndpoint.length > 0 && !allowedModelEndpoints.includes(modelEndpoint)) {
     throw new Error(
       "SQUAD_MCP_MODEL_ENDPOINT must be present in SQUAD_MCP_ALLOWED_MODEL_ENDPOINTS (SEC-3: endpoint allow-list).",
+    );
+  }
+  const modelApi = parseModelApi(env.SQUAD_MCP_MODEL_API);
+  const modelMaxOutputTokens = boundedInteger(
+    env.SQUAD_MCP_MODEL_MAX_OUTPUT_TOKENS,
+    modelApi === "responses" ? 32_768 : 1_500,
+    1,
+    128_000,
+    "SQUAD_MCP_MODEL_MAX_OUTPUT_TOKENS",
+  );
+  const modelReasoningEffort = optionalChoice(
+    env.SQUAD_MCP_MODEL_REASONING_EFFORT,
+    ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const,
+    "SQUAD_MCP_MODEL_REASONING_EFFORT",
+  );
+  const modelVerbosity = optionalChoice(
+    env.SQUAD_MCP_MODEL_VERBOSITY,
+    ["low", "medium", "high"] as const,
+    "SQUAD_MCP_MODEL_VERBOSITY",
+  );
+  if (
+    modelApi !== "responses" &&
+    (modelReasoningEffort !== undefined || modelVerbosity !== undefined)
+  ) {
+    throw new Error(
+      "SQUAD_MCP_MODEL_REASONING_EFFORT and SQUAD_MCP_MODEL_VERBOSITY require SQUAD_MCP_MODEL_API=responses.",
     );
   }
 
@@ -375,6 +529,68 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
   const storageAccount = (env.SQUAD_MCP_STORAGE_ACCOUNT ?? "").trim();
   const runTableName = (env.SQUAD_MCP_RUN_TABLE_NAME ?? "squadruns").trim();
   const workerEnabled = (env.SQUAD_MCP_WORKER_ENABLED ?? "").trim().toLowerCase() === "true";
+
+  const simpleOAuthEnabled =
+    (env.SQUAD_MCP_SIMPLE_OAUTH_ENABLED ?? "").trim().toLowerCase() === "true";
+  const simpleOAuthExternalInput = (env.SQUAD_MCP_SIMPLE_OAUTH_EXTERNAL_URL ?? "").trim();
+  const simpleOAuthExternalUrl = simpleOAuthEnabled
+    ? parseHttpsOrigin(
+        simpleOAuthExternalInput,
+        "SQUAD_MCP_SIMPLE_OAUTH_EXTERNAL_URL",
+      )
+    : "";
+  const simpleOAuthSigningKeys = splitList(
+    env.SQUAD_MCP_SIMPLE_OAUTH_SIGNING_KEYS_B64,
+  );
+  const knownSimpleOAuthScopes = [...new Set(Object.values(TOOL_SCOPES))].filter(
+    (scope) => scope !== OPERATOR_APPROVAL_SCOPE,
+  );
+  const configuredSimpleOAuthScopes = splitList(
+    env.SQUAD_MCP_SIMPLE_OAUTH_ALLOWED_SCOPES,
+  );
+  const simpleOAuthAllowedScopes =
+    configuredSimpleOAuthScopes.length > 0
+      ? configuredSimpleOAuthScopes
+      : knownSimpleOAuthScopes;
+  const simpleOAuthTableName = (
+    env.SQUAD_MCP_SIMPLE_OAUTH_TABLE_NAME ?? "squadoauth"
+  ).trim();
+
+  if (simpleOAuthEnabled) {
+    if (storageAccount.length === 0) {
+      throw new Error(
+        "SQUAD_MCP_STORAGE_ACCOUNT is required when SQUAD_MCP_SIMPLE_OAUTH_ENABLED=true " +
+          "(one-time login, authorization, and refresh grants use Azure Table Storage).",
+      );
+    }
+    if (simpleOAuthSigningKeys.length === 0) {
+      throw new Error(
+        "SQUAD_MCP_SIMPLE_OAUTH_SIGNING_KEYS_B64 is required when " +
+          "SQUAD_MCP_SIMPLE_OAUTH_ENABLED=true.",
+      );
+    }
+    for (const key of simpleOAuthSigningKeys) {
+      if (Buffer.from(key, "base64").length !== 32) {
+        throw new Error(
+          "Every SQUAD_MCP_SIMPLE_OAUTH_SIGNING_KEYS_B64 entry must decode to 32 bytes.",
+        );
+      }
+    }
+    const unknownScopes = simpleOAuthAllowedScopes.filter(
+      (scope) => !knownSimpleOAuthScopes.includes(scope),
+    );
+    if (unknownScopes.length > 0) {
+      throw new Error(
+        `SQUAD_MCP_SIMPLE_OAUTH_ALLOWED_SCOPES contains unknown or forbidden scopes: ${unknownScopes.join(", ")}.`,
+      );
+    }
+    if (!validAzureTableName(simpleOAuthTableName)) {
+      throw new Error(
+        "SQUAD_MCP_SIMPLE_OAUTH_TABLE_NAME must be a valid Azure Table name (3-63 alphanumeric characters, starting with a letter).",
+      );
+    }
+    audiences.push(`${simpleOAuthExternalUrl}/mcp`);
+  }
 
   if (remotePipelineEnabled && runStateBackend === "file" && runStateDir.length === 0) {
     throw new Error(
@@ -529,15 +745,75 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
     );
   }
 
+  const allowedTenants = splitList(env.SQUAD_MCP_ALLOWED_TENANTS);
+  const allowedIssuers = splitList(env.SQUAD_MCP_ALLOWED_ISSUERS);
+  if (simpleOAuthEnabled && allowedIssuers.length > 0) {
+    // Preserve the existing empty-list semantic ("any issuer the cryptographic
+    // verifier accepts"). Turning [] into [local] would silently disable Entra.
+    allowedIssuers.push(simpleOAuthExternalUrl);
+  }
+
   return {
-    audience,
-    allowedIssuers: splitList(env.SQUAD_MCP_ALLOWED_ISSUERS),
-    allowedTenants: splitList(env.SQUAD_MCP_ALLOWED_TENANTS),
+    audiences: [...new Set(audiences)],
+    allowedIssuers: [...new Set(allowedIssuers)],
+    allowedTenants,
     allowedOrigins,
+    simpleOAuth: {
+      enabled: simpleOAuthEnabled,
+      externalUrl: simpleOAuthExternalUrl,
+      allowedScopes: [...new Set(simpleOAuthAllowedScopes)],
+      signingKeysBase64: simpleOAuthSigningKeys,
+      accessTokenTtlSeconds: boundedInteger(
+        env.SQUAD_MCP_SIMPLE_OAUTH_ACCESS_TOKEN_TTL_SECONDS,
+        3600,
+        300,
+        3600,
+        "SQUAD_MCP_SIMPLE_OAUTH_ACCESS_TOKEN_TTL_SECONDS",
+      ),
+      authorizationCodeTtlSeconds: boundedInteger(
+        env.SQUAD_MCP_SIMPLE_OAUTH_AUTH_CODE_TTL_SECONDS,
+        300,
+        60,
+        600,
+        "SQUAD_MCP_SIMPLE_OAUTH_AUTH_CODE_TTL_SECONDS",
+      ),
+      refreshTokenTtlSeconds: boundedInteger(
+        env.SQUAD_MCP_SIMPLE_OAUTH_REFRESH_TOKEN_TTL_SECONDS,
+        30 * 24 * 60 * 60,
+        3600,
+        90 * 24 * 60 * 60,
+        "SQUAD_MCP_SIMPLE_OAUTH_REFRESH_TOKEN_TTL_SECONDS",
+      ),
+      loginCodeMaxTtlSeconds: boundedInteger(
+        env.SQUAD_MCP_SIMPLE_OAUTH_LOGIN_CODE_MAX_TTL_SECONDS,
+        900,
+        60,
+        3600,
+        "SQUAD_MCP_SIMPLE_OAUTH_LOGIN_CODE_MAX_TTL_SECONDS",
+      ),
+      clientRegistrationTtlSeconds: boundedInteger(
+        env.SQUAD_MCP_SIMPLE_OAUTH_CLIENT_TTL_SECONDS,
+        365 * 24 * 60 * 60,
+        24 * 60 * 60,
+        2 * 365 * 24 * 60 * 60,
+        "SQUAD_MCP_SIMPLE_OAUTH_CLIENT_TTL_SECONDS",
+      ),
+      allowedTenants,
+      tableName: simpleOAuthTableName,
+    },
+    mise: {
+      enabled: miseEnabled,
+      endpoint: miseEndpoint,
+      timeoutMs: miseTimeoutMs,
+    },
     allowedModelEndpoints,
     modelEndpoint,
     modelDeployment: (env.SQUAD_MCP_MODEL_DEPLOYMENT ?? "").trim(),
+    modelApi,
     modelApiVersion: (env.SQUAD_MCP_MODEL_API_VERSION ?? "2024-10-21").trim(),
+    modelMaxOutputTokens,
+    modelReasoningEffort,
+    modelVerbosity,
     tenantConcurrency: numberOr(env.SQUAD_MCP_TENANT_CONCURRENCY, DEFAULT_TENANT_CONCURRENCY),
     tenantMonthlyCostCeilingUsd: numberOr(
       env.SQUAD_MCP_TENANT_COST_CEILING_USD,

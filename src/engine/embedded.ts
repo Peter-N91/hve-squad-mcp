@@ -36,7 +36,11 @@ import { isAdvisoryOnly } from "./gates.js";
 import { defaultProfileTables, resolveProfile } from "./profiles.js";
 import type { BusinessToolSpec } from "./business-tools.js";
 import { FEDERATION_ROLE, federationPersona } from "./federation.js";
-import { coordinatorRequestFromRun, encodeRunParams } from "./run-params.js";
+import {
+  coordinatorRequestFromRun,
+  decodeRunParams,
+  encodeRunParams,
+} from "./run-params.js";
 import { runPipeline } from "./dispatch-loop.js";
 import { runAdvisoryPipeline, type AdvisoryLedgerSink, type AdvisoryStagePlan } from "./advisory-pipeline.js";
 import { StoreAdvisoryPersistence } from "./advisory-run-store.js";
@@ -266,7 +270,26 @@ export class EmbeddedCoordinator {
     if (!this.runRecorder || !project) {
       return undefined;
     }
+
     return this.runRecorder.sinkFor(tenantId, project, request, runId);
+  }
+
+  /** Resolve the project binding persisted on an async run, tenant-scoped. */
+  async projectContextForRun(
+    runId: string,
+    ctx: EmbeddedContext,
+  ): Promise<
+    Pick<CoordinatorRequest, "project" | "projectContext"> | undefined
+  > {
+    const run = await this.runStateStore.get(runId);
+    if (!run || run.tenantId !== ctx.auth.tenantId) {
+      return undefined;
+    }
+    const params = decodeRunParams(run.params);
+    return {
+      project: params.project,
+      projectContext: params.projectContext,
+    };
   }
 
   /**

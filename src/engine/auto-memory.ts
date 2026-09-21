@@ -142,6 +142,14 @@ export class AutoMemory {
    * arbitrary write location inside its tenant.
    */
   resolveProject(request: CoordinatorRequest): string {
+    const project = request.project?.trim();
+    if (
+      project &&
+      SUB_SQUAD_NAME.test(project) &&
+      isSafeMemorySegment(project)
+    ) {
+      return project;
+    }
     const squad = request.squad?.trim();
     if (squad && SUB_SQUAD_NAME.test(squad) && isSafeMemorySegment(squad)) {
       return squad;

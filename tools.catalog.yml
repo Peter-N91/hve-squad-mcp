@@ -26,8 +26,9 @@
 # Per-tool `input` mirrors the `/squad` prompt arguments
 # (squad-src/.github/prompts/squad/squad.prompt.md):
 #   request (required), profile, tier, owner, mode, context, the optional
-#   discovery-gate depth on the two catch-all tools, and the optional federation
-#   `squad` sub-squad target (plus `init` on squad_federate).
+#   project + projectContext bridge checkpoint, the discovery-gate depth on the
+#   two catch-all tools, and the optional federation `squad` sub-squad target
+#   (plus `init` on squad_federate).
 #
 # Execution model (Phase 0): DELEGATED. The tool returns the Coordinator
 # persona + matched routing + framed request; the calling host (VS Code GitHub
@@ -53,6 +54,49 @@ conventions:
   # input targets one; `squad_federate` owns the meta layer (registry +
   # meta-routing). See squad-src/.github/instructions/squad/squad-federation.instructions.md.
   subSquadRoot: ".copilot-tracking/squad/members/<name>/"
+  projectInput: &projectInput
+    type: string
+    pattern: "^[a-z0-9][a-z0-9-]*$"
+    description: "Stable lower-kebab project partition. Cowork uses the hve-project.json slug; never overload squad with a project id."
+  projectContextInput: &projectContextInput
+    type: object
+    additionalProperties: false
+    required: [schemaVersion, projectId, revision, sequence]
+    properties:
+      schemaVersion:
+        type: integer
+        const: 1
+      projectId:
+        type: string
+        pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+      revision:
+        type: integer
+        minimum: 0
+      sequence:
+        type: integer
+        minimum: 0
+      digest:
+        type: string
+        pattern: "^[0-9a-fA-F]{64}$"
+      trackingRoot:
+        type: string
+        const: ".copilot-tracking"
+      storage:
+        type: object
+        additionalProperties: false
+        required: [provider]
+        properties:
+          provider:
+            type: string
+            enum: [onedrive, sharepoint]
+          driveId:
+            type: string
+            minLength: 1
+          folderItemId:
+            type: string
+            minLength: 1
+          displayPath:
+            type: string
 
 tools:
   - id: squad_research
@@ -100,6 +144,8 @@ tools:
         context:
           type: string
           description: "Optional free-form context (files, constraints, prior findings) to frame the request."
+        project: *projectInput
+        projectContext: *projectContextInput
         squad:
           type: string
           pattern: "^[a-z0-9][a-z0-9-]*$"
@@ -150,6 +196,8 @@ tools:
         context:
           type: string
           description: "Optional free-form context (research artifacts, constraints) to frame the plan."
+        project: *projectInput
+        projectContext: *projectContextInput
         squad:
           type: string
           pattern: "^[a-z0-9][a-z0-9-]*$"
@@ -213,6 +261,8 @@ tools:
         context:
           type: string
           description: "Optional free-form context (the change, plan, or design under review)."
+        project: *projectInput
+        projectContext: *projectContextInput
         squad:
           type: string
           pattern: "^[a-z0-9][a-z0-9-]*$"
@@ -263,6 +313,8 @@ tools:
         context:
           type: string
           description: "Optional free-form context (existing design, constraints, IaC) to frame the review."
+        project: *projectInput
+        projectContext: *projectContextInput
         squad:
           type: string
           pattern: "^[a-z0-9][a-z0-9-]*$"
@@ -321,6 +373,8 @@ tools:
         context:
           type: string
           description: "Optional free-form context to frame the pipeline."
+        project: *projectInput
+        projectContext: *projectContextInput
         squad:
           type: string
           pattern: "^[a-z0-9][a-z0-9-]*$"
@@ -395,3 +449,5 @@ tools:
         context:
           type: string
           description: "Optional free-form context to frame the federation turn."
+        project: *projectInput
+        projectContext: *projectContextInput

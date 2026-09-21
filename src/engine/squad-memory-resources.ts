@@ -33,6 +33,7 @@ import {
   isSafeMemorySegment,
   type SquadMemoryStore,
 } from "./squad-memory-state.js";
+import { PROJECT_CONTEXT_REGISTRY_PATH } from "./project-context-bridge.js";
 
 /** The custom URI scheme the broker publishes memory resources under. */
 export const SQUAD_MEMORY_URI_SCHEME = "squad-memory";
@@ -125,7 +126,12 @@ function parseMemoryUri(uri: string): ParsedMemoryUri | undefined {
   }
   const project = rest.slice(0, slash);
   const path = rest.slice(slash + 1);
-  if (path.length === 0 || !isSafeMemorySegment(project) || !isSafeMemoryPath(path)) {
+  if (
+    path.length === 0 ||
+    path === PROJECT_CONTEXT_REGISTRY_PATH ||
+    !isSafeMemorySegment(project) ||
+    !isSafeMemoryPath(path)
+  ) {
     return undefined;
   }
   return { project, path };
@@ -184,7 +190,9 @@ export class SquadMemoryResourceProvider {
     const descriptors: MemoryResourceDescriptor[] = [];
     projects.forEach((project, index) => {
       for (const entry of perProject[index]) {
-        descriptors.push(toDescriptor(project, entry.path));
+        if (entry.path !== PROJECT_CONTEXT_REGISTRY_PATH) {
+          descriptors.push(toDescriptor(project, entry.path));
+        }
       }
     });
     return descriptors;

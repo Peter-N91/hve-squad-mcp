@@ -106,6 +106,21 @@ export class TargetedSquadMemoryStore implements SquadMemoryStore {
     return this.resolve().list(tenantId, project);
   }
 
+  listUpdatedSince(
+    tenantId: string,
+    project: string,
+    updatedAt: number,
+  ): Promise<SquadMemoryEntry[]> {
+    const store = this.resolve();
+    return store.listUpdatedSince
+      ? store.listUpdatedSince(tenantId, project, updatedAt)
+      : store
+          .list(tenantId, project)
+          .then((entries) =>
+            entries.filter((entry) => entry.updatedAt >= updatedAt),
+          );
+  }
+
   read(tenantId: string, project: string, path: string): Promise<SquadMemoryEntry | undefined> {
     return this.resolve().read(tenantId, project, path);
   }

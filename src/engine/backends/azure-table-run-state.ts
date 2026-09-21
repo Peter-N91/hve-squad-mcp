@@ -64,6 +64,7 @@ export interface AzureTableRunStateStoreOptions {
 
 /** The wire shape of a run entity (flat property bag; Table Storage has no nesting). */
 interface RunEntity {
+  [key: string]: string | number | undefined;
   PartitionKey: string;
   RowKey: string;
   toolId: string;
@@ -90,6 +91,112 @@ interface RunEntity {
   councilVerdict?: string;
   history?: string;
   "odata.etag"?: string;
+}
+
+/**
+ * Azure Table Edm.String values are UTF-16 and limited to 64 KiB. Keep each
+ * chunk below that hard ceiling so model artifacts and encrypted context can
+ * use the entity's larger 1 MiB aggregate allowance.
+ */
+export const AZURE_TABLE_STRING_CHUNK_BYTES = 60 * 1024;
+const CHUNK_COUNT_SUFFIX = "__chunkCount";
+const CHUNK_VALUE_PREFIX = "__chunk";
+
+type ChunkableRunProperty =
+  | "artifact"
+  | "request"
+  | "context"
+  | "params"
+  | "stages"
+  | "councilVerdict"
+  | "history";
+
+function splitTableString(value: string): string[] {
+  const chunks: string[] = [];
+  let chunkStart = 0;
+  let index = 0;
+  let chunkBytes = 0;
+
+  for (const character of value) {
+    const characterBytes = Buffer.byteLength(character, "utf16le");
+    if (
+      chunkBytes + characterBytes > AZURE_TABLE_STRING_CHUNK_BYTES &&
+      index > chunkStart
+    ) {
+      chunks.push(value.slice(chunkStart, index));
+      chunkStart = index;
+      chunkBytes = 0;
+    }
+    chunkBytes += characterBytes;
+    index += character.length;
+  }
+  chunks.push(value.slice(chunkStart));
+  return chunks;
+}
+
+function chunkName(property: ChunkableRunProperty, index: number): string {
+  return `${property}${CHUNK_VALUE_PREFIX}${String(index).padStart(3, "0")}`;
+}
+
+function writeTableString(
+  entity: RunEntity,
+  property: ChunkableRunProperty,
+  value: string | undefined,
+): void {
+  if (value === undefined) {
+    return;
+  }
+  const chunks = splitTableString(value);
+  if (chunks.length === 1) {
+    entity[property] = value;
+    return;
+  }
+  entity[`${property}${CHUNK_COUNT_SUFFIX}`] = chunks.length;
+  chunks.forEach((chunk, index) => {
+    entity[chunkName(property, index)] = chunk;
+  });
+}
+
+function readTableString(
+  entity: RunEntity,
+  property: ChunkableRunProperty,
+): string | undefined {
+  const direct = entity[property];
+  if (typeof direct === "string") {
+    return direct;
+  }
+  const count = entity[`${property}${CHUNK_COUNT_SUFFIX}`];
+  if (count === undefined) {
+    return undefined;
+  }
+  if (
+    typeof count !== "number" ||
+    !Number.isInteger(count) ||
+    count < 2 ||
+    count > 252
+  ) {
+    throw new Error(`Malformed chunk metadata for run-state property '${property}'.`);
+  }
+  const chunks: string[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const chunk = entity[chunkName(property, index)];
+    if (typeof chunk !== "string") {
+      throw new Error(`Missing chunk for run-state property '${property}'.`);
+    }
+    chunks.push(chunk);
+  }
+  return chunks.join("");
+}
+
+function entityStorageStats(entity: RunEntity): Record<string, number> {
+  const stringSizes = Object.values(entity)
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => Buffer.byteLength(value, "utf16le"));
+  return {
+    propertyCount: Object.keys(entity).length,
+    payloadBytes: Buffer.byteLength(JSON.stringify(entity), "utf8"),
+    largestStringBytes: Math.max(0, ...stringSizes),
+  };
 }
 
 export class AzureTableRunStateStore implements RunStateStore {
@@ -177,13 +284,13 @@ export class AzureTableRunStateStore implements RunStateStore {
     };
     if (run.updatedAt !== undefined) entity.updatedAt = run.updatedAt;
     if (run.holdReason !== undefined) entity.holdReason = run.holdReason;
-    if (run.artifact !== undefined) entity.artifact = run.artifact;
+    writeTableString(entity, "artifact", run.artifact);
     const sealedRequest = encryptField(this.cipher, run.request);
-    if (sealedRequest !== undefined) entity.request = sealedRequest;
+    writeTableString(entity, "request", sealedRequest);
     const sealedContext = encryptField(this.cipher, run.context);
-    if (sealedContext !== undefined) entity.context = sealedContext;
+    writeTableString(entity, "context", sealedContext);
     const sealedParams = encryptField(this.cipher, run.params);
-    if (sealedParams !== undefined) entity.params = sealedParams;
+    writeTableString(entity, "params", sealedParams);
     if (run.approvedBy !== undefined) entity.approvedBy = run.approvedBy;
     if (run.approvedAt !== undefined) entity.approvedAt = run.approvedAt;
     if (run.expiresAt !== undefined) entity.expiresAt = run.expiresAt;
@@ -191,18 +298,25 @@ export class AzureTableRunStateStore implements RunStateStore {
     // Phase 4 — flatten + encrypt the advisory composites; history is plain metadata.
     if (run.stages !== undefined) {
       const sealedStages = encryptField(this.cipher, JSON.stringify(run.stages));
-      if (sealedStages !== undefined) entity.stages = sealedStages;
+      writeTableString(entity, "stages", sealedStages);
     }
     if (run.councilVerdict !== undefined) {
       const sealedVerdict = encryptField(this.cipher, JSON.stringify(run.councilVerdict));
-      if (sealedVerdict !== undefined) entity.councilVerdict = sealedVerdict;
+      writeTableString(entity, "councilVerdict", sealedVerdict);
     }
-    if (run.history !== undefined) entity.history = JSON.stringify(run.history);
+    writeTableString(
+      entity,
+      "history",
+      run.history === undefined ? undefined : JSON.stringify(run.history),
+    );
     return entity;
   }
 
   /** Map a wire entity back to a decrypted RunState. */
   private fromEntity(entity: RunEntity): RunState {
+    const stages = readTableString(entity, "stages");
+    const councilVerdict = readTableString(entity, "councilVerdict");
+    const history = readTableString(entity, "history");
     return {
       runId: entity.RowKey,
       tenantId: entity.PartitionKey,
@@ -211,23 +325,23 @@ export class AzureTableRunStateStore implements RunStateStore {
       createdAt: entity.createdAt,
       updatedAt: entity.updatedAt,
       holdReason: entity.holdReason,
-      artifact: entity.artifact,
-      request: decryptField(this.cipher, entity.request),
-      context: decryptField(this.cipher, entity.context),
-      params: decryptField(this.cipher, entity.params),
+      artifact: readTableString(entity, "artifact"),
+      request: decryptField(this.cipher, readTableString(entity, "request")),
+      context: decryptField(this.cipher, readTableString(entity, "context")),
+      params: decryptField(this.cipher, readTableString(entity, "params")),
       approvedBy: entity.approvedBy,
       approvedAt: entity.approvedAt,
       expiresAt: entity.expiresAt,
       leaseExpiresAt: entity.leaseExpiresAt,
       stages:
-        entity.stages !== undefined
-          ? (JSON.parse(decryptField(this.cipher, entity.stages) as string) as RunState["stages"])
+        stages !== undefined
+          ? (JSON.parse(decryptField(this.cipher, stages) as string) as RunState["stages"])
           : undefined,
       councilVerdict:
-        entity.councilVerdict !== undefined
-          ? (JSON.parse(decryptField(this.cipher, entity.councilVerdict) as string) as RunState["councilVerdict"])
+        councilVerdict !== undefined
+          ? (JSON.parse(decryptField(this.cipher, councilVerdict) as string) as RunState["councilVerdict"])
           : undefined,
-      history: entity.history !== undefined ? (JSON.parse(entity.history) as RunState["history"]) : undefined,
+      history: history !== undefined ? (JSON.parse(history) as RunState["history"]) : undefined,
     };
   }
 
@@ -288,15 +402,20 @@ export class AzureTableRunStateStore implements RunStateStore {
 
   /** Overwrite an entity guarding on its ETag (CAS); returns false on 412 conflict. */
   private async putWithEtag(run: RunState, etag: string | undefined): Promise<boolean> {
+    const entity = this.toEntity(run);
     const response = await this.fetchImpl(this.entityUrl(run.tenantId, run.runId), {
       method: "PUT",
       headers: await this.headers({ "If-Match": etag ?? "*" }),
-      body: JSON.stringify(this.toEntity(run)),
+      body: JSON.stringify(entity),
     });
     if (response.status === 412) {
       return false; // CAS lost — another replica won.
     }
     if (!response.ok) {
+      this.logger?.error("Table run-state update rejected", {
+        status: response.status,
+        ...entityStorageStats(entity),
+      });
       throw new Error(`Table update failed with status ${response.status}.`);
     }
     return true;
@@ -360,22 +479,33 @@ export class AzureTableRunStateStore implements RunStateStore {
   }
 
   async listClaimable(now: number = Date.now()): Promise<RunState[]> {
-    // Query the candidate statuses cross-partition; decide claimability in-process
-    // (the OData filter cannot express the approved/lease predicate portably).
-    const filter = encodeURIComponent("status eq 'held' or status eq 'running'");
-    const url = `${this.baseUrl}/${this.tableName}()?$filter=${filter}`;
-    const response = await this.fetchImpl(url, { method: "GET", headers: await this.headers() });
-    if (!response.ok) {
-      throw new Error(`Table query failed with status ${response.status}.`);
-    }
-    const body = (await response.json()) as { value?: RunEntity[] };
-    return (body.value ?? [])
+    // Azure Table's OData subset is inconsistent for cross-partition `or`
+    // predicates. Query each status separately and merge by run id; the approved/
+    // lease predicate remains an in-process decision.
+    const queryStatus = async (status: "held" | "running"): Promise<RunEntity[]> => {
+      const filter = encodeURIComponent(`status eq '${status}'`);
+      const url = `${this.baseUrl}/${this.tableName}()?$filter=${filter}`;
+      const response = await this.fetchImpl(url, {
+        method: "GET",
+        headers: await this.headers(),
+      });
+      if (!response.ok) {
+        throw new Error(`Table query failed with status ${response.status}.`);
+      }
+      const body = (await response.json()) as { value?: RunEntity[] };
+      return body.value ?? [];
+    };
+    const candidates = [...(await queryStatus("held")), ...(await queryStatus("running"))];
+    const unique = [...new Map(candidates.map((entity) => [entity.RowKey, entity])).values()];
+    return unique
       .map((entity) => this.fromEntity(entity))
       .filter((run) => !isRunExpired(run, now) && isRunClaimable(run, now));
   }
 
   async sweepExpired(now: number = Date.now()): Promise<number> {
-    const filter = encodeURIComponent(`expiresAt le ${now}`);
+    // Epoch milliseconds exceed Edm.Int32. Azure Table parses an un-suffixed
+    // integer literal as Int32 and rejects it; `L` binds the comparison as Int64.
+    const filter = encodeURIComponent(`expiresAt le ${now}L`);
     const url = `${this.baseUrl}/${this.tableName}()?$filter=${filter}`;
     const response = await this.fetchImpl(url, { method: "GET", headers: await this.headers() });
     if (!response.ok) {

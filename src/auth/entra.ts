@@ -13,8 +13,9 @@
  *   * SEC-3 — tenant resolution. The resolved tenant/identity is the single root
  *     for all downstream authorization in the embedded engine; no ambient server
  *     identity satisfies a caller request.
- *   * SEC-10 — the raw token is registered with the logger for redaction and is
- *     NEVER logged or surfaced; failure reasons never echo the token or claims.
+ *   * SEC-10 — a cryptographically valid token is registered with the bounded
+ *     redaction set and is NEVER logged or surfaced; invalid attacker input is
+ *     never retained, and failure reasons never echo the token or claims.
  *
  * The cryptographic verification (signature + issuer + expiry) is delegated to a
  * pluggable {@link JwtVerifier} so this authorization logic is unit-testable
@@ -43,13 +44,23 @@ export interface JwtClaims {
   [key: string]: unknown;
 }
 
+/** Original request metadata required by the MISE sidecar validation contract. */
+export interface JwtVerificationContext {
+  /** Absolute URI received by the protected web API, including its query string. */
+  originalUri: string;
+  /** HTTP method received by the protected web API. */
+  originalMethod: string;
+  /** Trusted ingress sender IP supplied to MISE as `X-Forwarded-For`. */
+  forwardedFor: string;
+}
+
 /**
  * Verifies a token's signature, issuer, and expiry and returns its claims.
  * Throws on any cryptographic or temporal failure. Audience, tenant, and scope
  * checks are intentionally NOT done here — the authenticator owns authorization.
  */
 export interface JwtVerifier {
-  verify(token: string): Promise<JwtClaims>;
+  verify(token: string, context?: JwtVerificationContext): Promise<JwtClaims>;
 }
 
 /** The resolved caller identity — the single root for downstream authorization (SEC-3). */
@@ -60,7 +71,7 @@ export interface AuthContext {
   subject: string;
   /** The granted scopes parsed from the token. */
   scopes: string[];
-  /** The audience the token was bound to (this resource server). */
+  /** The audience the token was actually bound to (one of the configured set). */
   audience: string;
 }
 
@@ -77,8 +88,12 @@ export class AuthError extends Error {
 }
 
 export interface EntraAuthenticatorOptions {
-  /** The expected audience (this resource server; SEC-1, RFC 8707). */
-  audience: string;
+  /**
+   * The accepted audiences (this resource server; SEC-1, RFC 8707). Several are
+   * permitted so one deployment can serve front doors that mint tokens for
+   * different resource identifiers; each is matched exactly.
+   */
+  audiences: readonly string[];
   /** Permitted issuers; empty = accept any issuer the verifier already validated. */
   allowedIssuers?: string[];
   /** Permitted tenants; empty = any tenant whose token validates. */
@@ -89,14 +104,25 @@ export interface EntraAuthenticatorOptions {
   logger: RedactingLogger;
 }
 
-function audienceMatches(aud: string | string[] | undefined, expected: string): boolean {
-  if (typeof aud === "string") {
-    return aud === expected;
-  }
-  if (Array.isArray(aud)) {
-    return aud.includes(expected);
-  }
-  return false;
+/**
+ * Resolve which configured audience a token is bound to, or `undefined`.
+ *
+ * A deployment may serve several front doors that each mint tokens for their own
+ * resource identifier — a Copilot Studio connector bound to `api://<client-id>`
+ * and a Cowork Entra SSO auth config bound to the Application ID URI that
+ * registration generates. Accepting a SET does not weaken SEC-1: every entry is
+ * an operator-configured exact string, matched exactly, with no wildcard or
+ * prefix matching, so a token minted for any other resource is still rejected.
+ *
+ * Returns the matched value so the caller can record WHICH front door admitted
+ * the request rather than the whole configured set.
+ */
+function matchAudience(
+  aud: string | string[] | undefined,
+  expected: readonly string[],
+): string | undefined {
+  const presented = typeof aud === "string" ? [aud] : Array.isArray(aud) ? aud : [];
+  return expected.find((candidate) => presented.includes(candidate));
 }
 
 function parseScopes(claims: JwtClaims): string[] {
@@ -129,14 +155,19 @@ export function extractBearerToken(authorizationHeader: string | undefined): str
 
 /** Authenticates and authorizes remote callers against Entra/OAuth tokens. */
 export class EntraAuthenticator {
-  private readonly audience: string;
+  private readonly audiences: readonly string[];
   private readonly allowedIssuers: Set<string>;
   private readonly allowedTenants: Set<string>;
   private readonly verifier: JwtVerifier;
   private readonly logger: RedactingLogger;
 
   constructor(options: EntraAuthenticatorOptions) {
-    this.audience = options.audience;
+    // Fail fast rather than admit nothing: an empty set would reject every token
+    // with `wrong_audience`, which reads as a token problem instead of a config one.
+    if (options.audiences.length === 0) {
+      throw new Error("EntraAuthenticator requires at least one accepted audience (SEC-1).");
+    }
+    this.audiences = [...options.audiences];
     this.allowedIssuers = new Set(options.allowedIssuers ?? []);
     this.allowedTenants = new Set(options.allowedTenants ?? []);
     this.verifier = options.verifier;
@@ -146,29 +177,32 @@ export class EntraAuthenticator {
   /**
    * Authenticate one request. On success returns the resolved {@link AuthContext};
    * on any failure throws {@link AuthError} with the HTTP status. The token is
-   * registered as a secret BEFORE any other work so it can never be logged
-   * (SEC-10), and failure paths never include the token or claim values.
+   * registered as a secret only AFTER cryptographic verification so attacker-
+   * supplied junk cannot exhaust the bounded redaction set. Failure paths never
+   * include the token or claim values.
    */
-  async authenticate(authorizationHeader: string | undefined): Promise<AuthContext> {
+  async authenticate(
+    authorizationHeader: string | undefined,
+    verificationContext?: JwtVerificationContext,
+  ): Promise<AuthContext> {
     const token = extractBearerToken(authorizationHeader);
     if (!token) {
       // SEC-1: no anonymous access.
       throw new AuthError("Missing bearer token.", 401, "missing_token");
     }
-    // SEC-10: register the raw token so it is redacted everywhere, immediately.
-    this.logger.registerSecret(token);
-
     let claims: JwtClaims;
     try {
-      claims = await this.verifier.verify(token);
+      claims = await this.verifier.verify(token, verificationContext);
     } catch {
       // Never echo the token or the underlying crypto error detail.
       throw new AuthError("Token verification failed.", 401, "invalid_token");
     }
+    this.logger.registerSecret(token);
 
     // SEC-1: audience must be bound to THIS resource server (RFC 8707). A token
     // minted for a different resource (pass-through) is rejected outright.
-    if (!audienceMatches(claims.aud, this.audience)) {
+    const audience = matchAudience(claims.aud, this.audiences);
+    if (!audience) {
       throw new AuthError("Token audience is not bound to this resource.", 401, "wrong_audience");
     }
 
@@ -197,7 +231,7 @@ export class EntraAuthenticator {
       tenantId,
       subject,
       scopes: parseScopes(claims),
-      audience: this.audience,
+      audience,
     };
   }
 

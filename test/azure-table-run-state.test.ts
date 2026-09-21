@@ -13,7 +13,10 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { test } from "node:test";
 
-import { AzureTableRunStateStore } from "../src/engine/backends/azure-table-run-state.js";
+import {
+  AZURE_TABLE_STRING_CHUNK_BYTES,
+  AzureTableRunStateStore,
+} from "../src/engine/backends/azure-table-run-state.js";
 import { AesGcmFieldCipher, type FieldCipher } from "../src/engine/field-cipher.js";
 
 /**
@@ -26,7 +29,16 @@ class FakeTable {
   private seq = 0;
   /** WI-07 — count of `POST .../Tables` create calls, for auto-create assertions. */
   tablePosts = 0;
+  getUrls: string[] = [];
   private tableCreated = false;
+
+  private accepts(entity: Record<string, unknown>): boolean {
+    return Object.values(entity).every(
+      (value) =>
+        typeof value !== "string" ||
+        Buffer.byteLength(value, "utf16le") <= 64 * 1024,
+    );
+  }
 
   readonly fetch: typeof fetch = async (input, init) => {
     const url = String(input);
@@ -42,18 +54,23 @@ class FakeTable {
         return new Response(null, { status: created ? 409 : 204 });
       }
       const entity = JSON.parse(init?.body as string) as Record<string, unknown>;
+      if (!this.accepts(entity)) {
+        return new Response(null, { status: 400 });
+      }
       this.rows.set(entity.RowKey as string, { entity, etag: this.nextEtag() });
       return new Response(null, { status: 204 });
     }
     if (method === "GET") {
+      this.getUrls.push(url);
       const filter = new URL(url).searchParams.get("$filter") ?? "";
       let matches = [...this.rows.values()];
       const byRow = /RowKey eq '([^']+)'/.exec(filter);
       if (byRow) {
         matches = matches.filter((r) => r.entity.RowKey === byRow[1]);
       }
-      if (/status eq 'held'/.test(filter)) {
-        matches = matches.filter((r) => r.entity.status === "held" || r.entity.status === "running");
+      const byStatus = /status eq '([^']+)'/.exec(filter);
+      if (byStatus) {
+        matches = matches.filter((r) => r.entity.status === byStatus[1]);
       }
       const byExpiry = /expiresAt le (\d+)/.exec(filter);
       if (byExpiry) {
@@ -71,6 +88,9 @@ class FakeTable {
         return new Response(null, { status: 412 });
       }
       const entity = JSON.parse(init?.body as string) as Record<string, unknown>;
+      if (!this.accepts(entity)) {
+        return new Response(null, { status: 400 });
+      }
       this.rows.set(rowKey, { entity, etag: this.nextEtag() });
       return new Response(null, { status: 204 });
     }
@@ -147,6 +167,62 @@ test("a Table run without advisory fields still loads (backward-compatible optio
   assert.equal(read?.history, undefined);
 });
 
+test("oversized model artifacts are chunked below the Azure Table string limit", async () => {
+  const table = new FakeTable();
+  const store = storeOn(table);
+  const run = await store.create({ tenantId: "t", toolId: "squad_architect" });
+  const artifact = `ARTIFACT-BEGIN\n${"x".repeat(90_000)}\nARTIFACT-END`;
+
+  const updated = await store.update(run.runId, {
+    status: "complete",
+    artifact,
+  });
+  const raw = table.raw(run.runId) as Record<string, unknown>;
+  const chunks = Object.entries(raw).filter(([name]) =>
+    /^artifact__chunk\d{3}$/.test(name),
+  );
+
+  assert.ok(updated, "the update is accepted by a Table-compatible backend");
+  assert.equal(raw.artifact, undefined);
+  assert.ok(Number(raw.artifact__chunkCount) > 1);
+  assert.ok(
+    chunks.every(
+      ([, value]) =>
+        typeof value === "string" &&
+        Buffer.byteLength(value, "utf16le") <= AZURE_TABLE_STRING_CHUNK_BYTES,
+    ),
+  );
+  assert.equal((await store.get(run.runId))?.artifact, artifact);
+});
+
+test("oversized encrypted context and stages remain encrypted and round-trip across chunks", async () => {
+  const table = new FakeTable();
+  const store = storeOn(table, new AesGcmFieldCipher(randomBytes(32)));
+  const run = await store.create({ tenantId: "t", toolId: "squad_run" });
+  const secretContext = `SECRET-CONTEXT-BEGIN\n${"y".repeat(90_000)}\nSECRET-CONTEXT-END`;
+  const stages = [
+    {
+      role: "System Architecture Reviewer",
+      artifact: `STAGE-BEGIN\n${"z".repeat(90_000)}\nSTAGE-END`,
+    },
+  ];
+
+  const updated = await store.update(run.runId, {
+    context: secretContext,
+    stages,
+  });
+  const raw = table.raw(run.runId) as Record<string, unknown>;
+  const serialized = JSON.stringify(raw);
+
+  assert.ok(updated);
+  assert.ok(Number(raw.context__chunkCount) > 1);
+  assert.ok(Number(raw.stages__chunkCount) > 1);
+  assert.doesNotMatch(serialized, /SECRET-CONTEXT|STAGE-BEGIN/);
+  const read = await store.get(run.runId);
+  assert.equal(read?.context, secretContext);
+  assert.deepEqual(read?.stages, stages);
+});
+
 test("Azure Table store encrypts advisory stages + verdict at rest", async () => {
   const table = new FakeTable();
   const store = storeOn(table, new AesGcmFieldCipher(randomBytes(32)));
@@ -182,6 +258,40 @@ test("Azure Table store multi-replica: a verdict written by one instance is visi
   assert.deepEqual(read?.stages, SAMPLE_STAGES);
   assert.equal(read?.councilVerdict?.class, "Go-With-Conditions");
   assert.deepEqual(read?.history, SAMPLE_HISTORY);
+});
+
+test("listClaimable uses portable single-status filters and merges held/running candidates", async () => {
+  const table = new FakeTable();
+  const store = storeOn(table);
+  const held = await store.create({ tenantId: "t", toolId: "squad_run" });
+  await store.update(held.runId, {
+    status: "held",
+    approvedBy: "operator",
+    approvedAt: Date.now(),
+  });
+
+  const running = await store.create({ tenantId: "t", toolId: "squad_run" });
+  await store.update(running.runId, {
+    status: "running",
+    leaseExpiresAt: 0,
+  });
+
+  const claimable = await store.listClaimable();
+  assert.deepEqual(
+    claimable.map((run) => run.runId).sort(),
+    [held.runId, running.runId].sort(),
+  );
+});
+
+test("sweepExpired uses an Edm.Int64 literal for epoch milliseconds", async () => {
+  const table = new FakeTable();
+  const store = storeOn(table);
+  await store.sweepExpired(1_800_000_000_000);
+  assert.ok(
+    table.getUrls.some((url) =>
+      decodeURIComponent(url).includes("expiresAt le 1800000000000L"),
+    ),
+  );
 });
 
 test("Azure Table run-state store creates the table on first create, once (WI-07)", async () => {
