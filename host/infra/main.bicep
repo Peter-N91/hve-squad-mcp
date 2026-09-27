@@ -1,14 +1,28 @@
 // hve-squad MCP server — remote thin-slice hosting (Azure Container Apps).
 //
-// Resource-group-scoped deployment of the scale-to-zero ACA app that serves the
-// Streamable HTTP `/mcp` endpoint with Entra auth and managed-identity secrets.
+// Resource-group-scoped ORCHESTRATOR. Every resource lives in its own module under
+// ./modules; this file only composes configuration and wires module outputs into
+// module inputs. Every value is set in main.bicepparam — the CI/CD workflow
+// (.github/workflows/azure-infra.yml) passes nothing on the command line except,
+// through environment variables the parameter file reads, the image tag, the
+// deployment phase, and the optional run-encryption key.
+//
 // Carries the council's host-side conditions:
 //   * COST-3 / ARCH-2 — minReplicas 0 with ACA's idle scale-down (~5 min).
 //   * SEC-8           — HTTPS-only ingress (allowInsecure: false).
 //   * SEC-10          — secrets via managed identity + Key Vault; none in the image.
+//                       Azure OpenAI key auth is disabled; ACR admin user is off.
 //   * SEC-1           — ACA built-in Entra auth in front of the app's own
 //                       audience-bound validation (defense-in-depth).
+//   * SEC-3           — the model endpoint and its allow-list derive from the one
+//                       Azure OpenAI account this template provisions or reuses.
 //   * COST-2          — a monthly budget with 70 / 90 / 100% alerts.
+//
+// Two-phase deployment. deployApplication = false deploys the FOUNDATION (identity,
+// logs, Key Vault, registry + AcrPull, Azure OpenAI + its grant, storage, the ACA
+// environment, budget) so the image can be built into a registry the app identity
+// can already pull from; deployApplication = true adds the Container App and the
+// worker job. Both phases are idempotent and incremental.
 //
 // Per-tenant RATE caps (SEC-9 / COST-1, host side) require an APIM / Front Door
 // layer and are documented as a Phase-1 boundary in host/RUNBOOK.md; the engine
@@ -26,18 +40,34 @@ type SquadConfig = {
   allowedTenants: string
   @description('JWKS endpoint used to validate Entra tokens.')
   jwksUri: string
-  @description('Azure OpenAI endpoint to call (must be in allowedModelEndpoints; SEC-3).')
-  modelEndpoint: string
-  @description('Comma-separated Azure OpenAI endpoint allow-list (SEC-3).')
-  allowedModelEndpoints: string
-  @description('Azure OpenAI deployment name.')
-  modelDeployment: string
-  @description('Azure OpenAI REST API version.')
-  modelApiVersion: string
   @description('Per-tenant concurrency cap (SEC-9 / COST-1).')
   tenantConcurrency: int
   @description('Hard monthly per-tenant cost ceiling in USD (COST-2).')
   tenantCostCeilingUsd: int
+}
+
+@description('Azure OpenAI account + model deployment the embedded engine calls (SEC-3).')
+type OpenAiConfig = {
+  @description('true = create the account and model deployment; false = reuse an existing account in this resource group.')
+  create: bool
+  @description('Account name. Omit to generate one. Also the custom subdomain unless customSubDomainName is set.')
+  name: string?
+  @description('Custom subdomain of an EXISTING account when it differs from its name.')
+  customSubDomainName: string?
+  @description('Region of a created account. Omit to use the resource group region.')
+  location: string?
+  @description('Model deployment name.')
+  deploymentName: string
+  @description('Model name, e.g. gpt-4o.')
+  modelName: string
+  @description('Model version, e.g. 2024-11-20.')
+  modelVersion: string
+  @description('Deployment SKU, e.g. Standard or GlobalStandard.')
+  skuName: string
+  @description('Deployment capacity in thousands of tokens per minute.')
+  capacity: int
+  @description('Azure OpenAI REST API version the server calls.')
+  apiVersion: string
 }
 
 @description('Azure region for all resources.')
@@ -48,11 +78,25 @@ param location string = resourceGroup().location
 @maxLength(12)
 param namePrefix string = 'squadmcp'
 
-@description('Container image reference, e.g. <registry>.azurecr.io/hve-squad-mcp:<tag>.')
-param containerImage string
+@description('Tags applied to every resource that supports them.')
+param tags object = {}
 
-@description('Azure Container Registry login server the image is pulled from.')
-param containerRegistryServer string
+@description('false = deploy the foundation only (phase 1, before the image exists); true = also deploy the Container App and worker job (phase 2).')
+param deployApplication bool = true
+
+@description('Image repository inside the registry this template provisions.')
+param imageRepository string = 'hve-squad-mcp'
+
+@description('Image tag to run. CI sets it to the commit SHA it built.')
+param containerImageTag string = 'latest'
+
+@description('Container registry SKU.')
+@allowed([
+  'Basic'
+  'Standard'
+  'Premium'
+])
+param containerRegistrySku string = 'Basic'
 
 @description('Entra application (client) id for the ACA built-in auth (SEC-1).')
 param authClientId string
@@ -62,6 +106,9 @@ param authOpenIdIssuer string
 
 @description('Squad MCP application configuration.')
 param squad SquadConfig
+
+@description('Azure OpenAI account + model deployment.')
+param openAi OpenAiConfig
 
 @description('Minimum replicas. 0 enables scale-to-zero (COST-3 / ARCH-2).')
 @minValue(0)
@@ -76,11 +123,11 @@ param maxReplicas int = 5
 @description('Monthly cost budget in USD for this resource group (COST-2).')
 param budgetAmountUsd int = 500
 
-@description('First day of the budget month (YYYY-MM-01).')
-param budgetStartDate string = '2026-07-01'
+@description('First day of the budget month (YYYY-MM-01). A NEW budget must start in the current month or up to 12 months ahead.')
+param budgetStartDate string
 
 @description('Email addresses that receive the 70/90/100% budget alerts (COST-2).')
-param budgetAlertEmails array
+param budgetAlertEmails string[]
 
 @description('Log Analytics retention in days.')
 @minValue(30)
@@ -170,20 +217,17 @@ param memoryOverflowContainer string = 'squadmemory'
 param enableBusinessTools bool = false
 
 var tenantId = subscription().tenantId
-var keyVaultSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
-// Storage Table Data Contributor — the app + worker identity reads/writes run records.
-var storageTableDataContributorRoleId = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
-// Storage Blob Data Contributor — the app identity writes rendered decks + mints
-// user-delegation SAS (grants generateUserDelegationKey/action).
-var storageBlobDataContributorRoleId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
-// Which storage services are needed, and therefore which account/roles deploy.
-// Table: async run state (WI-06) and/or the table-backed memory broker.
-// Blob:  rendered decks and/or the memory overflow channel (WI-03).
 var enableMemoryTable = enableMemory && memoryBackend == 'table'
 var enableTableStorage = enableRemotePipeline || enableMemoryTable
 var enableBlobStorage = enableRenderPptx || enableMemoryOverflow
 var enableStorage = enableTableStorage || enableBlobStorage
 var storageAccountName = toLower(take('${namePrefix}st${uniqueString(resourceGroup().id)}', 24))
+var registryName = take(toLower(replace('${namePrefix}acr${uniqueString(resourceGroup().id)}', '-', '')), 50)
+var openAiName = openAi.?name ?? toLower('${namePrefix}-aoai-${uniqueString(resourceGroup().id)}')
+var modulePrefix = take(deployment().name, 40)
+
+var tableNames = concat(enableRemotePipeline ? [runTableName] : [], enableMemoryTable ? [memoryTableName] : [])
+var blobContainerNames = concat(enableRenderPptx ? [renderBlobContainer] : [], enableMemoryOverflow ? [memoryOverflowContainer] : [])
 
 // The storage account name is a single env entry shared by the run-state store,
 // the memory broker, the render tool, and the overflow channel — emitted once so
@@ -202,10 +246,8 @@ var pipelineEnv = enableRemotePipeline
     ]
   : []
 
-// Encryption key passed as an ACA secret (never a plain env value).
-var encryptionSecrets = !empty(runEncryptionKeyBase64)
-  ? [ { name: 'run-encryption-key', value: runEncryptionKeyBase64 } ]
-  : []
+// The run-encryption key itself is an ACA secret created inside the app / worker
+// modules (never a plain env value); env entries only reference it.
 var encryptionEnv = (enableRemotePipeline && !empty(runEncryptionKeyBase64))
   // checkov:skip=CKV_SECRET_6:The high-entropy match is the NAME of an environment variable, not a secret. Its value is a secretRef into the Container App secret store, which is the pattern this check exists to encourage.
   ? [ { name: 'SQUAD_MCP_RUN_ENCRYPTION_KEY_B64', secretRef: 'run-encryption-key' } ]
@@ -293,346 +335,191 @@ var webBaseEnv = [
   { name: 'SQUAD_MCP_ALLOWED_ISSUERS', value: squad.allowedIssuers }
   { name: 'SQUAD_MCP_ALLOWED_TENANTS', value: squad.allowedTenants }
   { name: 'SQUAD_MCP_JWKS_URI', value: squad.jwksUri }
-  { name: 'SQUAD_MCP_MODEL_ENDPOINT', value: squad.modelEndpoint }
-  { name: 'SQUAD_MCP_ALLOWED_MODEL_ENDPOINTS', value: squad.allowedModelEndpoints }
-  { name: 'SQUAD_MCP_MODEL_DEPLOYMENT', value: squad.modelDeployment }
-  { name: 'SQUAD_MCP_MODEL_API_VERSION', value: squad.modelApiVersion }
+  { name: 'SQUAD_MCP_MODEL_ENDPOINT', value: openAiAccount.outputs.endpoint }
+  { name: 'SQUAD_MCP_ALLOWED_MODEL_ENDPOINTS', value: openAiAccount.outputs.endpoint }
+  { name: 'SQUAD_MCP_MODEL_DEPLOYMENT', value: openAiAccount.outputs.deploymentName }
+  { name: 'SQUAD_MCP_MODEL_API_VERSION', value: openAi.apiVersion }
   { name: 'SQUAD_MCP_TENANT_CONCURRENCY', value: string(squad.tenantConcurrency) }
   { name: 'SQUAD_MCP_TENANT_COST_CEILING_USD', value: string(squad.tenantCostCeilingUsd) }
-  { name: 'AZURE_CLIENT_ID', value: identity.properties.clientId }
+  { name: 'AZURE_CLIENT_ID', value: identity.outputs.clientId }
 ]
 
-resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
-  name: '${namePrefix}-logs'
-  location: location
-  properties: {
-    sku: {
-      name: 'PerGB2018'
-    }
+// ─── Foundation (phase 1 and 2) ──────────────────────────────────────────────
+
+module identity 'modules/managed-identity.bicep' = {
+  name: '${modulePrefix}-identity'
+  params: {
+    name: '${namePrefix}-id'
+    location: location
+    tags: tags
+  }
+}
+
+module logAnalytics 'modules/log-analytics.bicep' = {
+  name: '${modulePrefix}-logs'
+  params: {
+    name: '${namePrefix}-logs'
+    location: location
     retentionInDays: logRetentionDays
+    tags: tags
   }
 }
 
-resource identity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
-  name: '${namePrefix}-id'
-  location: location
-}
-
-resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
-  // A vault name is capped at 24 characters, so the prefix + uniqueString pair is
-  // truncated; without this the default namePrefix already overflows the limit.
-  name: take('${namePrefix}-kv-${uniqueString(resourceGroup().id)}', 24)
-  location: location
-  properties: {
-    sku: {
-      family: 'A'
-      name: 'standard'
-    }
+module keyVault 'modules/key-vault.bicep' = {
+  name: '${modulePrefix}-keyvault'
+  params: {
+    // A vault name is capped at 24 characters, so the prefix + uniqueString pair
+    // is truncated; without this the default namePrefix already overflows.
+    name: take('${namePrefix}-kv-${uniqueString(resourceGroup().id)}', 24)
+    location: location
     tenantId: tenantId
-    enableRbacAuthorization: true
-    enableSoftDelete: true
-    softDeleteRetentionInDays: 90
-    publicNetworkAccess: 'Enabled'
+    readerPrincipalId: identity.outputs.principalId
+    readerIdentityId: identity.outputs.id
+    tags: tags
   }
 }
 
-// Let the app's managed identity read Key Vault secrets (SEC-10).
-resource keyVaultSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(keyVault.id, identity.id, keyVaultSecretsUserRoleId)
-  scope: keyVault
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultSecretsUserRoleId)
-    principalId: identity.properties.principalId
-    principalType: 'ServicePrincipal'
+module registry 'modules/container-registry.bicep' = {
+  name: '${modulePrefix}-registry'
+  params: {
+    // namePrefix (>= 3) + 'acr' + a 13-character hash is always >= 5 characters.
+    #disable-next-line BCP334
+    name: registryName
+    location: location
+    sku: containerRegistrySku
+    pullPrincipalId: identity.outputs.principalId
+    pullIdentityId: identity.outputs.id
+    tags: tags
   }
 }
 
-resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
-  name: '${namePrefix}-env'
-  location: location
-  properties: {
-    appLogsConfiguration: {
-      destination: 'log-analytics'
-      logAnalyticsConfiguration: {
-        customerId: logAnalytics.properties.customerId
-        sharedKey: logAnalytics.listKeys().primarySharedKey
-      }
-    }
+module openAiAccount 'modules/openai.bicep' = {
+  name: '${modulePrefix}-openai'
+  params: {
+    create: openAi.create
+    name: openAiName
+    customSubDomainName: openAi.?customSubDomainName ?? openAiName
+    location: openAi.?location ?? location
+    deploymentName: openAi.deploymentName
+    modelName: openAi.modelName
+    modelVersion: openAi.modelVersion
+    skuName: openAi.skuName
+    capacity: openAi.capacity
+    userPrincipalId: identity.outputs.principalId
+    userIdentityId: identity.outputs.id
+    tags: tags
   }
 }
 
-resource app 'Microsoft.App/containerApps@2024-03-01' = {
-  name: '${namePrefix}-app'
-  location: location
-  identity: {
-    type: 'UserAssigned'
-    userAssignedIdentities: {
-      '${identity.id}': {}
-    }
-  }
-  properties: {
-    managedEnvironmentId: environment.id
-    configuration: {
-      activeRevisionsMode: 'Single'
-      secrets: encryptionSecrets
-      ingress: {
-        external: true
-        targetPort: 3000
-        transport: 'auto'
-        // SEC-8: HTTPS-only — reject plaintext at the ingress.
-        allowInsecure: false
-      }
-      registries: [
-        {
-          server: containerRegistryServer
-          identity: identity.id
-        }
-      ]
-    }
-    template: {
-      containers: [
-        {
-          name: 'hve-squad-mcp'
-          image: containerImage
-          resources: {
-            cpu: json('0.5')
-            memory: '1Gi'
-          }
-          env: concat(webBaseEnv, storageEnv, pipelineEnv, encryptionEnv, memoryEncryptionEnv, renderEnv, memoryEnv, businessEnv, artifactsEnv, advisoryAutopilotEnv)
-        }
-      ]
-      scale: {
-        // COST-3 / ARCH-2: scale-to-zero with HTTP-driven scale-out.
-        minReplicas: minReplicas
-        maxReplicas: maxReplicas
-        rules: [
-          {
-            name: 'http-concurrency'
-            http: {
-              metadata: {
-                concurrentRequests: '20'
-              }
-            }
-          }
-        ]
-      }
-    }
+module storage 'modules/storage.bicep' = if (enableStorage) {
+  name: '${modulePrefix}-storage'
+  params: {
+    name: storageAccountName
+    location: location
+    tableNames: tableNames
+    blobContainerNames: blobContainerNames
+    dataPrincipalId: identity.outputs.principalId
+    dataIdentityId: identity.outputs.id
+    tags: tags
   }
 }
 
-// SEC-1 (defense-in-depth): require an Entra token at the ingress in addition to
-// the app's own audience-bound validation. The original Authorization header is
-// forwarded so the app still performs audience + per-tool scope checks.
-resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-03-01' = {
-  parent: app
-  name: 'current'
-  properties: {
-    platform: {
-      enabled: true
-    }
-    globalValidation: {
-      unauthenticatedClientAction: 'Return401'
-    }
-    identityProviders: {
-      azureActiveDirectory: {
-        enabled: true
-        registration: {
-          openIdIssuer: authOpenIdIssuer
-          clientId: authClientId
-        }
-        validation: {
-          allowedAudiences: [
-            squad.audience
-          ]
-        }
-      }
-    }
+module environment 'modules/container-apps-environment.bicep' = {
+  name: '${modulePrefix}-environment'
+  params: {
+    name: '${namePrefix}-env'
+    location: location
+    logAnalyticsWorkspaceName: logAnalytics.outputs.name
+    tags: tags
   }
 }
 
-// WI-06: cross-replica run-state + approval store (Azure Table Storage). ETag
-// If-Match gives a true compare-and-swap so exactly one replica drives a run.
-resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = if (enableStorage) {
-  name: storageAccountName
-  location: location
-  sku: {
-    name: 'Standard_LRS'
-  }
-  kind: 'StorageV2'
-  properties: {
-    minimumTlsVersion: 'TLS1_2'
-    allowBlobPublicAccess: false
-    supportsHttpsTrafficOnly: true
-  }
-}
-
-resource tableService 'Microsoft.Storage/storageAccounts/tableServices@2023-05-01' = if (enableTableStorage) {
-  parent: storage
-  name: 'default'
-}
-
-resource runTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-05-01' = if (enableRemotePipeline) {
-  parent: tableService
-  name: runTableName
-}
-
-// Shared-state memory broker table. Separate from the run table: a memory entry is
-// not a run (DR-03), and memory outlives the run that produced it.
-resource memoryTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-05-01' = if (enableMemoryTable) {
-  parent: tableService
-  name: memoryTableName
-}
-
-// Let the app + worker identity read/write run + memory records. Account-scoped RBAC.
-resource storageTableRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableTableStorage) {
-  name: guid(storageAccountName, identity.id, storageTableDataContributorRoleId)
-  scope: storage
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageTableDataContributorRoleId)
-    principalId: identity.properties.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// squad_render_pptx: a private Blob container for rendered decks + the Blob Data
-// Contributor role so the app identity can PUT decks and mint user-delegation SAS
-// (that role grants generateUserDelegationKey/action). Public access is disabled;
-// each download link is a short-lived per-blob user-delegation SAS.
-resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = if (enableBlobStorage) {
-  parent: storage
-  name: 'default'
-}
-
-resource renderContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = if (enableRenderPptx) {
-  parent: blobService
-  name: renderBlobContainer
-  properties: {
-    publicAccess: 'None'
-  }
-}
-
-// WI-03 overflow: a private container for over-threshold memory payloads. The blob
-// carries the same at-rest envelope as the primary store; the pointer entity left
-// behind never holds plaintext.
-resource memoryOverflowBlobContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = if (enableMemoryOverflow) {
-  parent: blobService
-  name: memoryOverflowContainer
-  properties: {
-    publicAccess: 'None'
-  }
-}
-
-resource storageBlobRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableBlobStorage) {
-  name: guid(storageAccountName, identity.id, storageBlobDataContributorRoleId)
-  scope: storage
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataContributorRoleId)
-    principalId: identity.properties.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// WI-1b4-WORKER: a scheduled ACA Job drains approved runs off the request path so
-// a run may exceed the 240s HTTP ingress ceiling. It shares the app image + the
-// same identity + the same cross-replica store; SQUAD_MCP_WORKER_ONCE makes each
-// scheduled run a single drain pass that exits.
-resource workerJob 'Microsoft.App/jobs@2024-03-01' = if (enableWorker) {
-  name: '${namePrefix}-worker'
-  location: location
-  identity: {
-    type: 'UserAssigned'
-    userAssignedIdentities: {
-      '${identity.id}': {}
-    }
-  }
-  properties: {
-    environmentId: environment.id
-    configuration: {
-      triggerType: 'Schedule'
-      replicaTimeout: 1800
-      replicaRetryLimit: 1
-      secrets: encryptionSecrets
-      scheduleTriggerConfig: {
-        cronExpression: workerCron
-        parallelism: 1
-        replicaCompletionCount: 1
-      }
-      registries: [
-        {
-          server: containerRegistryServer
-          identity: identity.id
-        }
-      ]
-    }
-    template: {
-      containers: [
-        {
-          name: 'hve-squad-mcp-worker'
-          image: containerImage
-          command: [ 'node', 'dist/src/worker-main.js' ]
-          resources: {
-            cpu: json('0.5')
-            memory: '1Gi'
-          }
-          env: concat(webBaseEnv, storageEnv, pipelineEnv, encryptionEnv, memoryEncryptionEnv, memoryEnv, artifactsEnv, advisoryAutopilotEnv, [
-            { name: 'SQUAD_MCP_WORKER_ONCE', value: 'true' }
-          ])
-        }
-      ]
-    }
-  }
-}
-
-// COST-2: monthly budget with 70 / 90 / 100% alerts.
-resource budget 'Microsoft.Consumption/budgets@2023-11-01' = {
-  name: '${namePrefix}-budget'
-  properties: {
-    category: 'Cost'
+module budget 'modules/budget.bicep' = {
+  name: '${modulePrefix}-budget'
+  params: {
+    name: '${namePrefix}-budget'
     amount: budgetAmountUsd
-    timeGrain: 'Monthly'
-    timePeriod: {
-      startDate: budgetStartDate
-    }
-    notifications: {
-      alert70: {
-        enabled: true
-        operator: 'GreaterThanOrEqualTo'
-        threshold: 70
-        thresholdType: 'Actual'
-        contactEmails: budgetAlertEmails
-      }
-      alert90: {
-        enabled: true
-        operator: 'GreaterThanOrEqualTo'
-        threshold: 90
-        thresholdType: 'Actual'
-        contactEmails: budgetAlertEmails
-      }
-      alert100: {
-        enabled: true
-        operator: 'GreaterThanOrEqualTo'
-        threshold: 100
-        thresholdType: 'Actual'
-        contactEmails: budgetAlertEmails
-      }
-    }
+    startDate: budgetStartDate
+    contactEmails: budgetAlertEmails
   }
 }
 
-@description('The HTTPS FQDN of the deployed /mcp endpoint.')
-output mcpFqdn string = app.properties.configuration.ingress.fqdn
+// ─── Application (phase 2) ───────────────────────────────────────────────────
 
-@description('The app managed-identity principal id (grant it Cognitive Services OpenAI User on the AOAI account).')
-output appPrincipalId string = identity.properties.principalId
+var containerImage = '${registry.outputs.loginServer}/${imageRepository}:${containerImageTag}'
+
+module app 'modules/container-app.bicep' = if (deployApplication) {
+  name: '${modulePrefix}-app'
+  params: {
+    name: '${namePrefix}-app'
+    location: location
+    environmentId: environment.outputs.id
+    identityId: identity.outputs.id
+    registryServer: registry.outputs.loginServer
+    image: containerImage
+    env: concat(webBaseEnv, storageEnv, pipelineEnv, encryptionEnv, memoryEncryptionEnv, renderEnv, memoryEnv, businessEnv, artifactsEnv, advisoryAutopilotEnv)
+    runEncryptionKeyBase64: runEncryptionKeyBase64
+    minReplicas: minReplicas
+    maxReplicas: maxReplicas
+    authClientId: authClientId
+    authOpenIdIssuer: authOpenIdIssuer
+    audience: squad.audience
+    tags: tags
+  }
+  dependsOn: [
+    // Secrets and storage grants must exist before the first revision starts. The
+    // AcrPull and Azure OpenAI grants are already implied by the outputs used above.
+    keyVault
+    storage
+  ]
+}
+
+module workerJob 'modules/worker-job.bicep' = if (deployApplication && enableWorker) {
+  name: '${modulePrefix}-worker'
+  params: {
+    name: '${namePrefix}-worker'
+    location: location
+    environmentId: environment.outputs.id
+    identityId: identity.outputs.id
+    registryServer: registry.outputs.loginServer
+    image: containerImage
+    env: concat(webBaseEnv, storageEnv, pipelineEnv, encryptionEnv, memoryEncryptionEnv, memoryEnv, artifactsEnv, advisoryAutopilotEnv)
+    runEncryptionKeyBase64: runEncryptionKeyBase64
+    cronExpression: workerCron
+    tags: tags
+  }
+  dependsOn: [
+    keyVault
+    storage
+  ]
+}
+
+@description('The HTTPS FQDN of the deployed /mcp endpoint (empty in the foundation phase).')
+output mcpFqdn string = app.?outputs.fqdn ?? ''
+
+@description('The container registry name (the target of az acr build).')
+output containerRegistryName string = registry.outputs.name
+
+@description('The container registry login server.')
+output containerRegistryLoginServer string = registry.outputs.loginServer
+
+@description('The image reference the app runs.')
+output containerImage string = containerImage
+
+@description('The Azure OpenAI endpoint the server calls.')
+output modelEndpoint string = openAiAccount.outputs.endpoint
+
+@description('The app managed-identity principal id (already granted Cognitive Services OpenAI User on the AOAI account).')
+output appPrincipalId string = identity.outputs.principalId
 
 @description('The Key Vault name for operator secrets.')
-output keyVaultName string = keyVault.name
+output keyVaultName string = keyVault.outputs.name
 
 @description('The Azure Storage account backing the async run-state store (empty when the pipeline is disabled).')
 output runStateStorageAccount string = enableRemotePipeline ? storageAccountName : ''
 
 @description('The app managed-identity CLIENT id. Pass it to graph-memory-permissions.bicep, which grants that identity access to the SharePoint library backing the graph memory backend.')
-output appClientId string = identity.properties.clientId
+output appClientId string = identity.outputs.clientId
 
 @description('Where squad memory is persisted, or empty when the memory broker is disabled.')
 output memoryBackendInUse string = enableMemory ? memoryBackend : ''

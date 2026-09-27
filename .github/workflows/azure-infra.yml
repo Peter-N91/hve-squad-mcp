@@ -1,0 +1,308 @@
+# Lint, what-if, and deploy the Azure hosting (host/infra) — the automated form
+# of host/RUNBOOK.md Steps 3 to 7.
+#
+#   lint     — every run. Lints and compiles every .bicep / .bicepparam under
+#              host/infra. Offline; needs no Azure access.
+#   what-if  — every run once Azure is bootstrapped. Shows exactly what a deploy
+#              would change. Environment `azure-plan` (no reviewers), signed in
+#              as a PLAN identity that can read and run what-if but cannot change
+#              any resource — so editing this file in a pull request cannot deploy.
+#   deploy   — main only, after what-if succeeds, and ONLY once a required
+#              reviewer approves it in environment `azure-production`. Deploys the
+#              foundation, builds the image in ACR, deploys the app, smoke-tests.
+#
+# Identity: GitHub OIDC federated into user-assigned MANAGED IDENTITIES — no
+# secret is stored. The deploy identity trusts ONLY the `azure-production`
+# environment (required reviewers, `main` only), so nothing reaches it without
+# approval. The identities, federated credentials, RBAC (the workload resource
+# group only), environments, and AZURE_* variables are created once by
+# host/infra/bootstrap/Initialize-AzureCicd.ps1.
+#
+# Configuration: every deployment detail lives in host/infra/main.bicepparam. This
+# workflow passes nothing on the command line; the parameter file reads the image
+# tag (CONTAINER_IMAGE_TAG), the phase (DEPLOY_APPLICATION), and the optional
+# encryption key (SQUAD_MCP_RUN_ENCRYPTION_KEY_B64) from the environment.
+#
+# The what-if and deploy jobs are skipped — not failed — until the bootstrap has
+# set AZURE_CLIENT_ID and main.bicepparam carries no <PLACEHOLDER>, so the lint
+# gate stays green on a fork or a fresh clone.
+name: Azure infrastructure
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'host/infra/**'
+      - 'host/Containerfile'
+      - '.github/workflows/azure-infra.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'host/**'
+      - 'src/**'
+      - 'generated/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'tools.catalog.yml'
+      - '.github/workflows/azure-infra.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: azure-infra-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  BICEP_VERSION: v0.43.8
+  PARAMETER_FILE: host/infra/main.bicepparam
+
+jobs:
+  lint:
+    name: Lint and build Bicep
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.readiness.outputs.ready }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Runners ship a bicep binary on PATH, which az prefers in CI; opt out so the
+      # pinned version is the one that runs.
+      - name: Install Bicep
+        run: |
+          az config set bicep.use_binary_from_path=false --only-show-errors
+          az bicep install --version "$BICEP_VERSION"
+          az bicep version
+
+      - name: Lint and compile templates
+        run: |
+          set -euo pipefail
+          failed=0
+          while IFS= read -r -d '' file; do
+            echo "::group::$file"
+            az bicep lint --file "$file" || failed=1
+            az bicep build --file "$file" --stdout > /dev/null || failed=1
+            echo "::endgroup::"
+          done < <(find host/infra -name '*.bicep' -print0 | sort -z)
+          exit "$failed"
+
+      # build-params type-checks each parameter file against its template.
+      - name: Compile parameter files
+        run: |
+          set -euo pipefail
+          failed=0
+          while IFS= read -r -d '' file; do
+            echo "::group::$file"
+            az bicep lint --file "$file" || failed=1
+            az bicep build-params --file "$file" --stdout > /dev/null || failed=1
+            echo "::endgroup::"
+          done < <(find host/infra -name '*.bicepparam' -print0 | sort -z)
+          exit "$failed"
+
+      - name: Check deployment readiness
+        id: readiness
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_PLAN_CLIENT_ID: ${{ vars.AZURE_PLAN_CLIENT_ID }}
+          AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+        run: |
+          set -euo pipefail
+          ready=true
+          if [ -z "${AZURE_CLIENT_ID:-}" ] || [ -z "${AZURE_PLAN_CLIENT_ID:-}" ] || [ -z "${AZURE_RESOURCE_GROUP:-}" ]; then
+            echo "::notice::AZURE_CLIENT_ID / AZURE_PLAN_CLIENT_ID / AZURE_RESOURCE_GROUP are not set; run host/infra/bootstrap/Initialize-AzureCicd.ps1. Skipping what-if and deploy."
+            ready=false
+          fi
+          placeholders=$(grep -vE '^\s*//' "$PARAMETER_FILE" | grep -oE '<[A-Z][A-Z0-9_]*>' | sort -u | tr '\n' ' ' || true)
+          if [ -n "$placeholders" ]; then
+            echo "::notice file=$PARAMETER_FILE::Unfilled placeholders: $placeholders. Skipping what-if and deploy."
+            ready=false
+          fi
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+
+  what-if:
+    name: What-if
+    needs: lint
+    # Fork pull requests get no OIDC token, so they stop at lint.
+    if: >-
+      needs.lint.outputs.ready == 'true' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    environment: azure-plan
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      CONTAINER_IMAGE_TAG: ${{ github.sha }}
+      DEPLOY_APPLICATION: 'true'
+      SQUAD_MCP_RUN_ENCRYPTION_KEY_B64: ${{ secrets.SQUAD_MCP_RUN_ENCRYPTION_KEY_B64 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Bicep
+        run: |
+          az config set bicep.use_binary_from_path=false --only-show-errors
+          az bicep install --version "$BICEP_VERSION"
+
+      - name: Azure login (OIDC -> plan identity, read + what-if only)
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_PLAN_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: What-if
+        run: |
+          set -euo pipefail
+          az deployment group what-if \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "hve-squad-mcp-whatif-$GITHUB_RUN_ID" \
+            --parameters "$PARAMETER_FILE" \
+            --result-format FullResourcePayloads \
+            --only-show-errors | tee whatif.txt
+          {
+            echo "### What-if against \`$AZURE_RESOURCE_GROUP\`"
+            echo
+            echo '```text'
+            sed 's/\x1b\[[0-9;]*m//g' whatif.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain the what-if output
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: what-if
+          path: whatif.txt
+          retention-days: 30
+
+  deploy:
+    name: Deploy (requires approval)
+    needs: [lint, what-if]
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/main' &&
+      needs.what-if.result == 'success'
+    runs-on: ubuntu-latest
+    # Required reviewers on this environment are the approval gate.
+    environment:
+      name: azure-production
+      url: ${{ steps.app.outputs.url }}
+    concurrency:
+      group: azure-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      CONTAINER_IMAGE_TAG: ${{ github.sha }}
+      SQUAD_MCP_RUN_ENCRYPTION_KEY_B64: ${{ secrets.SQUAD_MCP_RUN_ENCRYPTION_KEY_B64 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Bicep
+        run: |
+          az config set bicep.use_binary_from_path=false --only-show-errors
+          az bicep install --version "$BICEP_VERSION"
+
+      - name: Azure login (OIDC -> deploy identity)
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # Phase 1: identity, logs, Key Vault, registry + AcrPull, Azure OpenAI + its
+      # grant, storage, ACA environment, budget. The registry must exist, and the
+      # app identity must already hold AcrPull, before the app references an image.
+      - name: Deploy foundation
+        id: foundation
+        env:
+          DEPLOY_APPLICATION: 'false'
+        run: |
+          set -euo pipefail
+          az deployment group create \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name hve-squad-mcp-foundation \
+            --parameters "$PARAMETER_FILE" \
+            --query properties.outputs \
+            --only-show-errors --output json > foundation.json
+          registry=$(jq -r '.containerRegistryName.value' foundation.json)
+          image=$(jq -r '.containerImage.value' foundation.json)
+          echo "registry=$registry" >> "$GITHUB_OUTPUT"
+          # az acr build takes repository:tag, without the login server.
+          echo "image=${image#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Build image in ACR
+        env:
+          REGISTRY: ${{ steps.foundation.outputs.registry }}
+          IMAGE: ${{ steps.foundation.outputs.image }}
+        run: |
+          set -euo pipefail
+          az acr build \
+            --registry "$REGISTRY" \
+            --image "$IMAGE" \
+            --file host/Containerfile \
+            --only-show-errors \
+            .
+
+      # Phase 2: the Container App (+ worker job when enabled) on the new image.
+      - name: Deploy application
+        id: app
+        env:
+          DEPLOY_APPLICATION: 'true'
+        run: |
+          set -euo pipefail
+          az deployment group create \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name hve-squad-mcp \
+            --parameters "$PARAMETER_FILE" \
+            --query properties.outputs \
+            --only-show-errors --output json > outputs.json
+          fqdn=$(jq -r '.mcpFqdn.value' outputs.json)
+          echo "fqdn=$fqdn" >> "$GITHUB_OUTPUT"
+          echo "url=https://$fqdn/mcp" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Deployed \`$CONTAINER_IMAGE_TAG\`"
+            echo
+            echo "| Output | Value |"
+            echo "|--------|-------|"
+            jq -r 'to_entries[] | "| \(.key) | `\(.value.value)` |"' outputs.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # An unauthenticated initialize must be REJECTED with 401 by the ACA Entra
+      # auth layer: proves ingress, TLS, and SEC-1 are live. Retries cover the
+      # scale-from-zero cold start.
+      - name: Smoke test /mcp
+        env:
+          FQDN: ${{ steps.app.outputs.fqdn }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            status=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 60 \
+              -X POST "https://$FQDN/mcp" \
+              -H 'Content-Type: application/json' \
+              -H 'Origin: https://copilotstudio.microsoft.com' \
+              -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' || echo 000)
+            echo "attempt $attempt: HTTP $status"
+            if [ "$status" = "401" ]; then
+              echo "Unauthenticated call rejected with 401 as required."
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::Expected HTTP 401 from an unauthenticated /mcp call; last status $status."
+          exit 1
