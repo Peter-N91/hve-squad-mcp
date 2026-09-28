@@ -6,9 +6,14 @@ using './graph-memory-permissions.bicep'
 // Replace every <PLACEHOLDER> with your values. No secret belongs here — the
 // grants run as the managed identity named by grantIdentityResourceId.
 
+param location = '<AZURE_REGION>'
+param namePrefix = 'squadmcp'
+
 // From the main.bicep outputs.
 param appPrincipalId = '<APP_PRINCIPAL_ID>'
 param appClientId = '<APP_CLIENT_ID>'
+param appDisplayName = 'hve-squad-mcp'
+param graphAppRoleId = '883ea226-0bf2-4a8f-9f9d-92c9162a727d'
 
 // The site whose document library holds squad memory. Get the id with:
 //   az rest --method GET \
@@ -22,3 +27,4 @@ param sharePointSiteId = '<SHAREPOINT_SITE_ID>'
 // high-privilege grant is auditable to one named principal and no credential is
 // stored in this template.
 param grantIdentityResourceId = '/subscriptions/<SUB_ID>/resourceGroups/<RG>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<GRANT_IDENTITY>'
+param scriptRetentionInterval = 'PT1H'
