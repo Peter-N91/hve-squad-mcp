@@ -1,9 +1,11 @@
 <!-- markdownlint-disable-file -->
 # RUNBOOK — deploy the hve-squad MCP remote thin slice to YOUR Azure tenant
 
-> **Documentation-only.** This runbook is a reference sequence. Nothing here runs
-> automatically — you (the operator) run each step in **your own** Azure tenant
-> after reviewing it. Replace every `<PLACEHOLDER>` with your values.
+> **Automation-first.** Pull requests lint and compile the Bicep. Trusted pushes
+> and manual runs execute Azure what-if, then pause at a protected GitHub
+> `production` environment before building the image or changing Azure. One-time
+> tenant-admin steps remain explicit. Replace every `<PLACEHOLDER>` with your
+> values before enabling the workflow.
 >
 > **Fidelity claim (locked):** squad-guided / embedded — NOT "squad-executed". The
 > squad runs server-side under its gates and methodology and returns a finished
@@ -45,6 +47,8 @@ before spend grows.
 - Permission to **register an Entra application** and grant admin consent in your
   tenant.
 - The Azure CLI (`az`) with the Bicep tooling (`az bicep install`).
+- PowerShell 7 and the GitHub CLI (`gh`) for the one-time deployment-identity
+  bootstrap.
 - Access to **Microsoft Copilot Studio** in the same tenant, with permission to
   create custom connectors and enable generative orchestration.
 - The built server in this package (`squad-mcp/`); the container image is built in
@@ -70,21 +74,22 @@ az group create --name "$RESOURCE_GROUP" --location "$LOCATION"
 
 ## Step 1 — deploy identity (OIDC for CI, or local `az` for a manual run)
 
-You can deploy manually with your own `az login` (above) or wire the reference
-GitHub Actions workflow (`host/oidc/deploy-aca.workflow.yml`) with **workload-identity
-federation** so no client secret is ever stored.
+Run the repository's idempotent bootstrap once:
 
-For the CI path, reuse the one-time OIDC wizard shipped under the `azure-scaffold`
-skill rather than duplicating it:
+```powershell
+./host/oidc/Setup-AzureDeploymentIdentity.ps1 `
+  -GitHubRepository '<OWNER>/<REPOSITORY>' `
+  -ResourceGroup '<RESOURCE_GROUP>' `
+  -ContainerRegistryName '<REGISTRY>' `
+  -ProductionApprover '<GITHUB_USERNAME>' `
+  -Location '<AZURE_REGION>'
+```
 
-- Template: `squad-src/.github/skills/azure-scaffold/Setup-AzureOidc.template.ps1`
-- Copy it into your consumer repo as `scripts/Setup-AzureOidc.ps1` and run it once.
-
-It creates the deploy app registration, the federated credential
-(`repo:<owner>/<repo>:environment:prod`), the RBAC role assignments, and the
-`AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID` GitHub secrets the
-deploy workflow consumes. See [host/oidc/README.md](oidc/README.md) for the
-ACA-specific notes.
+It creates a **user-assigned managed identity**, federates it to the `preview`
+and `production` GitHub environments, applies the deployment RBAC, configures
+the repository variables, and makes `production` require the named reviewer.
+No client secret is created. See [host/oidc/README.md](oidc/README.md) for the
+exact permissions and trust subjects.
 
 > The **deploy** identity is separate from the **app's** managed identity created in
 > Step 6. The app identity is what calls Azure OpenAI at runtime (Step 7).
@@ -185,8 +190,12 @@ Edit [host/infra/main.bicepparam](infra/main.bicepparam) and replace every
 `<PLACEHOLDER>`. Every value is **operator-controlled** and never caller-influenced:
 
 ```bicep
-param containerImage = '<REGISTRY>.azurecr.io/hve-squad-mcp:latest'
-param containerRegistryServer = '<REGISTRY>.azurecr.io'
+param location = '<AZURE_REGION>'
+param containerRegistryName = '<REGISTRY>'
+param imageRepository = 'hve-squad-mcp'
+param imageTag = 'latest' // CI overrides this with the commit SHA
+param containerRegistrySkuName = 'Basic'
+param azureOpenAiAccountName = '<AOAI_RESOURCE>'
 param authClientId = '<ENTRA_CLIENT_ID>'      // the APP_ID from Step 2
 param authOpenIdIssuer = 'https://login.microsoftonline.com/<ENTRA_TENANT_ID>/v2.0'
 
@@ -213,30 +222,23 @@ These map 1:1 to the server's environment contract (`SQUAD_MCP_AUDIENCE`,
 the Container App sets them for you. No secret belongs in this file — the model
 token comes from managed identity at runtime (SEC-10).
 
-## Step 5 — build the image in ACR (real, small spend)
+## Step 5 — validate and review Azure what-if
 
-```bash
-az acr build \
-  --registry "$ACR_NAME" \
-  --image "$IMAGE" \
-  --file squad-mcp/host/Containerfile \
-  squad-mcp
-```
+The active [Azure infrastructure workflow](../.github/workflows/azure-deploy.yml)
+runs:
 
-This builds and pushes `$ACR_NAME.azurecr.io/$IMAGE`. The multi-stage build runs
-`npm run build` and ships only `dist/`, `tools.catalog.yml`, and `generated/`; no
-secret is baked into the image (SEC-10).
+1. `az bicep lint` and `az bicep build-params` on pull requests;
+2. the same static checks plus `az deployment group what-if` on a trusted push
+   to `main` or a manual workflow run; and
+3. a protected `production` job only after what-if succeeds.
+
+Review the what-if in the workflow summary. The deployment job remains paused
+until a configured production reviewer approves it.
 
 ## Step 6 — deploy the Container App + Key Vault + managed identity (real, small spend)
 
-```bash
-az deployment group create \
-  --resource-group "$RESOURCE_GROUP" \
-  --template-file squad-mcp/host/infra/main.bicep \
-  --parameters squad-mcp/host/infra/main.bicepparam \
-  --parameters containerImage="$ACR_NAME.azurecr.io/$IMAGE" \
-  --parameters containerRegistryServer="$ACR_NAME.azurecr.io"
-```
+After approval, the workflow builds the commit-pinned image with ACR Tasks and
+deploys `main.bicep`. No local Docker daemon or stored Azure credential is used.
 
 `main.bicep` provisions, in one resource-group-scoped deployment:
 
@@ -248,34 +250,21 @@ az deployment group create \
   (defense-in-depth; SEC-1); and
 - a **monthly budget** with 70 / 90 / 100% alerts (COST-2).
 
-Capture the outputs:
-
-```bash
-az deployment group show \
-  --resource-group "$RESOURCE_GROUP" \
-  --name main \
-  --query "properties.outputs.{fqdn:mcpFqdn.value, principal:appPrincipalId.value, kv:keyVaultName.value}"
-```
+Every ARM resource is defined in one module under `host/infra/modules/` and
+composed by `main.bicep`. Environment values and feature flags remain in
+`main.bicepparam`. Deployment outputs are written to the GitHub job summary.
 
 - `mcpFqdn` — the HTTPS FQDN of your `/mcp` endpoint.
 - `appPrincipalId` — the app managed-identity principal id (used in Step 7).
 - `keyVaultName` — the Key Vault for any operator secrets.
 
-## Step 7 — grant the app identity access to Azure OpenAI (SEC-3 / SEC-10)
+## Step 7 — verify managed-identity access and smoke-test (SEC-3 / SEC-10)
 
 The embedded backend authenticates to AOAI with the app's **managed identity** —
-no key in code or image. Grant it the data-plane role on the AOAI account:
-
-```bash
-APP_PRINCIPAL_ID="<appPrincipalId from Step 6>"
-AOAI_RESOURCE_ID=$(az cognitiveservices account show \
-  --name "$AOAI_NAME" --resource-group "$RESOURCE_GROUP" --query id -o tsv)
-
-az role assignment create \
-  --assignee "$APP_PRINCIPAL_ID" \
-  --role "Cognitive Services OpenAI User" \
-  --scope "$AOAI_RESOURCE_ID"
-```
+no key in code or image. The modular deployment grants it **Cognitive Services
+OpenAI User** on the configured account and **AcrPull** on the configured
+registry. It also grants the Key Vault and optional Storage roles declared in
+`main.bicepparam`; there is no post-deployment RBAC command.
 
 Smoke-test the endpoint (auth + handshake). `initialize` does not require a scope;
 a `tools/call` does (Step 8 validates that end to end through Copilot Studio):
@@ -691,23 +680,22 @@ Entra-authenticated `/mcp` endpoint.
 
 - **No shell / process execution** over the remote boundary; the embedded engine
   does inference plus contained file I/O only (SEC-7).
-- `squad_run` **is** exposed as a gated async pipeline, but a long run beyond the
-  240s ACA ingress timeout needs a **background worker / ACA Job** to drive
-  execution off the status-poll path; that worker is not deployed here, so keep
-  runs short.
+- `squad_run` **is** exposed as a gated async pipeline. Enable both
+  `enableRemotePipeline` and `enableWorker` in `main.bicepparam` when runs can
+  exceed the 240s ACA ingress timeout.
 - **No M365 / Agent 365 (PROD-4) and no Microsoft Cowork (PROD-3)** targets yet.
 - Widening the remote surface to `squad_run` / `squad_status` reopens the
   council-gated PROD-1 boundary; a **security re-gate** is required before
   production use, even though the gate is safe by construction (holds, never
   auto-releases, cross-tenant denied).
-- Durable resumable run-state **is** realized for the async pipeline
-  (`DurableRunStateStore`); the production store targets Azure Storage / Key Vault
-  (a follow-up) rather than the local file store used here.
+- Durable resumable run-state uses the managed-identity-backed Azure Table
+  resources deployed by the template when the remote pipeline is enabled.
 
 ## Cross-references
 
 - IaC: [host/infra/main.bicep](infra/main.bicep) · [host/infra/main.bicepparam](infra/main.bicepparam)
 - Image: [host/Containerfile](Containerfile)
-- OIDC: [host/oidc/README.md](oidc/README.md) · [host/oidc/deploy-aca.workflow.yml](oidc/deploy-aca.workflow.yml)
+- CI/CD: [.github/workflows/azure-deploy.yml](../.github/workflows/azure-deploy.yml)
+- OIDC: [host/oidc/README.md](oidc/README.md) · [host/oidc/Setup-AzureDeploymentIdentity.ps1](oidc/Setup-AzureDeploymentIdentity.ps1)
 - Connector: [generated/copilot-studio-connector/README.md](../generated/copilot-studio-connector/README.md)
 - Conformance gate (run before you ship): `npm run test:conformance` in `squad-mcp/`.
