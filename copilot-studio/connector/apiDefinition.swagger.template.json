@@ -38,10 +38,10 @@
       "authorizationUrl": "https://login.microsoftonline.com/<ENTRA_TENANT_ID>/oauth2/v2.0/authorize",
       "tokenUrl": "https://login.microsoftonline.com/<ENTRA_TENANT_ID>/oauth2/v2.0/token",
       "scopes": {
-        "api://<ENTRA_CLIENT_ID>/Squad.Research": "Invoke squad_research",
-        "api://<ENTRA_CLIENT_ID>/Squad.Plan": "Invoke squad_plan",
-        "api://<ENTRA_CLIENT_ID>/Squad.Review": "Invoke squad_review",
-        "api://<ENTRA_CLIENT_ID>/Squad.Architect": "Invoke squad_architect"
+        "<ENTRA_RESOURCE_URI>/Squad.Research": "Invoke squad_research",
+        "<ENTRA_RESOURCE_URI>/Squad.Plan": "Invoke squad_plan",
+        "<ENTRA_RESOURCE_URI>/Squad.Review": "Invoke squad_review",
+        "<ENTRA_RESOURCE_URI>/Squad.Architect": "Invoke squad_architect"
       }
     }
   },

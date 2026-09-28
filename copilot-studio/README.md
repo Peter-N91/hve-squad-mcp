@@ -131,9 +131,23 @@ The four included tools are exposed by a default deployment. Confirm only:
 ## Connector templates
 
 `connector/*.template.json` are placeholder versions of the Copilot Studio custom
-connector. Copy them, replace `<CONTAINER_APP_FQDN>`, `<ENTRA_TENANT_ID>`, and
-`<ENTRA_CLIENT_ID>`, and import the result. The filled-in copies are
-git-ignored because they identify a live tenant and endpoint.
+connector. Copy them, replace `<CONTAINER_APP_FQDN>`, `<ENTRA_TENANT_ID>`,
+`<ENTRA_CLIENT_ID>`, and `<ENTRA_RESOURCE_URI>`, and import the result. The
+filled-in copies are git-ignored because they identify a live tenant and
+endpoint.
+
+`<ENTRA_RESOURCE_URI>` is the token **resource** a client requests a scope
+against (the OAuth `resourceUri` / `AzureActiveDirectoryResourceId` setting
+and the prefix on every `scopes` entry) — it is **not** always the same value
+as `<ENTRA_CLIENT_ID>`:
+
+- **App registered by `host/infra/bootstrap/entra-app.bicep`:** use its
+  `identifierUri` output, `api://<ENTRA_TENANT_ID>/<uniqueName>`. The token's
+  `aud` claim is still the appId GUID (`<ENTRA_CLIENT_ID>` / the `tokenAudience`
+  output) — that value goes into `SQUAD_MCP_AUDIENCE` / `squad.audience`
+  elsewhere (see `host/RUNBOOK.md`), not into `<ENTRA_RESOURCE_URI>` here.
+- **Manually registered (v1-token) app:** use `api://<ENTRA_CLIENT_ID>`, same
+  as before.
 
 Two settings in these templates differ from the generated connector under
 `generated/copilot-studio-connector/` and matter:
