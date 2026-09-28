@@ -219,7 +219,7 @@ Everything here is new. The generator reads the existing squad sources read-only
 
 - Remote deploy runbook: [host/RUNBOOK.md](host/RUNBOOK.md) (ACA + Entra + Copilot Studio connector).
 - Dual-mode decision record: [docs/planning/adrs/0001-dual-mode-mcp-exposure-delegated-vs-embedded.md](docs/planning/adrs/0001-dual-mode-mcp-exposure-delegated-vs-embedded.md) (delegated vs embedded, trust boundary, ARCH-1/ARCH-2).
-- IaC: [host/infra/main.bicep](host/infra/main.bicep) · connector: [generated/copilot-studio-connector/README.md](generated/copilot-studio-connector/README.md).
+- IaC: [host/infra/main.bicep](host/infra/main.bicep) (one module per resource under `host/infra/modules/`, every value in `main.bicepparam`) · CI/CD: [.github/workflows/azure-infra.yml](.github/workflows/azure-infra.yml) (lint + what-if automatically, deploy on approval via managed identity) · connector: [generated/copilot-studio-connector/README.md](generated/copilot-studio-connector/README.md).
 - Conformance (security) proof: `test/conformance/` (auth rejection, cross-tenant, gate carry-through, remote async, pipeline exposure).
 
 ## Contributing

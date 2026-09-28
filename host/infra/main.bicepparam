@@ -1,31 +1,77 @@
 using './main.bicep'
 
-// Replace every <PLACEHOLDER> with your tenant's values before deploying.
-// No secret belongs here — the model token comes from managed identity at runtime.
+// Every deployment detail lives here. The CI/CD workflow
+// (.github/workflows/azure-infra.yml) deploys this file as-is and passes nothing on
+// the command line; the only values it injects arrive through the environment
+// variables read below (the image tag it built, the deployment phase, and the
+// optional encryption key from a GitHub secret).
+//
+// Replace every <PLACEHOLDER> before the first deployment. The workflow refuses to
+// run what-if or deploy while a placeholder remains. None of these values is a
+// secret; the model token comes from managed identity at runtime (SEC-10).
 
-param containerImage = '<REGISTRY>.azurecr.io/hve-squad-mcp:latest'
-param containerRegistryServer = '<REGISTRY>.azurecr.io'
-param authClientId = '<ENTRA_CLIENT_ID>'
-param authOpenIdIssuer = 'https://login.microsoftonline.com/<ENTRA_TENANT_ID>/v2.0'
+// ─── Tenant + resource-server identity (RUNBOOK Step 2) ──────────────────────
+// The Entra app registration created by host/infra/bootstrap/Initialize-AzureCicd.ps1
+// (its apiClientId output).
+var entraTenantId = '<ENTRA_TENANT_ID>'
+var apiClientId = '<ENTRA_CLIENT_ID>'
+var entraIssuer = 'https://login.microsoftonline.com/${entraTenantId}/v2.0'
 
-param squad = {
-  audience: 'api://<ENTRA_CLIENT_ID>'
-  allowedOrigins: 'https://copilotstudio.microsoft.com'
-  allowedIssuers: 'https://login.microsoftonline.com/<ENTRA_TENANT_ID>/v2.0'
-  allowedTenants: '<ENTRA_TENANT_ID>'
-  jwksUri: 'https://login.microsoftonline.com/<ENTRA_TENANT_ID>/discovery/v2.0/keys'
-  modelEndpoint: 'https://<AOAI_RESOURCE>.openai.azure.com'
-  allowedModelEndpoints: 'https://<AOAI_RESOURCE>.openai.azure.com'
-  modelDeployment: '<AOAI_DEPLOYMENT>'
-  modelApiVersion: '2024-10-21'
-  tenantConcurrency: 4
-  tenantCostCeilingUsd: 500
+param namePrefix = 'squadmcp'
+param tags = {
+  workload: 'hve-squad-mcp'
+  managedBy: 'bicep'
 }
 
+// ─── Image (RUNBOOK Step 5) ──────────────────────────────────────────────────
+// The registry is provisioned by this template. CI builds the image into it and
+// sets CONTAINER_IMAGE_TAG to the commit SHA; a manual run falls back to 'latest'.
+param imageRepository = 'hve-squad-mcp'
+param containerImageTag = readEnvironmentVariable('CONTAINER_IMAGE_TAG', 'latest')
+param containerRegistrySku = 'Basic'
+
+// Phase 1 (DEPLOY_APPLICATION=false) deploys the foundation so the image can be
+// built before the Container App references it; phase 2 deploys everything.
+param deployApplication = bool(readEnvironmentVariable('DEPLOY_APPLICATION', 'true'))
+
+// ─── Entra auth (SEC-1 / SEC-2) ──────────────────────────────────────────────
+param authClientId = apiClientId
+param authOpenIdIssuer = entraIssuer
+
+param squad = {
+  audience: 'api://${apiClientId}'
+  allowedOrigins: 'https://copilotstudio.microsoft.com' // SEC-8: strict, never '*'
+  allowedIssuers: entraIssuer
+  allowedTenants: entraTenantId
+  jwksUri: 'https://login.microsoftonline.com/${entraTenantId}/discovery/v2.0/keys'
+  tenantConcurrency: 4 // SEC-9 / COST-1
+  tenantCostCeilingUsd: 500 // COST-2 (hard per-tenant monthly ceiling)
+}
+
+// ─── Azure OpenAI (RUNBOOK Steps 3 + 7) ──────────────────────────────────────
+// create: true provisions the account (key auth disabled) and the deployment;
+// create: false reuses an account of that name in the same resource group. Either
+// way the app identity is granted Cognitive Services OpenAI User on it, and the
+// endpoint + allow-list (SEC-3) are derived from it.
+param openAi = {
+  create: true
+  name: 'squadmcp-aoai' // globally unique custom subdomain -> https://<name>.openai.azure.com
+  // location: 'swedencentral' // uncomment when the model is not offered in the resource group region
+  deploymentName: 'gpt-4o'
+  modelName: 'gpt-4o'
+  modelVersion: '2024-11-20'
+  skuName: 'GlobalStandard'
+  capacity: 10
+  apiVersion: '2024-10-21'
+}
+
+// ─── Scale + cost (COST-2 / COST-3) ──────────────────────────────────────────
 param minReplicas = 0
 param maxReplicas = 5
 param budgetAmountUsd = 500
-param budgetStartDate = '2026-07-01'
+// A NEW budget must start in the current month or up to 12 months ahead, and the
+// start date of an existing budget should not be changed afterwards.
+param budgetStartDate = '2026-10-01'
 param budgetAlertEmails = [
   '<ALERT_EMAIL>'
 ]
@@ -37,6 +83,11 @@ param budgetAlertEmails = [
 // background worker that drives long runs off the request path.
 param enableRemotePipeline = false
 param enableWorker = false
+
+// AES-256-GCM key for request/context (and table memory) at rest. Never commit it:
+// CI reads it from the SQUAD_MCP_RUN_ENCRYPTION_KEY_B64 GitHub secret. Empty keeps
+// platform-only at-rest encryption.
+param runEncryptionKeyBase64 = readEnvironmentVariable('SQUAD_MCP_RUN_ENCRYPTION_KEY_B64', '')
 
 // The shared-state squad-memory broker.
 //   memoryBackend 'table' — Azure Table Storage on the account this template
