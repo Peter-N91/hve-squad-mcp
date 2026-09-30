@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Démarrage — hve-squad-mcp</title>
+  <meta name="description" content="Compilez le serveur MCP hve-squad et enregistrez-le dans VS Code GitHub Copilot pour pouvoir appeler les outils du squad localement." />
+  <link rel="icon" type="image/svg+xml" href="../assets/logo.svg" />
+  <link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+<header class="site">
+  <nav class="site">
+    <a class="brand" href="index.html"><img src="../assets/logo.svg" alt="" /><span class="wordmark">hve<span class="dot">-</span>squad<span class="tag">mcp</span></span></a>
+    <span class="links">
+      <a class="nav" href="index.html">Accueil</a>
+      <a class="nav" href="getting-started.html" aria-current="page">Démarrage</a>
+      <a class="nav" href="tools.html">Outils</a>
+      <a class="nav" href="deploy.html">Déployer</a>
+      <a class="nav" href="configuration.html">Configuration</a>
+      <a class="nav" href="scenario-product-backlog.html">Scénario</a>
+      <a class="nav" href="contributing.html">Contribution</a>
+      <a class="nav" href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a>
+    </span>
+  </nav>
+</header>
+
+<main>
+  <h1>Démarrage</h1>
+  <p class="lead">
+    Le moyen le plus rapide de démarrer est le <strong>mode délégué</strong> : le serveur s'exécute localement via stdio et VS Code GitHub Copilot invoque les agents réellement déployés. Aucun recours à Azure, aucune authentification et aucun coût de modèle au-delà de celui de votre propre session Copilot.
+  </p>
+
+  <h2>Prérequis</h2>
+  <ul>
+    <li><strong>Node.js 20 ou version ultérieure.</strong> Le développement utilise Node 24 ; l'intégration continue (CI) utilise Node 22.</li>
+    <li><strong>VS Code avec GitHub Copilot</strong> et la prise en charge de MCP activée.</li>
+    <li><strong>L'ensemble d'agents hve-squad installé dans votre espace de travail.</strong> Le mode délégué renvoie une charte permettant à Copilot d'invoquer le persona correspondant ; les personas doivent donc être présents localement — installez le package APM <a href="https://github.com/Peter-N91/hve-squad">hve-squad</a> et exécutez <code>apm install</code>.</li>
+  </ul>
+
+  <div class="callout warn">
+    <p>
+      Le package npm est actuellement <code>private</code> et non publié : <code>npx -y @hve-squad/mcp</code> ne peut donc pas encore le trouver. Compilez le code source et configurez VS Code pour utiliser le chemin local <code>dist/</code>.
+    </p>
+  </div>
+
+  <h2>Compiler le serveur</h2>
+  <pre><code>git clone https://github.com/Peter-N91/hve-squad-mcp.git
+cd hve-squad-mcp
+npm ci
+npm run build     # tsc -> dist/
+npm test          # unit suites
+</code></pre>
+
+  <p>Pour l'exécuter manuellement — il communique en JSON-RPC sur stdout et envoie ses journaux sur stderr :</p>
+
+  <pre><code>node dist/src/server.js</code></pre>
+
+  <h2>L'enregistrer dans VS Code</h2>
+  <ol class="steps">
+    <li>
+      <strong>Ouvrez (ou créez) le fichier <code>.vscode/mcp.json</code> de votre espace de travail.</strong>
+      Le package n'écrit jamais ce fichier à votre place — le modèle fourni dans les sources du squad est un exemple à copier.
+    </li>
+    <li>
+      <strong>Ajoutez l'entrée du serveur</strong>, en indiquant dans <code>args</code> le chemin absolu du serveur compilé :
+      <pre><code>{
+  "servers": {
+    "hve-squad": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["C:\\path\\to\\hve-squad-mcp\\dist\\src\\server.js"]
+    }
+  }
+}</code></pre>
+    </li>
+    <li>
+      <strong>Rechargez VS Code.</strong> Les outils <code>squad_*</code> apparaissent dans le sélecteur d'outils Copilot.
+    </li>
+    <li>
+      <strong>Sollicitez le squad en langage naturel</strong> — « effectue des recherches sur X avec le squad », « demande au squad de revoir cette conception ». Copilot choisit l'outil, le serveur renvoie la charte à exécuter en mode délégué, puis Copilot invoque le persona réel de l'ensemble d'agents installé.
+    </li>
+  </ol>
+
+  <h2>Ce que « délégué » signifie réellement</h2>
+  <p>
+    En mode délégué, le serveur n'effectue <strong>aucun appel au modèle</strong>. Il détermine le routage correspondant à l'intention, charge la charte du persona concerné depuis le disque et la renvoie à l'hôte appelant. Votre session Copilot exécute l'inférence. C'est pourquoi le mode délégué n'entraîne aucun coût côté serveur et offre les mêmes fonctionnalités que le package complet — l'hôte exécute le même ensemble d'agents que d'habitude, simplement selon la table de routage propre au squad.
+  </p>
+  <p>
+    Le <a href="deploy.html">mode intégré</a> distant repose sur le compromis inverse : le serveur exécute lui-même l'invocation du persona auprès d'Azure OpenAI, ce qui le rend accessible depuis Copilot Studio, mais entraîne des coûts.
+  </p>
+
+  <h2>Vérifier une modification</h2>
+  <p>Si vous modifiez le serveur, voici les vérifications exécutées par la CI :</p>
+  <pre><code>npm run lint                      # tsc --noEmit
+npm test                          # unit suites
+npm run test:conformance          # security conformance suites
+npm run generate:check            # generated descriptor is not stale
+npm run generate:connector:check  # generated connector is not stale
+npm run snapshot:cast:check       # bundled cast matches its pin
+</code></pre>
+
+  <div class="callout">
+    <p>
+      <code>generated/</code> est versionné dans le dépôt <em>et</em> régénérable. Si vous avez modifié <code>tools.catalog.yml</code>, exécutez <code>npm run generate</code> et incluez le résultat dans votre commit — la CI échoue en cas d'écart entre les sources et les fichiers générés, pas du fait de la modification elle-même.
+    </p>
+  </div>
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>Sous licence MIT. Fondé sur <a href="https://github.com/Peter-N91/hve-squad">hve-squad</a>.</span>
+    <span><a href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a> · <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/CHANGELOG.md">Journal des modifications</a></span>
+  </div>
+</footer>
+</body>
+</html>

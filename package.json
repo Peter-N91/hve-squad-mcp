@@ -39,6 +39,10 @@
     "release:prep": "tsx scripts/release-prep.ts",
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
     "test:conformance": "node --import tsx --test \"test/conformance/**/*.test.ts\"",
+    "docs:build": "eleventy && pagefind --site _site && node scripts/check-docs.mjs",
+    "docs:dev": "npm run docs:build && eleventy --serve --port=4173",
+    "docs:check": "node scripts/check-docs.mjs",
+    "docs:test": "node --test test/docs/*.test.mjs",
     "start": "node dist/src/server.js",
     "start:http": "node dist/src/server-http.js",
     "start:worker": "node dist/src/worker-main.js"
@@ -51,7 +55,10 @@
     "yaml": "^2.9.1"
   },
   "devDependencies": {
+    "@11ty/eleventy": "3.1.6",
     "@types/node": "^26.6.2",
+    "cheerio": "1.2.0",
+    "pagefind": "1.5.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   },

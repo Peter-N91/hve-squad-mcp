@@ -1,8 +1,7 @@
 # Publish the consumer-facing docs site to GitHub Pages.
 #
-# `docs/` is hand-authored HTML with no build step, so the artifact is the folder
-# itself. `docs/.nojekyll` disables Jekyll processing, which would otherwise drop
-# any path beginning with an underscore.
+# Eleventy preserves the hand-authored docs content inside shared, localized
+# layouts. Pagefind builds language-specific search indexes. Only _site ships.
 #
 # The `docs/planning/adrs/` tree ships along with it as raw markdown. That is
 # deliberate: the decision records are public, and linking to a served path keeps
@@ -15,6 +14,23 @@ on:
       - main
     paths:
       - 'docs/**'
+      - 'site/**'
+      - 'scripts/docs-content.mjs'
+      - 'scripts/check-docs.mjs'
+      - 'test/docs/**'
+      - 'eleventy.config.js'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'site/**'
+      - 'scripts/*docs*.mjs'
+      - 'test/docs/**'
+      - 'eleventy.config.js'
+      - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -22,12 +38,44 @@ permissions:
   contents: read
 
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  build:
+    name: Build documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Documentation contracts
+        run: npm run docs:test
+
+      - name: Build localized site and search
+        run: npm run docs:build
+
+      - name: Upload artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
   deploy:
-    name: Build and Deploy
+    name: Deploy documentation
+    if: github.event_name != 'pull_request'
+    needs: build
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -37,20 +85,10 @@ jobs:
       pages: write
       id-token: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
         with:
           enablement: true
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-        with:
-          path: docs
 
       - name: Deploy to GitHub Pages
         id: deployment

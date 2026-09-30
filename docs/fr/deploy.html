@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Déployer — hve-squad-mcp</title>
+  <meta name="description" content="Déployez le serveur MCP hve-squad sur Container Apps dans votre propre locataire Azure et accédez-y depuis Copilot Studio via HTTP authentifié." />
+  <link rel="icon" type="image/svg+xml" href="../assets/logo.svg" />
+  <link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+<header class="site">
+  <nav class="site">
+    <a class="brand" href="index.html"><img src="../assets/logo.svg" alt="" /><span class="wordmark">hve<span class="dot">-</span>squad<span class="tag">mcp</span></span></a>
+    <span class="links">
+      <a class="nav" href="index.html">Accueil</a>
+      <a class="nav" href="getting-started.html">Démarrage</a>
+      <a class="nav" href="tools.html">Outils</a>
+      <a class="nav" href="deploy.html" aria-current="page">Déployer</a>
+      <a class="nav" href="configuration.html">Configuration</a>
+      <a class="nav" href="scenario-product-backlog.html">Scénario</a>
+      <a class="nav" href="contributing.html">Contribution</a>
+      <a class="nav" href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a>
+    </span>
+  </nav>
+</header>
+
+<main>
+  <h1>Déployer dans votre propre locataire</h1>
+  <p class="lead">
+    En mode intégré, l'invocation du persona s'exécute côté serveur auprès de votre déploiement Azure OpenAI, sous authentification Entra. C'est ce qui rend le squad accessible depuis Copilot Studio — et ce qui entraîne des coûts.
+  </p>
+
+  <div class="callout">
+    <p>
+      Cette page présente les grandes lignes du déploiement. La procédure de référence, avec toutes les commandes et tous les paramètres prêts à copier-coller, figure dans <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/host/RUNBOOK.md"><strong>host/RUNBOOK.md</strong></a>. Suivez cette procédure ; utilisez d'abord cette page pour comprendre ce qu'implique le déploiement.
+    </p>
+  </div>
+
+  <h2>Ce que vous déployez</h2>
+  <ul>
+    <li><strong>Azure Container Apps</strong> — le serveur lui-même, capable de réduire le nombre de réplicas à zéro, avec une identité managée affectée par l'utilisateur.</li>
+    <li><strong>Azure Container Registry</strong> — l'image, construite dans ACR à partir de <code>host/Containerfile</code>.</li>
+    <li><strong>Azure Key Vault</strong> — les secrets de l'opérateur ; l'application les lit via son identité managée.</li>
+    <li><strong>Azure OpenAI</strong> — le backend du modèle. <strong>C'est ici que les dépenses réelles commencent.</strong></li>
+    <li><strong>Une inscription d'application Entra</strong> — le serveur de ressources dont l'URI d'ID d'application devient l'audience du jeton.</li>
+    <li><strong>En option</strong>, Azure Table Storage pour la persistance de l'état d'exécution, et Blob Storage pour les rendus et le stockage des contenus de mémoire dépassant la limite.</li>
+  </ul>
+  <p>Tout est défini en Bicep dans <code>host/infra/</code>. Aucune procédure via une interface graphique n'est prévue.</p>
+
+  <h2>Les étapes du déploiement</h2>
+  <ol class="steps">
+    <li><strong>Déployez l'identité.</strong> Fédération OIDC pour la CI, ou <code>az login</code> en local pour une exécution manuelle.</li>
+    <li><strong>Inscrivez l'application Entra et exposez l'API.</strong> L'URI d'ID d'application est l'audience que le serveur exige pour chaque jeton. Exposez une étendue d'autorisation par outil, ainsi que le rôle d'application <code>Squad.Operate</code> pour l'opérateur chargé de débloquer les exécutions suspendues.</li>
+    <li><strong>Provisionnez Azure OpenAI.</strong> Les dépenses réelles commencent ici. Le point de terminaison doit figurer dans la liste des points de terminaison de modèles autorisés par le serveur ; sinon, celui-ci refuse de démarrer.</li>
+    <li><strong>Renseignez les paramètres de déploiement</strong> dans <code>host/infra/main.bicepparam</code>.</li>
+    <li><strong>Construisez l'image dans ACR</strong> et déployez l'application Container Apps, Key Vault et l'identité managée.</li>
+    <li><strong>Accordez à l'identité de l'application l'accès à Azure OpenAI</strong> — selon le principe du moindre privilège, sans clés dans la configuration.</li>
+    <li><strong>Importez le connecteur dans Copilot Studio</strong> depuis <code>generated/copilot-studio-connector/</code>, dont le contenu est généré et versionné dans le dépôt.</li>
+  </ol>
+
+  <h2>L'authentification n'est pas négociable</h2>
+  <p>
+    L'interface distante applique le refus par défaut à trois niveaux indépendants ; chaque appel doit franchir les trois :
+  </p>
+  <table>
+    <thead><tr><th>Niveau</th><th>Éléments rejetés</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Vérification de l'audience</strong></td><td>Un jeton valide émis pour une autre ressource. Protection contre le problème de l'adjoint confus (confused deputy).</td></tr>
+      <tr><td><strong>Étendue d'autorisation par outil</strong></td><td>Un jeton sans étendue explicite pour l'outil appelé.</td></tr>
+      <tr><td><strong>Liste des origines autorisées</strong></td><td>Toute origine non explicitement répertoriée. <code>*</code> est rejeté au démarrage, et non lors d'une requête.</td></tr>
+    </tbody>
+  </table>
+  <p>
+    L'isolation des locataires s'ajoute à ces contrôles : chaque chemin de stockage est préfixé par le locataire de l'appelant et protégé contre les traversées de répertoires, de sorte qu'un locataire ne peut pas accéder aux exécutions, aux artefacts ou à la mémoire d'un autre. Les suites <code>test/conformance/</code> servent précisément à signaler clairement toute régression de ces protections.
+  </p>
+
+  <h2>Débloquer une exécution suspendue</h2>
+  <p>
+    <code>squad_run</code> suspend l'exécution à l'étape de validation humaine. La débloquer relève d'un <strong>opérateur</strong>, et non d'un appel d'outil : le détenteur du rôle d'application <code>Squad.Operate</code> envoie une requête POST hors bande à <code>/admin/approve</code>. L'approbation est enregistrée avec l'identité de l'approbateur et un horodatage, et sa portée est limitée au locataire. Aucun chemin d'exécution du code ne permet aux entrées de l'appelant ou aux sorties du modèle de débloquer un point de contrôle.
+  </p>
+  <p>
+    Si vous souhaitez que les exécutions exclusivement consultatives se poursuivent sans surveillance, une activation distincte et explicite est nécessaire (<code>SQUAD_MCP_ADVISORY_AUTOPILOT_ENABLED</code>) ; elle <em>restreint</em> le point de contrôle aux exécutions consultatives — sans jamais le supprimer pour les exécutions à impact. Voir <a href="configuration.html">Configuration</a>.
+  </p>
+
+  <h2>Un ou plusieurs réplicas</h2>
+  <p>
+    Le pipeline asynchrone nécessite un état d'exécution persistant ; le backend choisi détermine les possibilités de mise à l'échelle :
+  </p>
+  <table>
+    <thead><tr><th>Backend</th><th>Réplicas</th><th>Compromis</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>file</code></td><td>un</td>
+        <td>Un répertoire local. La solution la plus simple à mettre en place. L'approbation n'est visible que par le réplica qui détient le fichier ; l'ajout de réplicas empêche donc le déblocage sans signaler d'erreur.</td>
+      </tr>
+      <tr>
+        <td><code>table</code></td><td>plusieurs</td>
+        <td>Azure Table Storage avec comparaison et échange (compare-and-swap) fondés sur les ETag. Rend le déblocage visible par tous les réplicas, ce qui permet de réduire leur nombre à zéro en toute sécurité.</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    Les exécutions de plus de quatre minutes environ dépassent la durée prise en charge par le traitement d'une requête. Activez le <strong>worker</strong> en arrière-plan (un job ACA) : l'interrogation de l'état devient alors une opération en lecture seule, tandis que le worker mène les exécutions approuvées à leur terme. Le worker nécessite le backend <code>table</code>, pour la même raison que l'ajout de réplicas.
+  </p>
+
+  <h2>Coût</h2>
+  <p>
+    Le mode délégué est en pratique gratuit — c'est le propre modèle de l'appelant qui exécute l'inférence. En mode intégré, l'inférence côté serveur représente l'essentiel du coût. C'est pourquoi l'hébergement permet de réduire le nombre de réplicas à zéro, et pourquoi les limites d'exécutions simultanées et de coûts par locataire sont des paramètres essentiels, prévus dès la conception. Définissez <code>SQUAD_MCP_TENANT_COST_CEILING_USD</code> avant d'exposer le moindre service à de vrais utilisateurs.
+  </p>
+
+  <h2>Ce que ce déploiement ne fait délibérément pas</h2>
+  <ul>
+    <li>Il n'écrit pas dans Azure DevOps, Jira ou GitHub. Jamais. Un connecteur natif certifié s'en charge.</li>
+    <li>Il n'exécute ni code ni déploiement. Le mode intégré est consultatif : du texte finalisé, ainsi qu'un rendu <code>.pptx</code> déterministe.</li>
+    <li>Il ne cible pas encore Microsoft 365 Copilot ni Cowork.</li>
+    <li>Il ne débloque automatiquement aucun point de contrôle, quelle que soit la configuration.</li>
+  </ul>
+
+  <h2>Intégration dans un locataire soumis à gouvernance</h2>
+  <p>
+    Dans les locataires qui appliquent la gouvernance Agents 365, le serveur peut être enregistré dans le catalogue du locataire en tant qu'outil fourni par vos soins, approuvé dans le Centre d'administration Microsoft 365, puis utilisé depuis Copilot Studio en tant qu'outil approuvé. Le guide d'exploitation décrit l'enregistrement en ligne de commande, l'approbation par l'administrateur et l'étape d'utilisation.
+  </p>
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>Sous licence MIT. Fondé sur <a href="https://github.com/Peter-N91/hve-squad">hve-squad</a>.</span>
+    <span><a href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a> · <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/CHANGELOG.md">Journal des modifications</a></span>
+  </div>
+</footer>
+</body>
+</html>

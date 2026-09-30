@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Outils — hve-squad-mcp</title>
+  <meta name="description" content="Chaque outil exposé par le serveur MCP hve-squad : l'intention de routage correspondante, l'étendue OAuth requise et les environnements depuis lesquels il est accessible." />
+  <link rel="icon" type="image/svg+xml" href="../assets/logo.svg" />
+  <link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+<header class="site">
+  <nav class="site">
+    <a class="brand" href="index.html"><img src="../assets/logo.svg" alt="" /><span class="wordmark">hve<span class="dot">-</span>squad<span class="tag">mcp</span></span></a>
+    <span class="links">
+      <a class="nav" href="index.html">Accueil</a>
+      <a class="nav" href="getting-started.html">Démarrage</a>
+      <a class="nav" href="tools.html" aria-current="page">Outils</a>
+      <a class="nav" href="deploy.html">Déployer</a>
+      <a class="nav" href="configuration.html">Configuration</a>
+      <a class="nav" href="scenario-product-backlog.html">Scénario</a>
+      <a class="nav" href="contributing.html">Contribution</a>
+      <a class="nav" href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a>
+    </span>
+  </nav>
+</header>
+
+<main>
+  <h1>Outils</h1>
+  <p class="lead">
+    L'interface expose délibérément des outils de haut niveau. Chaque outil du squad correspond exactement à une ligne de sa table de routage — et non à l'un des quelque 200 agents. Le coordinateur du squad est responsable du routage ; ces outils permettent d'y accéder directement.
+  </p>
+
+  <h2>Outils du squad</h2>
+  <p>
+    Ils proviennent de <code>tools.catalog.yml</code>, la référence pour les outils exposés. La compilation échoue si l'un d'eux correspond à une intention absente de la table de routage ou à un rôle qui ne figure pas parmi les agents fournis.
+  </p>
+
+  <table>
+    <thead>
+      <tr><th>Outil</th><th>Rôle principal</th><th>Étendue d'autorisation</th><th>À distance</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>squad_research</code></td><td>Chercheur du squad</td><td><code>Squad.Research</code></td><td><span class="pill ok">consultatif</span></td></tr>
+      <tr><td><code>squad_plan</code></td><td>Responsable du squad</td><td><code>Squad.Plan</code></td><td><span class="pill ok">consultatif</span></td></tr>
+      <tr><td><code>squad_review</code></td><td>Responsable de la revue du squad</td><td><code>Squad.Review</code></td><td><span class="pill ok">consultatif</span></td></tr>
+      <tr><td><code>squad_architect</code></td><td>Responsable de la revue d'architecture système</td><td><code>Squad.Architect</code></td><td><span class="pill ok">consultatif</span></td></tr>
+      <tr><td><code>squad_run</code></td><td>Coordinateur du squad</td><td><code>Squad.Run</code></td><td><span class="pill optin">pipeline</span></td></tr>
+      <tr><td><code>squad_federate</code></td><td>Coordinateur de la fédération de squads</td><td><code>Squad.Federate</code></td><td><span class="pill optin">pipeline</span></td></tr>
+    </tbody>
+  </table>
+
+  <h3>Les quatre outils consultatifs</h3>
+  <p>
+    <code>squad_research</code>, <code>squad_plan</code>, <code>squad_review</code> et <code>squad_architect</code> exécutent chacun une invocation <strong>en une seule étape</strong> et ne réalisent aucune action à impact. C'est pourquoi ils sont exposés à distance même lorsque le pipeline asynchrone est désactivé — par défaut, l'accès distant est exclusivement consultatif.
+  </p>
+
+  <h3>squad_run — le pipeline consultatif complet</h3>
+  <p>
+    <code>squad_run</code> est le point d'entrée généraliste. Il applique un routage piloté par les données aux agents réels — chercheur → responsable → membres du conseil → testeur — et le conseil synthétise un verdict Go, Go-With-Conditions ou Stop selon la règle suivante : la décision la plus restrictive prévaut. Il respecte le paramètre <code>mode</code> : le mode interactif marque une pause à chaque étape, tandis que le mode autopilot poursuit l'exécution jusqu'à l'obtention d'un artefact consolidé.
+  </p>
+  <p>
+    Il est <strong>sûr par conception</strong>. Il suspend l'exécution à une étape obligatoire de validation humaine, impossible à contourner, et ne la débloque jamais automatiquement. Un opérateur disposant du rôle d'application distinct <code>Squad.Operate</code> débloque une exécution suspendue via la route hors bande <code>POST /admin/approve</code> — jamais via <code>tools/call</code> — après quoi une interrogation par <code>squad_status</code> la fait progresser jusqu'à son terme. Les approbations sont consignées à des fins d'audit avec l'identité de l'approbateur et un horodatage, et leur portée est limitée au locataire.
+  </p>
+
+  <h3>squad_federate — sous-squads</h3>
+  <p>
+    La couche de méta-orchestration de la fédération assure le routage entre les sous-squads nommés. Elle possède une étendue d'autorisation <em>dédiée</em> plutôt que de réutiliser <code>Squad.Run</code>, car un appelant autorisé à exécuter un squad n'est pas pour autant autorisé à piloter une fédération entière. Elle relève de la même classe de sécurité que <code>squad_run</code> et hérite donc du même point de contrôle et des mêmes prérequis de persistance de l'état d'exécution.
+  </p>
+
+  <h3>L'étape de découverte</h3>
+  <p>
+    Les deux outils généralistes acceptent un niveau d'approfondissement facultatif <code>discovery</code>, qui reprend les arguments des invites <code>/squad</code> et <code>/squad-federation</code>. Ce paramètre pilote l'étape introduite dans <code>hve-squad@0.15.0</code>, dont la condition de déclenchement est <em>inverse</em> de celle du contrôle à l'entrée : ce dernier valide un artefact d'exigences lorsqu'il existe ; l'étape de découverte intervient lorsqu'il n'en existe aucun — lorsque la demande exprime un objectif plutôt qu'une tâche déjà définie — et fait émerger, par une réflexion collective, le document de cadrage que le contrôle à l'entrée valide ensuite.
+  </p>
+
+  <table>
+    <thead>
+      <tr><th><code>discovery</code></th><th>Rôles invoqués</th><th>Résultat produit</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>quick</code></td><td><code>analyst</code></td><td>le document de cadrage (choix recommandé par défaut)</td></tr>
+      <tr><td><code>standard</code></td><td><code>designer</code> (coach en design thinking), puis <code>analyst</code></td><td>cadrage, axes de solution, document de cadrage</td></tr>
+      <tr><td><code>deep</code></td><td><code>designer</code>, puis <code>challenger</code> et <code>experimenter</code>, puis <code>analyst</code></td><td>cadrage, axes de solution, objections, hypothèse la plus risquée, document de cadrage</td></tr>
+      <tr><td><code>skip</code></td><td>aucun</td><td>un verdict <code>Depth: skip</code> consignant le refus de cette étape</td></tr>
+    </tbody>
+  </table>
+
+  <p>
+    Cette étape est <strong>proposée, jamais automatique</strong> : un agent peut valider un document seul, mais pas mener seul une démarche d'idéation. Chaque rôle invoqué pose une question à la fois à l'utilisateur et s'arrête plutôt que d'inventer une réponse qu'il n'a pas pu obtenir ; seul <code>analyst</code> écrit un fichier, de sorte qu'une session produit un seul artefact.
+  </p>
+  <p>
+    <strong>Le mode distant n'exécute jamais cette étape.</strong> Une exécution intégrée n'a personne à interroger : cette étape n'est donc pas proposée et un paramètre <code>discovery</code> explicite est ignoré plutôt qu'appliqué — la charge utile de l'appelant sert alors d'entrée au contrôle à l'entrée. Une exécution sans surveillance est soumise à une validation, et non à une démarche d'idéation.
+  </p>
+
+  <h2>Outils utilitaires</h2>
+  <p>
+    Ce sont des utilitaires de la couche transport, et non des intentions de routage : ils ne figurent donc pas dans le catalogue et ne sont pas soumis au contrôle des écarts. Chacun reste désactivé tant que l'opérateur n'active pas la fonctionnalité correspondante.
+  </p>
+
+  <table>
+    <thead>
+      <tr><th>Outil</th><th>Étendue d'autorisation</th><th>Activé par</th><th>Fonction</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>squad_status</code></td><td><code>Squad.Run</code></td><td>pipeline</td>
+        <td>Interroge l'état d'une exécution lancée par l'appelant. Réutilise l'étendue d'autorisation d'exécution — vous pouvez consulter les exécutions que vous êtes autorisé à démarrer.</td>
+      </tr>
+      <tr>
+        <td><code>squad_render_pptx</code></td><td><code>Squad.Render</code></td><td><code>SQUAD_MCP_ENABLE_RENDER_PPTX</code></td>
+        <td>Génère un <code>.pptx</code> à partir du contenu YAML d'une présentation avec <code>python-pptx</code>, inclus dans l'image, et renvoie un lien SAS de délégation utilisateur à courte durée de validité, limité au locataire. Aucun appel au modèle ; le SAS n'est jamais consigné dans les journaux.</td>
+      </tr>
+      <tr>
+        <td><code>squad_memory_read</code></td><td><code>Squad.Memory</code></td><td><code>SQUAD_MCP_ENABLE_MEMORY</code></td>
+        <td>Lit la mémoire <code>.copilot-tracking/squad/</code> du projet.</td>
+      </tr>
+      <tr>
+        <td><code>squad_history</code></td><td><code>Squad.Memory</code></td><td><code>SQUAD_MCP_ENABLE_MEMORY</code></td>
+        <td>Liste et lit l'arborescence <code>.copilot-tracking</code> écrite par une exécution — les artefacts de ce même projet.</td>
+      </tr>
+      <tr>
+        <td><code>squad_memory_write</code></td><td><code>Squad.MemoryWrite</code></td><td><code>SQUAD_MCP_ENABLE_MEMORY</code></td>
+        <td>Réécrit une entrée de mémoire par comparaison et échange (compare-and-swap). L'étendue d'autorisation est distincte de celle de la lecture : une autorisation de lecture ne permet donc aucune modification.</td>
+      </tr>
+      <tr>
+        <td><code>squad_memory_sync</code></td><td><code>Squad.MemoryWrite</code></td><td><code>SQUAD_MCP_ENABLE_MEMORY</code></td>
+        <td>Comparaison et échange par lot — enregistre tous les artefacts d'une exécution, chacun avec son propre jeton CAS.</td>
+      </tr>
+      <tr>
+        <td><code>squad_business_plan</code></td><td><code>Squad.Business</code></td><td><code>SQUAD_MCP_ENABLE_BUSINESS_TOOLS</code></td>
+        <td>Une invocation consultative unique d'un persona réel de l'ensemble d'agents, qui renvoie un plan métier structuré en sections.</td>
+      </tr>
+      <tr>
+        <td><code>squad_backlog</code></td><td><code>Squad.Backlog</code></td><td><code>SQUAD_MCP_ENABLE_BUSINESS_TOOLS</code></td>
+        <td>Produit un contrat de données de backlog en <em>JSON validé</em> — epics → user stories → tâches, ainsi qu'un tableau à plat <code>workItems[]</code>.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Pourquoi squad_backlog renvoie du JSON plutôt que du texte libre</h3>
+  <p>
+    Les connecteurs natifs Azure DevOps et Jira nécessitent un appel par élément de travail, avec des champs typés. Une transmission en texte libre oblige l'agent d'orchestration à interpréter l'anglais, principale source d'échec : un unique élément de travail démesuré, des critères d'acceptation perdus, des parents inventés. Avec le contrat JSON, l'agent parcourt <code>workItems</code> dans l'ordre, crée d'abord les parents et relie les enfants en faisant correspondre <code>parentRef</code> aux identifiants enregistrés — sans rapprochement par titre ni supposition. Le serveur valide et normalise le JSON du modèle et, s'il n'y parvient pas, signale l'échec de manière contrôlée.
+  </p>
+
+  <div class="callout danger">
+    <p>
+      <strong>La frontière de confiance reste inchangée.</strong> Aucun des deux outils métier n'écrit dans Azure DevOps ou Jira. Ce serveur produit le plan ; le connecteur natif certifié effectue chaque écriture via la connexion propre à l'utilisateur final, en appliquant l'authentification, les règles de prévention de la perte de données (DLP) et les limites de débit de ce connecteur.
+    </p>
+  </div>
+
+  <h2>Étendues d'autorisation : refus par défaut</h2>
+  <p>
+    Chaque outil nécessite une étendue OAuth explicite ; sans elle, l'appel est refusé. Les étendues respectent le principe du moindre privilège dès leur conception — une autorisation de rendu n'accorde pas le droit de recherche, une autorisation de lecture de la mémoire n'accorde pas le droit d'y écrire, et aucune ne confère <code>Squad.Operate</code>, le rôle d'opérateur distinct qui permet de débloquer une exécution suspendue. La vérification de l'audience est indépendante de celle de l'étendue : un jeton émis pour une autre ressource est rejeté sans exception.
+  </p>
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>Sous licence MIT. Fondé sur <a href="https://github.com/Peter-N91/hve-squad">hve-squad</a>.</span>
+    <span><a href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a> · <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/CHANGELOG.md">Journal des modifications</a></span>
+  </div>
+</footer>
+</body>
+</html>

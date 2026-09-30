@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Configuration — hve-squad-mcp</title>
+  <meta name="description" content="Paramètres d'exploitation du serveur MCP hve-squad : authentification, pipeline asynchrone, backends de stockage, mémoire du squad et registre des artefacts." />
+  <link rel="icon" type="image/svg+xml" href="../assets/logo.svg" />
+  <link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+<header class="site">
+  <nav class="site">
+    <a class="brand" href="index.html"><img src="../assets/logo.svg" alt="" /><span class="wordmark">hve<span class="dot">-</span>squad<span class="tag">mcp</span></span></a>
+    <span class="links">
+      <a class="nav" href="index.html">Accueil</a>
+      <a class="nav" href="getting-started.html">Démarrage</a>
+      <a class="nav" href="tools.html">Outils</a>
+      <a class="nav" href="deploy.html">Déployer</a>
+      <a class="nav" href="configuration.html" aria-current="page">Configuration</a>
+      <a class="nav" href="scenario-product-backlog.html">Scénario</a>
+      <a class="nav" href="contributing.html">Contribution</a>
+      <a class="nav" href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a>
+    </span>
+  </nav>
+</header>
+
+<main>
+  <h1>Configuration</h1>
+  <p class="lead">
+    Chaque paramètre présenté ici est <strong>contrôlé par l'opérateur</strong> et lu depuis l'environnement au démarrage. Aucun n'est accessible via les entrées de l'appelant ou les sorties du modèle — cette séparation est un principe fondamental, pas un détail d'implémentation.
+  </p>
+
+  <div class="callout warn">
+    <p>
+      La configuration est validée <strong>au démarrage, avec blocage en cas d'erreur</strong>. Une fonctionnalité activée sans le stockage dont elle dépend ne passe pas silencieusement en mode dégradé : le serveur refuse de démarrer et indique la variable manquante. Un échec de démarrage signifie que cette protection fonctionne comme prévu.
+    </p>
+  </div>
+
+  <h2>Authentification</h2>
+  <table>
+    <thead><tr><th>Variable</th><th>Obligatoire</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>SQUAD_MCP_AUDIENCE</code></td><td>oui</td><td>L'audience attendue dans les jetons destinés au serveur de ressources. Aucune valeur par défaut — sans audience définie, un serveur accepterait des jetons émis pour n'importe quelle ressource.</td></tr>
+      <tr><td><code>SQUAD_MCP_ALLOWED_ISSUERS</code></td><td>—</td><td>Liste des émetteurs autorisés, séparés par des virgules.</td></tr>
+      <tr><td><code>SQUAD_MCP_ALLOWED_TENANTS</code></td><td>—</td><td>Liste des locataires autorisés, séparés par des virgules.</td></tr>
+      <tr><td><code>SQUAD_MCP_ALLOWED_ORIGINS</code></td><td>—</td><td>Liste d'autorisation stricte. La valeur littérale <code>*</code> est rejetée au démarrage.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Backend du modèle</h2>
+  <table>
+    <thead><tr><th>Variable</th><th>Par défaut</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>SQUAD_MCP_MODEL_ENDPOINT</code></td><td>—</td><td>Doit également apparaître dans la liste d'autorisation ci-dessous, sinon le démarrage échoue.</td></tr>
+      <tr><td><code>SQUAD_MCP_ALLOWED_MODEL_ENDPOINTS</code></td><td>—</td><td>Les seuls points de terminaison que ce serveur est autorisé à appeler. Protection contre l'exfiltration.</td></tr>
+      <tr><td><code>SQUAD_MCP_MODEL_DEPLOYMENT</code></td><td>—</td><td>Le nom du déploiement Azure OpenAI.</td></tr>
+      <tr><td><code>SQUAD_MCP_MODEL_API_VERSION</code></td><td><code>2024-10-21</code></td><td></td></tr>
+      <tr><td><code>SQUAD_MCP_TENANT_CONCURRENCY</code></td><td>valeur intégrée</td><td>Nombre maximal d'exécutions simultanées par locataire.</td></tr>
+      <tr><td><code>SQUAD_MCP_TENANT_COST_CEILING_USD</code></td><td>valeur intégrée</td><td>Plafond de dépenses par locataire. Définissez-le avant d'ouvrir l'accès à de vrais utilisateurs.</td></tr>
+      <tr><td><code>SQUAD_MCP_SESSION_IDLE_MS</code></td><td>valeur intégrée</td><td>Éviction des sessions inactives.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Le pipeline asynchrone</h2>
+  <table>
+    <thead><tr><th>Variable</th><th>Par défaut</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>SQUAD_MCP_REMOTE_PIPELINE_ENABLED</code></td><td><code>false</code></td><td>Désactivé par défaut. Par défaut, seuls les outils consultatifs sont exposés à distance.</td></tr>
+      <tr><td><code>SQUAD_MCP_RUN_STATE_BACKEND</code></td><td><code>file</code></td><td><code>file</code> (réplica unique) ou <code>table</code> (Azure Table, comparaison et échange CAS entre réplicas).</td></tr>
+      <tr><td><code>SQUAD_MCP_RUN_STATE_DIR</code></td><td>—</td><td>Requis pour le backend <code>file</code>.</td></tr>
+      <tr><td><code>SQUAD_MCP_STORAGE_ACCOUNT</code></td><td>—</td><td>Requis pour le backend <code>table</code>, les rendus, la mémoire et le stockage des contenus dépassant la limite.</td></tr>
+      <tr><td><code>SQUAD_MCP_RUN_TABLE_NAME</code></td><td><code>squadruns</code></td><td></td></tr>
+      <tr><td><code>SQUAD_MCP_WORKER_ENABLED</code></td><td><code>false</code></td><td>Worker en arrière-plan pour les exécutions dépassant environ quatre minutes. Nécessite le backend <code>table</code>.</td></tr>
+      <tr><td><code>SQUAD_MCP_RUN_ENCRYPTION_KEY_B64</code></td><td>—</td><td>Clé encodée en Base64. Lorsqu'elle est définie, les artefacts de chaque étape, le verdict du conseil et les champs <code>request</code>/<code>context</code> de l'appelant sont chiffrés au repos en AES-256-GCM.</td></tr>
+      <tr><td><code>SQUAD_MCP_ADVISORY_AUTOPILOT_ENABLED</code></td><td><code>false</code></td><td>Permet aux exécutions <strong>exclusivement consultatives</strong> de se poursuivre sans surveillance. Restreint le point de contrôle, sans jamais le supprimer pour les rôles à impact.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout danger">
+    <p>
+      <code>SQUAD_MCP_ADVISORY_AUTOPILOT_ENABLED</code> ne permet pas de contourner un point de contrôle. Il s'applique uniquement aux exécutions dont les rôles ne réalisent aucune action à impact. Une exécution faisant intervenir un exécuteur de backlog, un déployeur, un auteur IaC ou des diagnostics Azure reste suspendue dans l'attente d'un opérateur, quelle que soit la valeur de ce paramètre.
+    </p>
+  </div>
+
+  <h2>Mémoire du squad</h2>
+  <p>
+    Le serveur écrit la même arborescence <code>.copilot-tracking/squad/</code> que celle produite localement par le squad — notes de recherche, plans, verdicts, registre des exécutions. Une exécution distante laisse ainsi la même trace persistante qu'une exécution locale, et l'historique peut être relu automatiquement lors de l'exécution suivante, au lieu d'être ressaisi dans l'invite.
+  </p>
+
+  <table>
+    <thead><tr><th>Variable</th><th>Par défaut</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>SQUAD_MCP_ENABLE_MEMORY</code></td><td><code>false</code></td><td>Paramètre d'activation principal des outils du service d'accès à la mémoire.</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_BACKEND</code></td><td><code>table</code></td><td><code>table</code>, <code>file</code> ou <code>graph</code>.</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_TABLE_NAME</code></td><td><code>squadmemory</code></td><td></td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_DIR</code></td><td>—</td><td>Requis pour le backend <code>file</code>.</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_GRAPH_DRIVE_ID</code></td><td>—</td><td>Requis pour <code>graph</code> : la bibliothèque de documents SharePoint ou OneDrive.</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_GRAPH_ROOT_PATH</code></td><td>—</td><td>Chemin du dossier dans cette bibliothèque.</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_GRAPH_ENCRYPT</code></td><td><code>false</code></td><td>Chiffrement au niveau des champs avant l'envoi du contenu à Graph.</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_AUTO_ENABLED</code></td><td><code>false</code></td><td>Écrit automatiquement la mémoire au fil de l'exécution, plutôt que lors d'un appel d'outil explicite.</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_DEFAULT_PROJECT</code></td><td><code>default</code></td><td>Format kebab-case en minuscules ; il s'agit d'un segment de partition du stockage.</td></tr>
+      <tr><td><code>SQUAD_MCP_ENABLE_ARTIFACTS</code></td><td><code>false</code></td><td>Conserve le registre du squad — <code>team.md</code>, <code>routing.md</code>, <code>state.json</code> et les journaux en ajout seul. Nécessite la mémoire.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Plusieurs destinations à la fois</h3>
+  <p>
+    <code>SQUAD_MCP_MEMORY_TARGETS</code> accepte un tableau JSON de destinations nommées, et <code>SQUAD_MCP_MEMORY_DEFAULT_TARGET</code> désigne celle à utiliser lorsque l'appelant n'en choisit aucune. Les noms des destinations sont au format kebab-case en minuscules, car l'appelant les utilise pour sélectionner une destination. Un même déploiement peut ainsi desservir, par exemple, une bibliothèque SharePoint d'ingénierie et une bibliothèque distincte destinée aux clients, sans que l'appelant puisse franchir la séparation entre les deux.
+  </p>
+
+  <h3>Stockage des contenus volumineux dans des blobs</h3>
+  <p>
+    La taille des entités de table est limitée ; sans mécanisme de débordement, l'écriture d'un artefact volumineux échouerait. Avec <code>SQUAD_MCP_MEMORY_OVERFLOW_ENABLED</code>, tout contenu dépassant <code>SQUAD_MCP_MEMORY_OVERFLOW_THRESHOLD_BYTES</code> (32 Kio par défaut) est stocké dans <code>SQUAD_MCP_MEMORY_OVERFLOW_CONTAINER</code>, tandis qu'un pointeur est conservé dans l'entité.
+  </p>
+
+  <h2>Rendu déterministe</h2>
+  <table>
+    <thead><tr><th>Variable</th><th>Par défaut</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>SQUAD_MCP_ENABLE_RENDER_PPTX</code></td><td><code>false</code></td><td>Active <code>squad_render_pptx</code>.</td></tr>
+      <tr><td><code>SQUAD_MCP_RENDER_PYTHON_PATH</code></td><td>—</td><td>Requis lorsque le rendu est activé — l'interpréteur utilisé pour <code>python-pptx</code>, intégré à l'image.</td></tr>
+      <tr><td><code>SQUAD_MCP_RENDER_SCRIPTS_DIR</code></td><td>—</td><td>Requis lorsque le rendu est activé.</td></tr>
+      <tr><td><code>SQUAD_MCP_RENDER_BLOB_CONTAINER</code></td><td><code>renders</code></td><td></td></tr>
+      <tr><td><code>SQUAD_MCP_RENDER_SAS_TTL_MINUTES</code></td><td><code>60</code></td><td>Durée de validité du SAS de délégation utilisateur. Le SAS n'est jamais consigné dans les journaux.</td></tr>
+      <tr><td><code>SQUAD_MCP_RENDER_BRAND_TEMPLATE_PATH</code></td><td>—</td><td>Modèle <code>.pptx</code> facultatif aux couleurs de la marque.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Outils métier</h2>
+  <table>
+    <thead><tr><th>Variable</th><th>Par défaut</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>SQUAD_MCP_ENABLE_BUSINESS_TOOLS</code></td><td><code>false</code></td><td>Active <code>squad_business_plan</code> et <code>squad_backlog</code>. Nécessite un point de terminaison de modèle.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <p>
+      Cette liste présente les paramètres disponibles, et non la procédure de déploiement. Le raccordement précis des paramètres, les références Key Vault et les paramètres Bicep sont décrits dans <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/host/RUNBOOK.md">host/RUNBOOK.md</a>.
+    </p>
+  </div>
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>Sous licence MIT. Fondé sur <a href="https://github.com/Peter-N91/hve-squad">hve-squad</a>.</span>
+    <span><a href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a> · <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/CHANGELOG.md">Journal des modifications</a></span>
+  </div>
+</footer>
+</body>
+</html>
