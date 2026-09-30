@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scénario : de l’idée au backlog — hve-squad-mcp</title>
+  <meta name="description" content="Guide de bout en bout : déployer le serveur MCP hve-squad, lancer le profil product depuis Copilot Studio, puis créer les epics, user stories et tâches obtenus dans Azure DevOps, Jira ou GitHub." />
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<header class="site">
+  <nav class="site">
+    <a class="brand" href="index.html"><img src="assets/logo.svg" alt="" /><span class="wordmark">hve<span class="dot">-</span>squad<span class="tag">mcp</span></span></a>
+    <span class="links">
+      <a class="nav" href="index.html">Accueil</a>
+      <a class="nav" href="getting-started.html">Prise en main</a>
+      <a class="nav" href="tools.html">Outils</a>
+      <a class="nav" href="deploy.html">Déploiement</a>
+      <a class="nav" href="configuration.html">Configuration</a>
+      <a class="nav" href="scenario-product-backlog.html" aria-current="page">Scénario</a>
+      <a class="nav" href="contributing.html">Contribuer</a>
+      <a class="nav" href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a>
+    </span>
+  </nav>
+</header>
+
+<main>
+  <h1>Scénario : de l’idée au backlog de réalisation</h1>
+  <p class="lead">
+    Un utilisateur métier soumet une idée à un agent Copilot Studio. La squad <strong>product</strong> mène les recherches,
+    élabore un plan, produit les livrables destinés aux parties prenantes et restitue un backlog structuré. L’agent crée
+    ensuite les epics, user stories et tâches correspondants dans Azure DevOps, Jira ou GitHub. Cette page décrit
+    l’ensemble du parcours pour vous permettre de le reproduire.
+  </p>
+
+  <div class="callout">
+    <p>
+      <strong>Deux limites à bien comprendre.</strong> Le serveur n’écrit jamais dans Azure DevOps, Jira ou GitHub :
+      c’est l’agent qui s’en charge, au moyen du connecteur natif certifié et de la connexion propre à l’utilisateur.
+      Par ailleurs, les résultats de la squad restent <em>consultatifs</em> : des textes finalisés et un plan validé,
+      pas du code exécuté.
+    </p>
+  </div>
+
+  <h2>Ce que vous obtiendrez</h2>
+  <ol>
+    <li>Un serveur MCP déployé dans votre propre locataire Azure, avec le profil product et les outils métier activés.</li>
+    <li>Un agent Copilot Studio doté de deux connecteurs : celui de ce serveur et le connecteur natif de votre outil de suivi du travail.</li>
+    <li>Un échange reproductible : <em>« transforme ce PRD en backlog »</em> → confirmation → création des éléments de travail,
+        avec les bons liens parent-enfant et l’intégralité des critères d’acceptation.</li>
+    <li>Une trace durable sous <code>.copilot-tracking/</code> dans votre propre stockage, relue automatiquement à l’exécution suivante.</li>
+  </ol>
+
+  <h2>Partie 0 — Prérequis</h2>
+  <ul>
+    <li>Un abonnement Azure dans lequel vous pouvez déployer des ressources et l’autorisation de créer une inscription d’application Entra.</li>
+    <li>Un déploiement Azure OpenAI. <strong>C’est là que se situe le coût.</strong></li>
+    <li>Une licence Copilot Studio et la possibilité d’ajouter un connecteur personnalisé.</li>
+    <li>Azure DevOps, Jira ou GitHub, avec une licence permettant l’utilisation du connecteur natif.</li>
+    <li>Le dépôt cloné et la commande <code>npm ci &amp;&amp; npm run build</code> exécutée une fois.</li>
+  </ul>
+
+  <h2>Partie 1 — Déployer en activant le parcours produit</h2>
+  <p>
+    Suivez les étapes 1 à 7 de <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/host/RUNBOOK.md">host/RUNBOOK.md</a>
+    pour le déploiement de base. Ce scénario nécessite davantage de fonctionnalités que le mode consultatif par défaut.
+    Configurez donc les paramètres suivants avant l’étape 6 : ils sont disponibles à la fois dans
+    <code>main.bicepparam</code> et sous forme de variables d’environnement.
+  </p>
+
+  <table>
+    <thead><tr><th>Paramètre</th><th>Valeur</th><th>Utilité pour ce scénario</th></tr></thead>
+    <tbody>
+      <tr><td><code>SQUAD_MCP_REMOTE_PIPELINE_ENABLED</code></td><td><code>true</code></td><td>Expose <code>squad_run</code> et <code>squad_status</code>. Désactivé par défaut.</td></tr>
+      <tr><td><code>SQUAD_MCP_RUN_STATE_BACKEND</code></td><td><code>table</code></td><td>Une exécution du profil product est longue. Le stockage de l’état dans Table permet de le conserver après une réduction à zéro du nombre de réplicas et de partager l’approbation entre les réplicas.</td></tr>
+      <tr><td><code>SQUAD_MCP_STORAGE_ACCOUNT</code></td><td>votre compte de stockage</td><td>Stocke l’état des exécutions, la mémoire et les données dépassant le seuil de taille.</td></tr>
+      <tr><td><code>SQUAD_MCP_WORKER_ENABLED</code></td><td><code>true</code></td><td>Une exécution du profil product en 10 étapes dépasse la durée prise en charge dans le traitement d’une requête. Le worker la pilote en dehors de ce traitement.</td></tr>
+      <tr><td><code>SQUAD_MCP_ENABLE_BUSINESS_TOOLS</code></td><td><code>true</code></td><td>Expose <code>squad_backlog</code>, dont le contrat JSON est au cœur de ce scénario.</td></tr>
+      <tr><td><code>SQUAD_MCP_ENABLE_MEMORY</code></td><td><code>true</code></td><td>Conserve l’arborescence <code>.copilot-tracking/</code> de manière persistante.</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_BACKEND</code></td><td><code>table</code> ou <code>graph</code></td><td>Définit la destination de cette arborescence. <a href="#history">Faites ce choix dans la partie 2</a> avant le déploiement.</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_AUTO_ENABLED</code></td><td><code>true</code></td><td>Réintègre automatiquement l’état antérieur dans <code>context</code>, afin que l’appel de création du backlog dispose déjà des décisions prises pendant l’exécution.</td></tr>
+      <tr><td><code>SQUAD_MCP_ENABLE_ARTIFACTS</code></td><td><code>true</code></td><td>Écrit le registre — <code>team.md</code>, <code>routing.md</code>, <code>state.json</code> — pour permettre l’examen du fonctionnement de la squad.</td></tr>
+      <tr><td><code>SQUAD_MCP_ADVISORY_AUTOPILOT_ENABLED</code></td><td><code>true</code></td><td><strong>Facultatif, mais recommandé ici.</strong> Voir la remarque ci-dessous.</td></tr>
+      <tr><td><code>SQUAD_MCP_RUN_ENCRYPTION_KEY_B64</code></td><td>une clé encodée en base64</td><td>Chiffre au repos les artefacts des étapes et les données fournies par l’appelant. Les documents d’exigences sont généralement confidentiels.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <p>
+      <strong>À propos du mode autopilot.</strong> Normalement, <code>squad_run</code> se met en attente à un point de
+      validation humain et nécessite l’intervention d’un opérateur pour reprendre. Ce fonctionnement vous convient
+      peut-être, mais il peut dérouter un utilisateur métier qui souhaite simplement obtenir un backlog. Le profil
+      product ne comporte <em>aucun rôle susceptible d’effectuer des actions à impact</em> : ni agent de déploiement,
+      ni auteur IaC, ni agent d’exécution du backlog. Il est donc considéré comme purement consultatif, et
+      <code>SQUAD_MCP_ADVISORY_AUTOPILOT_ENABLED=true</code> lui permet d’aller jusqu’au bout sans intervention.
+    </p>
+    <p>
+      Cette option <strong>restreint</strong> le champ du point de validation ; elle ne le supprime pas. Toute demande
+      dont le routage mobilise un rôle susceptible d’effectuer des actions à impact reste mise en attente.
+      Si vous préférez soumettre chaque exécution à une validation, laissez cette option désactivée et utilisez
+      l’approbation par un opérateur décrite dans la partie 6.
+    </p>
+  </div>
+
+  <h2 id="history">Partie 2 — Choisir où conserver l’historique</h2>
+  <p>
+    Ce choix est souvent négligé. Après une première utilisation réelle, on découvre alors qu’un mois de résultats de
+    la squad se trouve dans un emplacement que personne ne peut consulter. Décidez maintenant : un seul paramètre
+    suffit, et il s’applique à tout ce que la squad écrit.
+  </p>
+
+  <h3>Ce qui est effectivement écrit</h3>
+  <p>
+    Avec <code>SQUAD_MCP_ENABLE_ARTIFACTS=true</code>, chaque exécution écrit une arborescence
+    <code>.copilot-tracking/</code> consultable, identique à celle que la squad produit lorsqu’elle s’exécute localement
+    dans VS Code :
+  </p>
+  <pre><code>squad/team.md                          the 13 seeded roles
+squad/routing.md                       the rows those roles can serve
+squad/state.json                       the ledger
+squad/decisions.md                     append-only — incl. the Intake Readiness Verdict
+squad/notifications.md                 append-only
+squad/history/&lt;agent&gt;.md               per agent, with a measured Consumption block
+squad/history/autopilot-run-&lt;id&gt;.md    per run
+squad/consumption.md                   rebuilt from those blocks, so earlier turns are never dropped
+plans/ · docs/ · outputs/ · ppt/&lt;date&gt;/&lt;slug&gt;/   the deliverables themselves</code></pre>
+  <div class="callout warn">
+    <p>
+      Sans <code>SQUAD_MCP_ENABLE_ARTIFACTS</code>, la mémoire automatique ne conserve que <strong>trois clés sans
+      arborescence</strong>. Cela suffit à assurer la continuité entre deux échanges, mais ne permet aucun audit :
+      vous ne pouvez ni ouvrir le PRD produit par une exécution, ni voir quel agent a écrit quoi. Pour ce scénario,
+      activez cette option.
+    </p>
+  </div>
+
+  <h3>Choisir une destination</h3>
+  <p>
+    Un seul paramètre, <code>SQUAD_MCP_MEMORY_BACKEND</code>, définit simultanément la destination de la mémoire,
+    du registre et des livrables.
+  </p>
+  <table>
+    <thead><tr><th>Backend de stockage</th><th>Destination</th><th>Quand le choisir</th><th>Configuration requise</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>table</code><br /><em>par défaut</em></td>
+        <td>Azure Table Storage dans votre compte, table <code>squadmemory</code></td>
+        <td>Vous souhaitez un stockage durable, économique et fiable avec plusieurs réplicas, et vous consultez les données au moyen des outils plutôt que manuellement.</td>
+        <td>Définissez <code>SQUAD_MCP_STORAGE_ACCOUNT</code>. <strong>Rien d’autre</strong> :
+            <code>main.bicep</code> attribue pour vous le rôle <em>Storage Table Data Contributor</em> à l’identité
+            de l’application et du worker.</td>
+      </tr>
+      <tr>
+        <td><code>graph</code></td>
+        <td>Une bibliothèque de documents SharePoint ou OneDrive, avec un fichier <code>.md</code> lisible par entrée</td>
+        <td><strong>Les utilisateurs métier doivent pouvoir ouvrir eux-mêmes les résultats.</strong> C’est généralement
+            le bon choix pour un scénario utilisant le profil product.</td>
+        <td>Définissez <code>SQUAD_MCP_MEMORY_GRAPH_DRIVE_ID</code> et effectuez un déploiement
+            <em>distinct, avec des privilèges d’administration</em> ; voir ci-dessous.</td>
+      </tr>
+      <tr>
+        <td><code>file</code></td>
+        <td>Un répertoire local dans le conteneur</td>
+        <td>Un essai avec un seul réplica. Les données ne sont pas conservées après un redémarrage consécutif à une réduction à zéro du nombre de réplicas.</td>
+        <td>Définissez <code>SQUAD_MCP_MEMORY_DIR</code>. Ne l’utilisez pas conjointement avec le worker.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <p>
+      <strong>L’état d’exécution et la mémoire sont deux stockages distincts.</strong>
+      <code>SQUAD_MCP_RUN_STATE_BACKEND</code> conserve l’exécution en cours afin qu’elle puisse survivre à un
+      redémarrage ; <code>SQUAD_MCP_MEMORY_BACKEND</code> conserve l’historique. Leurs valeurs peuvent différer :
+      l’association d’un état d’exécution dans <code>table</code> et d’une mémoire dans <code>graph</code> est courante.
+      Tous deux lisent <code>SQUAD_MCP_STORAGE_ACCOUNT</code>, ce qui explique la confusion fréquente.
+    </p>
+  </div>
+
+  <h3>Si vous avez choisi SharePoint</h3>
+  <p>Chaque entrée devient un fichier Markdown à l’emplacement suivant :</p>
+  <pre><code>&lt;rootPath&gt;/&lt;tenantId&gt;/&lt;project&gt;/&lt;path&gt;.md</code></pre>
+  <p>
+    SharePoint en gère les versions et lui applique vos politiques existantes de conservation, de recherche et de
+    prévention de la perte de données (DLP). La gestion des accès concurrents utilise l’<code>eTag</code> natif de Graph
+    avec <code>If-Match</code> : une écriture fondée sur une version obsolète est donc refusée au lieu d’écraser les données.
+  </p>
+  <p>Vous devez effectuer vous-même deux étapes :</p>
+  <ol class="steps">
+    <li>
+      <strong>Récupérez l’identifiant du lecteur</strong> de la bibliothèque qui accueillera l’historique :
+      <pre><code>SITE_ID=$(az rest --method GET \
+  --url "https://graph.microsoft.com/v1.0/sites/&lt;TENANT&gt;.sharepoint.com:/sites/&lt;SITE_PATH&gt;" \
+  --query id --output tsv)
+
+az rest --method GET \
+  --url "https://graph.microsoft.com/v1.0/sites/$SITE_ID/drives" \
+  --query "value[].{name:name,id:id}" --output table</code></pre>
+    </li>
+    <li>
+      <strong>Accordez à l’identité de l’application l’accès à cette seule bibliothèque</strong>, en tant qu’administrateur :
+      <pre><code>az deployment group create \
+  --resource-group "$RG" \
+  --template-file host/infra/graph-memory-permissions.bicep \
+  --parameters host/infra/graph-memory-permissions.bicepparam</code></pre>
+      Ce déploiement attribue <code>Sites.Selected</code>, qui, à lui seul, ne donne accès à <strong>aucun</strong> site,
+      puis accorde un droit d’écriture uniquement sur le site que vous avez indiqué. Il est volontairement distinct :
+      il nécessite <code>AppRoleAssignment.ReadWrite.All</code> et <code>Sites.FullControl.All</code>, des autorisations
+      bien plus étendues que celles requises pour déployer la Container App. Vos déploiements courants n’exigent donc
+      jamais de droits d’administration Graph. Le relancer n’entraîne aucune modification supplémentaire.
+    </li>
+  </ol>
+  <div class="callout warn">
+    <p>
+      <strong>Laissez <code>SQUAD_MCP_MEMORY_GRAPH_ENCRYPT</code> désactivé</strong>, sauf si une politique l’impose.
+      L’intérêt même de SharePoint est de permettre à une personne d’ouvrir le fichier ; chiffrer son contenu supprime
+      cet avantage. Si vous activez cette option, configurez également <code>runEncryptionKeyBase64</code>.
+    </p>
+    <p>
+      Si <code>sharePointSiteId</code> reste vide, seul <code>Sites.Selected</code> est attribué. Cet état partiel est
+      volontairement sûr : l’identité peut recevoir un accès, mais n’accède encore à rien. Une configuration inachevée
+      n’expose donc jamais une bibliothèque à votre insu.
+    </p>
+  </div>
+
+  <h3>Artefacts volumineux</h3>
+  <p>
+    Une entité Table est soumise à une limite de taille, qu’un PRD ou un backlog complet dépassera. Activez le stockage
+    des données excédentaires pour éviter l’échec de l’écriture :
+  </p>
+  <table>
+    <thead><tr><th>Variable</th><th>Valeur</th></tr></thead>
+    <tbody>
+      <tr><td><code>SQUAD_MCP_MEMORY_OVERFLOW_ENABLED</code></td><td><code>true</code></td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_OVERFLOW_CONTAINER</code></td><td>le nom d’un conteneur de blobs</td></tr>
+      <tr><td><code>SQUAD_MCP_MEMORY_OVERFLOW_THRESHOLD_BYTES</code></td><td><code>32768</code> par défaut</td></tr>
+    </tbody>
+  </table>
+  <p>Tout contenu dépassant le seuil est stocké dans un blob, avec un pointeur conservé dans l’entité. La lecture reste transparente.</p>
+
+  <h3>Proposer plusieurs destinations aux équipes</h3>
+  <p>
+    Si un même déploiement dessert plusieurs équipes qui ne doivent pas partager la même destination, déclarez une
+    liste de destinations autorisées plutôt qu’un backend unique :
+  </p>
+  <pre><code>SQUAD_MCP_MEMORY_TARGETS=[
+  { "name": "azure",      "backend": "table", "tableName": "squadmemory" },
+  { "name": "sharepoint", "backend": "graph", "driveId": "&lt;DRIVE_ID&gt;", "rootPath": "squad-memory" }
+]
+SQUAD_MCP_MEMORY_DEFAULT_TARGET=azure</code></pre>
+  <p>
+    L’appelant transmet alors un nom <code>target</code> opaque. <strong>Vous</strong> gardez la maîtrise de tous les
+    champs contenant des informations d’authentification ; un nom non déclaré est refusé avant toute entrée-sortie,
+    sans jamais utiliser la destination par défaut comme solution de repli.
+  </p>
+
+  <h3>Relire l’historique</h3>
+  <p>Deux modes sont possibles ; dans ce scénario, c’est le premier qui importe :</p>
+  <ul>
+    <li>
+      <strong>Automatiquement.</strong> Avec <code>SQUAD_MCP_MEMORY_AUTO_ENABLED=true</code>, le serveur lit les entrées
+      <code>state</code> et <code>decisions</code> du projet avant chaque délégation et les injecte comme des
+      <strong>données</strong> explicitement délimitées, jamais comme des instructions faisant autorité.
+      Personne n’a besoin de penser à le demander. C’est pourquoi l’appel à <code>squad_backlog</code> dans la partie 7
+      ne nécessite pas de recoller l’artefact de l’exécution.
+    </li>
+    <li>
+      <strong>À la demande.</strong> <code>squad_history</code> permet de parcourir l’arborescence :
+      <code>op=index</code> pour en obtenir une synthèse, <code>op=list</code> pour en lister le contenu et
+      <code>op=read</code> pour ouvrir un fichier. Il nécessite l’étendue d’autorisation
+      <code>Squad.Memory</code>.
+    </li>
+  </ul>
+  <div class="callout danger">
+    <p>
+      <strong>Désactivez les outils de mémoire dans l’agent.</strong> Lorsque la mémoire automatique est activée,
+      vous devez supprimer la section consacrée à la mémoire dans les instructions générées. Si vous la conservez,
+      l’agent appelle lui aussi ces outils, invente un nom <code>project</code> différent à chaque session et rompt
+      silencieusement la continuité. Le résultat ressemble alors en tout point à une fonctionnalité défaillante.
+    </p>
+  </div>
+
+  <h3>Garanties communes à toutes les destinations</h3>
+  <ul>
+    <li>Le <code>tenantId</code> du jeton validé constitue toujours le premier segment du chemin : l’isolation par
+        locataire est donc assurée dans Azure Table, SharePoint et sur disque.</li>
+    <li>La partition est déterminée à partir d’une sous-squad épinglée ou de
+        <code>SQUAD_MCP_MEMORY_DEFAULT_PROJECT</code>, et <strong>jamais</strong> à partir d’un texte libre fourni par l’appelant.</li>
+    <li>Lorsque <code>SQUAD_MCP_RUN_ENCRYPTION_KEY_B64</code> est défini, les artefacts des étapes, le verdict du conseil et les champs
+        <code>request</code>/<code>context</code> de l’appelant sont chiffrés au repos avec AES-256-GCM.</li>
+    <li>Les écritures utilisent une comparaison suivie d’un échange atomique : deux exécutions simultanées dans un même projet ne peuvent donc pas écraser leurs données respectives.</li>
+  </ul>
+
+  <h2>Partie 3 — Exposer les étendues d’autorisation utilisées par ce scénario</h2>
+  <p>Dans l’inscription d’application Entra créée à l’étape 2 du guide d’exploitation, exposez les étendues suivantes et accordez les consentements correspondants :</p>
+  <table>
+    <thead><tr><th>Étendue d’autorisation</th><th>Bénéficiaire</th><th>Usage</th></tr></thead>
+    <tbody>
+      <tr><td><code>Squad.Run</code></td><td>la connexion Copilot Studio</td><td>Démarrer l’exécution du profil product et interroger son état avec <code>squad_status</code>.</td></tr>
+      <tr><td><code>Squad.Backlog</code></td><td>la connexion Copilot Studio</td><td>Appeler <code>squad_backlog</code>. Distincte de <code>Squad.Business</code> afin de pouvoir être révoquée indépendamment.</td></tr>
+      <tr><td><code>Squad.Memory</code></td><td>la connexion Copilot Studio</td><td>Facultative : uniquement si vous souhaitez que l’agent consulte l’historique avec <code>squad_history</code>.</td></tr>
+      <tr><td><code>Squad.Operate</code></td><td><strong>vous</strong>, sous forme de rôle d’application</td><td>Autoriser la reprise d’une exécution en attente. Ne l’accordez jamais à l’agent.</td></tr>
+    </tbody>
+  </table>
+  <p>
+    Le contrôle d’accès refuse toute opération sans l’étendue requise : si elle manque, le serveur renvoie une
+    réponse 403, sans effectuer de travail ni générer de facturation.
+  </p>
+
+  <h2>Partie 4 — Importer le connecteur dans Copilot Studio</h2>
+  <ol class="steps">
+    <li>
+      Régénérez le connecteur pour qu’il corresponde à votre build, puis remplacez les valeurs provisoires dans
+      <code>generated/copilot-studio-connector/apiDefinition.swagger.json</code> et <code>apiProperties.json</code> :
+      <pre><code>npm run generate:connector</code></pre>
+      <table>
+        <thead><tr><th>Valeur provisoire</th><th>Valeur de remplacement</th></tr></thead>
+        <tbody>
+          <tr><td><code>&lt;SQUAD_MCP_HOST&gt;</code></td><td>le nom de domaine complet (FQDN) de votre Container App, uniquement le nom d’hôte, sans schéma</td></tr>
+          <tr><td><code>&lt;ENTRA_TENANT_ID&gt;</code></td><td>l’identifiant de votre locataire</td></tr>
+          <tr><td><code>&lt;ENTRA_CLIENT_ID&gt;</code></td><td>l’identifiant de l’application obtenu à l’étape 2</td></tr>
+          <tr><td><code>&lt;SQUAD_MCP_AUDIENCE&gt;</code></td><td><code>api://&lt;ENTRA_CLIENT_ID&gt;</code></td></tr>
+        </tbody>
+      </table>
+    </li>
+    <li><strong>Ajoutez un connecteur personnalisé</strong> dans Copilot Studio à partir du fichier OpenAPI. Il déclare
+        l’opération <code>x-ms-agentic-protocol: mcp-streamable-1.0</code> <code>/mcp</code>.</li>
+    <li><strong>Finalisez la connexion Entra OAuth 2.0</strong> en accordant le consentement aux étendues de la partie 3.</li>
+    <li><strong>Activez l’orchestration générative</strong> sur l’agent. Sans elle, l’agent ne peut appeler aucun outil MCP :
+        c’est de loin la raison la plus fréquente lorsqu’« il ne se passe rien ».</li>
+    <li><strong>Ajoutez le connecteur de votre outil de suivi</strong> au même agent : le connecteur certifié Azure DevOps,
+        Jira ou GitHub, authentifié avec l’identité de l’utilisateur final.</li>
+    <li><strong>Collez les instructions générées pour l’agent</strong> depuis
+        <code>generated/copilot-studio-connector/agent-instructions.md</code> dans le champ Instructions de l’agent.
+        Elles contiennent déjà le protocole de création des éléments de travail, l’exigence de confirmation et les règles
+        de rattachement parent-enfant. Supprimez la section consacrée à la mémoire : vous avez activé la mémoire
+        automatique dans la partie 1, l’agent ne doit donc pas appeler les outils de mémoire.</li>
+  </ol>
+
+  <h2>Partie 5 — Ce que le profil product exécute réellement</h2>
+  <p>
+    <code>profile: "product"</code> initialise 13 rôles. C’est cette initialisation qui distingue ce scénario d’un
+    appel générique à <code>squad_run</code>. Une fois les rôles associés aux agents disponibles dans le package,
+    l’exécution du profil product enchaîne les étapes suivantes :
+  </p>
+
+  <table>
+    <thead><tr><th>Nº</th><th>Étape</th><th>Rôle</th><th>Agent sélectionné</th></tr></thead>
+    <tbody>
+      <tr><td>0</td><td><strong>Point de validation des données d’entrée</strong></td><td><code>intake-validator</code></td><td>PRD Quality Reviewer</td></tr>
+      <tr><td>1</td><td>Recherche</td><td><code>researcher</code></td><td>Squad Researcher</td></tr>
+      <tr><td>2</td><td>Planification</td><td><code>lead</code></td><td>Squad Lead</td></tr>
+      <tr><td>—</td><td>Conseil</td><td colspan="2">Intervient à ce stade uniquement si la demande le sollicite. Ce n’est généralement pas le cas d’une demande de backlog.</td></tr>
+      <tr><td>3</td><td rowspan="7"><strong>Production des livrables par les spécialistes</strong></td><td><code>analyst</code></td><td>PRD Builder</td></tr>
+      <tr><td>4</td><td><code>product-owner</code></td><td>Functional Planner</td></tr>
+      <tr><td>5</td><td><code>designer</code></td><td>UX UI Designer</td></tr>
+      <tr><td>6</td><td><code>experimenter</code></td><td>Experiment Designer</td></tr>
+      <tr><td>7</td><td><code>presenter</code></td><td>PowerPoint Subagent</td></tr>
+      <tr><td>8</td><td><code>technical-writer</code></td><td>Squad Technical Writer</td></tr>
+      <tr><td>9</td><td><code>data-scientist</code></td><td>DS Gen Data Spec</td></tr>
+      <tr><td>10</td><td>Revue</td><td><code>tester</code></td><td>Squad Reviewer</td></tr>
+    </tbody>
+  </table>
+
+  <p>Deux comportements méritent d’être compris avant de lancer l’exécution :</p>
+  <ul>
+    <li>
+      <strong>Le point de validation des données d’entrée peut arrêter l’exécution.</strong> Comme le profil product
+      initialise le rôle <code>intake-validator</code>, toute exécution fondée sur un document d’exigences fait
+      <em>d’abord</em> l’objet d’une validation. Le validateur consigne le verdict <code>Ready</code>,
+      <code>Ready-With-Gaps</code> ou <code>Not-Ready</code>. Dans le cas de <code>Not-Ready</code>, le pipeline
+      s’arrête avec <code>reason: "intake_not_ready"</code>, plutôt que de laisser sept spécialistes travailler à partir
+      de données qu’il vient de rejeter. C’est le fonctionnement attendu du point de validation : corrigez le document
+      et relancez l’exécution.
+    </li>
+    <li>
+      <strong>Il n’existe pas d’étape distincte de transmission du backlog.</strong> Le profil product inclut
+      <code>product-owner</code> parmi les spécialistes chargés des livrables : la transmission <em>correspond donc</em>
+      à l’étape 4. Pour un profil qui ne contient pas ce rôle, une étape consacrée au backlog est ajoutée à la fin.
+    </li>
+  </ul>
+
+  <p>Chaque spécialiste écrit dans son propre répertoire racine, où vous retrouverez ensuite ses livrables :</p>
+  <table>
+    <thead><tr><th>Rôle</th><th>Racine des livrables</th></tr></thead>
+    <tbody>
+      <tr><td>analyst, product-owner, designer, experimenter</td><td><code>.copilot-tracking/plans</code></td></tr>
+      <tr><td>presenter</td><td><code>.copilot-tracking/ppt/&lt;date&gt;/deck</code></td></tr>
+      <tr><td>technical-writer</td><td><code>docs</code></td></tr>
+      <tr><td>data-scientist</td><td><code>outputs</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>Partie 6 — Lancer l’exécution</h2>
+  <p>Dans l’agent Copilot Studio, l’utilisateur formule par exemple la demande suivante :</p>
+  <pre><code>Run the full product squad on our customer onboarding PRD and turn it into a delivery backlog.</code></pre>
+  <p>L’agent appelle <code>squad_run</code>. Assurez-vous que vos instructions transmettent bien le profil :</p>
+  <pre><code>{
+  "name": "squad_run",
+  "arguments": {
+    "request": "Turn our customer onboarding PRD into a delivery backlog",
+    "profile": "product",
+    "mode": "autopilot",
+    "squad": "onboarding",
+    "context": "&lt;the PRD text, or the constraints the user gave&gt;"
+  }
+}</code></pre>
+
+  <div class="callout">
+    <p>
+      <code>squad</code> désigne la partition du projet. Utilisez un nom stable par initiative : il délimite la mémoire,
+      le registre et l’historique que l’exécution suivante relira. La valeur <code>default</code> fonctionne,
+      mais tout partage alors une seule arborescence.
+    </p>
+  </div>
+
+  <p><strong>Le résultat dépend du choix effectué dans la partie 1 :</strong></p>
+  <table>
+    <thead><tr><th>Mode autopilot</th><th>Comportement</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>activé</td>
+        <td>L’exécution se poursuit sans intervention. L’agent reçoit un identifiant d’exécution ; l’utilisateur
+            interroge régulièrement <code>squad_status</code> jusqu’à réception de l’artefact consolidé.</td>
+      </tr>
+      <tr>
+        <td>désactivé</td>
+        <td>L’exécution reste en attente. L’agent communique l’identifiant d’exécution et indique qu’une approbation
+            est attendue ; il ne doit pas prétendre que le travail est terminé. Vous autorisez la reprise par un canal distinct :
+            <pre><code>curl -sS -X POST "https://$FQDN/admin/approve" \
+  -H "Authorization: Bearer $OPERATOR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"runId":"&lt;run-id&gt;"}'</code></pre>
+            Une interrogation de <code>squad_status</code> conduit ensuite l’exécution à son terme. L’autorisation
+            de reprise est limitée au locataire concerné et fait l’objet d’un audit indiquant l’approbateur et l’horodatage.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Partie 7 — Transformer le résultat en éléments de travail</h2>
+  <p>
+    L’artefact consolidé est rédigé en prose : il convient à une personne, mais pas à un connecteur.
+    <code>squad_backlog</code> assure la conversion :
+  </p>
+  <pre><code>{
+  "name": "squad_backlog",
+  "arguments": {
+    "request": "Break the approved onboarding plan into epics, stories, and tasks",
+    "squad": "onboarding"
+  }
+}</code></pre>
+  <p>
+    Lorsque la mémoire automatique est activée, vous n’avez pas à recoller les résultats de l’exécution : la lecture
+    préalable intègre l’état antérieur du projet à <code>context</code> en tant que données. Il suffit donc de transmettre
+    la même valeur <code>squad</code>. Ne fournissez explicitement <code>context</code> que pour ajouter des informations
+    absentes de l’exécution, comme un backlog existant ou une définition de « terminé ».
+  </p>
+
+  <h3>Le contrat renvoyé</h3>
+  <pre><code>{
+  "summary": "Plain-language summary for the business user.",
+  "epics": [ { "title": "...", "description": "...",
+               "acceptanceCriteria": ["..."],
+               "stories": [ { "title": "...", "tasks": [ ... ] } ] } ],
+  "workItems": [
+    { "ref": "E1",       "type": "Epic",       "title": "...", "acceptanceCriteria": ["..."] },
+    { "ref": "E1-S1",    "type": "User Story", "parentRef": "E1",    "estimate": "M", "...": "..." },
+    { "ref": "E1-S1-T1", "type": "Task",       "parentRef": "E1-S1", "...": "..." }
+  ]
+}</code></pre>
+  <p>
+    <code>workItems</code> est une liste aplatie obtenue par parcours en profondeur de <code>epics</code> :
+    <strong>les parents précèdent donc toujours leurs enfants</strong>. En parcourant cette liste dans l’ordre et en
+    créant les éléments au fur et à mesure, l’identifiant du parent existe toujours au moment où un enfant en a besoin.
+    Les valeurs <code>ref</code> et <code>parentRef</code> sont attribuées par le serveur, et non par le modèle.
+    C’est essentiel : l’agent établit les liens à partir des identifiants qu’il a enregistrés, jamais en rapprochant
+    les titres, car ceux-ci ne sont pas uniques et le modèle peut les reformuler.
+  </p>
+  <p>
+    Le serveur valide et normalise le JSON du modèle. S’il n’y parvient pas, il signale proprement l’échec :
+    l’agent ne reçoit donc jamais de résultat partiellement analysé. Des limites strictes s’appliquent :
+    30 epics, 30 user stories par epic, 30 tâches par user story, 20 critères d’acceptation et 4 000 caractères
+    par champ texte. Un appel ne peut donc jamais produire un backlog de taille illimitée.
+  </p>
+
+  <h3>La boucle de création de l’agent</h3>
+  <p>Cette procédure figure déjà dans les instructions générées ; elle est rappelée ici pour vous permettre de vérifier le comportement observé :</p>
+  <ol class="steps">
+    <li>Présentez à l’utilisateur le contenu de <code>summary</code> et la liste des epics et des user stories.
+        <strong>Demandez une confirmation.</strong> Ne lancez jamais de création en masse sans confirmation.</li>
+    <li>Après confirmation, parcourez <code>workItems</code> dans l’ordre, avec un appel au connecteur par élément :
+        le type provient de <code>type</code>, le titre de <code>title</code>, la description de
+        <code>description</code>, et les lignes de <code>acceptanceCriteria</code> sont réunies en une liste.</li>
+    <li>Enregistrez l’identifiant créé en l’associant à la valeur <code>ref</code> de l’élément. Lorsqu’un élément possède
+        un <code>parentRef</code>, rattachez-le à l’identifiant enregistré pour cette référence.</li>
+    <li>En cas d’échec, indiquez la <code>ref</code> concernée, poursuivez avec les autres éléments, puis proposez
+        de ne réessayer que les créations en échec.</li>
+    <li>Espacez les appels. Les connecteurs imposent des limites de débit par connexion : créez un epic et ses
+        user stories à la fois, plutôt que d’envoyer tout le tableau d’un seul coup.</li>
+  </ol>
+
+  <h2>Partie 8 — Adapter le contrat à votre outil de suivi</h2>
+  <p>
+    Le contrat utilise les noms de types d’Azure DevOps. Il s’agit d’un choix de nomenclature, pas d’une dépendance
+    imposée : la correspondance est définie dans les instructions de votre agent, et le serveur ne sait pas quel
+    outil de suivi vous utilisez.
+  </p>
+  <table>
+    <thead><tr><th><code>type</code> du contrat</th><th>Azure DevOps</th><th>Jira</th><th>GitHub</th></tr></thead>
+    <tbody>
+      <tr><td><code>Epic</code></td><td>Epic</td><td>Epic</td><td>Issue portant l’étiquette <code>epic</code></td></tr>
+      <tr><td><code>User Story</code></td><td>User Story <em>(Product Backlog Item avec Scrum)</em></td><td>Story</td><td>Issue portant l’étiquette <code>story</code>, rattachée à l’epic comme sous-issue</td></tr>
+      <tr><td><code>Task</code></td><td>Task</td><td>Sub-task</td><td>Sous-issue ou élément de liste de tâches dans la user story</td></tr>
+      <tr><td>rattachement parent-enfant</td><td><code>Add link</code>, parent/enfant</td><td>lien entre issues / champ parent</td><td>sous-issues</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <p>
+      <strong>Vérifiez votre modèle de processus ADO.</strong> <em>User Story</em> existe dans Agile ; Scrum utilise
+      <em>Product Backlog Item</em> et CMMI utilise <em>Requirement</em>. Si les créations échouent en raison d’un type
+      d’élément de travail inconnu, ajoutez la substitution aux instructions de votre agent : le serveur continuera
+      à renvoyer <code>User Story</code>.
+    </p>
+    <p>
+      <strong>GitHub ne possède pas de type epic natif.</strong> La hiérarchie à trois niveaux repose sur des issues
+      et des sous-issues. Choisissez donc la convention à l’avance et inscrivez-la dans les instructions.
+      Sinon, l’agent en inventera une, différente à chaque fois.
+    </p>
+  </div>
+
+  <h2>Partie 9 — Vérifier le résultat</h2>
+  <table>
+    <thead><tr><th>Point à vérifier</th><th>Résultat attendu</th></tr></thead>
+    <tbody>
+      <tr><td>Le registre de l’exécution</td><td><code>team.md</code> répertorie les 13 rôles du profil product ; <code>routing.md</code> ne contient que les lignes de routage que ces rôles peuvent prendre en charge.</td></tr>
+      <tr><td>Le journal des décisions</td><td>Un bloc <code>## Intake Readiness Verdict</code>, si l’exécution s’appuyait sur un document.</td></tr>
+      <tr><td>Les racines des livrables</td><td>Des artefacts sous <code>.copilot-tracking/plans</code>, <code>docs</code> et <code>outputs</code>.</td></tr>
+      <tr><td>L’outil de suivi</td><td>Chaque <code>ref</code> est créée une seule fois, les enfants sont rattachés à leurs parents et les critères d’acceptation figurent dans les user stories.</td></tr>
+      <tr><td>L’exécution suivante</td><td>Formulez une demande complémentaire avec la même valeur <code>squad</code>. Les décisions précédentes doivent déjà être connues.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Dépannage</h2>
+  <table>
+    <thead><tr><th>Symptôme</th><th>Cause</th><th>Solution</th></tr></thead>
+    <tbody>
+      <tr><td>L’agent répond à partir de ses propres connaissances et n’appelle jamais d’outil</td><td>L’orchestration générative est désactivée ou les instructions n’ont pas été collées</td><td>Activez-la et collez le bloc d’instructions généré</td></tr>
+      <tr><td><code>squad_run</code> ne figure pas dans la liste des outils</td><td>Le pipeline est désactivé</td><td>Définissez <code>SQUAD_MCP_REMOTE_PIPELINE_ENABLED=true</code> et configurez un backend persistant pour l’état des exécutions</td></tr>
+      <tr><td><code>squad_backlog</code> ne figure pas dans la liste des outils</td><td>Les outils métier sont désactivés</td><td>Définissez <code>SQUAD_MCP_ENABLE_BUSINESS_TOOLS=true</code> et configurez un point de terminaison de modèle</td></tr>
+      <tr><td>Réponse 403 lors de l’appel d’un outil</td><td>Le consentement à l’étendue d’autorisation n’a jamais été accordé</td><td>Accordez l’étendue de la partie 2 et autorisez à nouveau la connexion</td></tr>
+      <tr><td>Réponse 401 à chaque appel</td><td>L’audience ou l’émetteur du jeton n’est pas accepté</td><td>Vérifiez que <code>&lt;SQUAD_MCP_AUDIENCE&gt;</code> correspond à <code>api://&lt;client-id&gt;</code></td></tr>
+      <tr><td>Réponse 403 <code>origin_not_allowed</code></td><td>La liste des origines autorisées bloque l’appel</td><td>Ajoutez l’origine de l’appelant à <code>SQUAD_MCP_ALLOWED_ORIGINS</code>. La valeur <code>*</code> est refusée au démarrage</td></tr>
+      <tr><td>L’exécution ne se termine jamais</td><td>Elle attend au point de validation ou dépasse la durée prise en charge dans le traitement d’une requête</td><td>Approuvez-la ou activez le mode autopilot ; activez également le worker pour les exécutions longues</td></tr>
+      <tr><td>L’exécution s’arrête prématurément avec <code>intake_not_ready</code></td><td>Le point de validation a rejeté les données d’entrée</td><td>Lisez le verdict, corrigez le document d’exigences, puis relancez l’exécution. Ce comportement est normal</td></tr>
+      <tr><td>La squad n’a pas les bons rôles</td><td>Le projet disposait déjà d’une squad</td><td>La composition initialisée prévaut sur l’indication <code>profile</code>. Utilisez un nouveau nom <code>squad</code></td></tr>
+      <tr><td>Un seul élément de travail démesuré a été créé</td><td>L’agent a analysé le texte en prose au lieu d’appeler <code>squad_backlog</code></td><td>Vérifiez que l’outil est accessible et que les instructions lui adressent les demandes de backlog</td></tr>
+      <tr><td>Les enfants sont rattachés au mauvais parent</td><td>L’agent a établi les correspondances à partir du titre</td><td>Il doit utiliser <code>ref</code>. Collez à nouveau les instructions générées</td></tr>
+      <tr><td>Les créations échouent en cours de route à cause d’une limitation de débit</td><td>Tout le tableau a été envoyé d’un seul coup</td><td>Procédez par lots : un epic et ses user stories à chaque passage</td></tr>
+      <tr><td>L’exécution suivante ne se souvient de rien</td><td>L’agent appelle encore les outils de mémoire et invente un nouveau nom de projet à chaque session</td><td>Supprimez la section mémoire des instructions de l’agent et transmettez une valeur <code>squad</code> stable</td></tr>
+      <tr><td>L’enregistrement d’un artefact volumineux échoue</td><td>La limite de taille des entités Table est atteinte</td><td>Activez <code>SQUAD_MCP_MEMORY_OVERFLOW_ENABLED</code> avec un conteneur de blobs</td></tr>
+      <tr><td>Rien n’apparaît dans la bibliothèque SharePoint</td><td><code>Sites.Selected</code> a été attribué, mais aucun accès à un site n’a été accordé</td><td>Relancez <code>graph-memory-permissions.bicep</code> en renseignant <code>sharePointSiteId</code></td></tr>
+      <tr><td>L’historique disparaît après un redémarrage</td><td>Le backend de mémoire <code>file</code> est utilisé sur une application dont le nombre de réplicas peut être réduit à zéro</td><td>Passez à <code>table</code> ou <code>graph</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>Ce que ce scénario ne fait volontairement pas</h2>
+  <ul>
+    <li>Il n’écrit pas dans Azure DevOps, Jira ou GitHub depuis le serveur. Chaque écriture est effectuée par l’agent
+        au moyen de la connexion propre à l’utilisateur, avec l’authentification, les règles DLP et les limites de débit du connecteur.</li>
+    <li>Il n’exécute pas de code, n’ouvre pas de pull request et ne déploie rien.</li>
+    <li>Il ne permet ni au modèle ni à l’appelant d’autoriser la reprise à un point de validation humain.
+        Seul <code>Squad.Operate</code> le permet, par un canal distinct.</li>
+    <li>Il ne traite pas le PRD comme des instructions. Le contenu de l’appelant constitue des données ;
+        seule la charte d’un persona fait autorité.</li>
+  </ul>
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>Sous licence MIT. Basé sur <a href="https://github.com/Peter-N91/hve-squad">hve-squad</a>.</span>
+    <span><a href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a> · <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/CHANGELOG.md">Journal des modifications</a></span>
+  </div>
+</footer>
+</body>
+</html>

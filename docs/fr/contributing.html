@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Contribution — hve-squad-mcp</title>
+  <meta name="description" content="Comment contribuer à hve-squad-mcp : les exigences de publication de version fondées sur les fragments de modification, la version épinglée de l'ensemble d'agents et les invariants de sécurité que chaque modification doit respecter." />
+  <link rel="icon" type="image/svg+xml" href="../assets/logo.svg" />
+  <link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+<header class="site">
+  <nav class="site">
+    <a class="brand" href="index.html"><img src="../assets/logo.svg" alt="" /><span class="wordmark">hve<span class="dot">-</span>squad<span class="tag">mcp</span></span></a>
+    <span class="links">
+      <a class="nav" href="index.html">Accueil</a>
+      <a class="nav" href="getting-started.html">Démarrage</a>
+      <a class="nav" href="tools.html">Outils</a>
+      <a class="nav" href="deploy.html">Déployer</a>
+      <a class="nav" href="configuration.html">Configuration</a>
+      <a class="nav" href="scenario-product-backlog.html">Scénario</a>
+      <a class="nav" href="contributing.html" aria-current="page">Contribution</a>
+      <a class="nav" href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a>
+    </span>
+  </nav>
+</header>
+
+<main>
+  <h1>Contribution</h1>
+  <p class="lead">
+    Les contributions sont mises à disposition des utilisateurs au moyen d'un fork et d'une pull request. Le guide complet — <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a> — fait référence ; cette page en présente les grandes lignes.
+  </p>
+
+  <div class="actions">
+    <a class="btn btn-primary" href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/CONTRIBUTING.md">Lire CONTRIBUTING.md</a>
+    <a class="btn" href="https://github.com/Peter-N91/hve-squad-mcp/issues">Créer une issue</a>
+  </div>
+
+  <h2>Les exigences de publication de version</h2>
+  <p>
+    Ne modifiez pas <code>CHANGELOG.md</code> et n'incrémentez pas <code>version</code> dans <code>package.json</code>. Ce sont tous deux des <em>résultats</em> du processus de publication de version, assemblés sur <code>main</code>. Une pull request qui modifie l'un ou l'autre est rejetée par la CI.
+  </p>
+  <p>
+    La raison est mécanique : le numéro de version occupe une seule ligne, et le dernier en-tête du journal des modifications un seul emplacement. Deux pull requests qui les modifient entrent donc systématiquement en conflit — et la seconde fusionnée réutilise silencieusement une version déjà attribuée à la première. À la place, chaque pull request ajoute un nouveau fichier sous <code>.changes/unreleased/</code> :
+  </p>
+  <pre><code>npm run change</code></pre>
+  <p>
+    La commande demande quatre informations — type, incrément de version, titre et entrée — puis écrit un fichier dont le nom contient une date et un identifiant lisible (slug), sans conflit avec une autre pull request ouverte. La fusion de votre pull request déclenche sa publication.
+  </p>
+
+  <h3>Les incréments de version suivent les idées, pas les artefacts</h3>
+  <table>
+    <thead><tr><th>Incrément</th><th>Quand l'utiliser</th></tr></thead>
+    <tbody>
+      <tr><td><code>major</code></td><td>Un utilisateur doit modifier son intégration pour qu'elle continue à fonctionner.</td></tr>
+      <tr><td><code>minor</code></td><td>Une idée véritablement nouvelle — un nouvel outil, un nouveau mode d'exécution, une nouvelle famille de backends.</td></tr>
+      <tr><td><code>patch</code></td><td>Tout le reste, y compris une nouvelle association de rôle dans une fonctionnalité déjà publiée.</td></tr>
+    </tbody>
+  </table>
+  <p>
+    En cas de doute, choisissez <code>patch</code>. Le responsable de maintenance voit le niveau déterminé lors de la vérification de la pull request et peut le relever ; un incrément <code>minor</code> accidentel est irréversible.
+  </p>
+
+  <h2>Avant d'ouvrir une pull request</h2>
+  <pre><code>npm ci
+npm run lint
+npm test
+npm run test:conformance
+npm run generate:check
+npm run generate:connector:check
+</code></pre>
+
+  <h2>Les trois invariants</h2>
+  <p>Toute modification qui affaiblit l'un de ces invariants est refusée, quels que soient ses autres apports :</p>
+  <ul>
+    <li>
+      <strong>La charte fait autorité ; les entrées de l'appelant sont des données.</strong> Tout ce qui provient d'un appelant — <code>request</code>, <code>context</code>, contenu YAML d'une présentation, nom de fichier — est un contenu non fiable. Seule la charte d'un persona fait autorité en matière d'instructions.
+    </li>
+    <li>
+      <strong>Le serveur n'écrit jamais dans Azure DevOps, Jira ou GitHub.</strong> Il produit le plan ; un connecteur natif certifié effectue chaque écriture via la connexion propre à l'utilisateur final.
+    </li>
+    <li>
+      <strong>Chaque chemin de stockage est limité au locataire et protégé contre les traversées de répertoires.</strong> Toute nouvelle destination de stockage doit hériter du préfixe du locataire et de la protection des chemins ; sinon, elle n'est pas publiée.
+    </li>
+  </ul>
+  <p>
+    Toute modification touchant l'authentification, les points de contrôle, l'isolation des locataires ou l'exposition des fonctionnalités nécessite un test de conformité sous <code>test/conformance/</code>.
+  </p>
+
+  <h2>Modifier cette documentation</h2>
+  <p>
+    Ce site est constitué de HTML simple, rédigé à la main dans <code>docs/</code>, et déployé sur GitHub Pages lors d'un push sur <code>main</code>. Il n'y a pas d'étape de compilation — modifiez directement le HTML et le CSS, et veillez à synchroniser la navigation commune sur toutes les pages. Lisez <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/docs/assets/BRAND.md">BRAND.md</a> avant de modifier le logo ou la palette : le logo appartient à une famille visuelle partagée avec hve-squad, et seul son calque intérieur propre à la variante peut changer.
+  </p>
+
+  <div class="callout danger">
+    <p>
+      <strong>Ce dépôt est public.</strong> N'incluez jamais dans un commit un identifiant de locataire, un identifiant d'abonnement, un point de terminaison de ressource, un identifiant d'objet ou un secret — ni dans le code, ni dans les données de test, ni dans un exemple, ni dans une entrée du journal des modifications. Utilisez des valeurs de substitution.
+    </p>
+  </div>
+
+  <h2>Signaler une vulnérabilité</h2>
+  <p>
+    N'ouvrez pas d'issue publique. Signalez la vulnérabilité en privé via <a href="https://github.com/Peter-N91/hve-squad-mcp/security/advisories/new">GitHub Security Advisories</a>.
+  </p>
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>Sous licence MIT. Fondé sur <a href="https://github.com/Peter-N91/hve-squad">hve-squad</a>.</span>
+    <span><a href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a> · <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/CHANGELOG.md">Journal des modifications</a></span>
+  </div>
+</footer>
+</body>
+</html>

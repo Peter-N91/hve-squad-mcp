@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>hve-squad-mcp — hve-squad sous forme d'outils MCP</title>
+  <meta name="description" content="Un serveur Model Context Protocol sortant qui expose hve-squad sous forme d'outils de haut niveau appelables par un modèle — localement via stdio dans VS Code et à distance via HTTP pour Copilot Studio." />
+  <link rel="icon" type="image/svg+xml" href="../assets/logo.svg" />
+  <link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+<header class="site">
+  <nav class="site">
+    <a class="brand" href="index.html"><img src="../assets/logo.svg" alt="" /><span class="wordmark">hve<span class="dot">-</span>squad<span class="tag">mcp</span></span></a>
+    <span class="links">
+      <a class="nav" href="index.html" aria-current="page">Accueil</a>
+      <a class="nav" href="getting-started.html">Démarrage</a>
+      <a class="nav" href="tools.html">Outils</a>
+      <a class="nav" href="deploy.html">Déployer</a>
+      <a class="nav" href="configuration.html">Configuration</a>
+      <a class="nav" href="scenario-product-backlog.html">Scénario</a>
+      <a class="nav" href="contributing.html">Contribution</a>
+      <a class="nav" href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a>
+    </span>
+  </nav>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="hero-logo">
+      <img src="../assets/logo.svg" alt="logo hve-squad-mcp" />
+      <span class="wordmark">hve<span class="dot">-</span>squad<span class="tag">mcp</span></span>
+    </div>
+    <p class="lead">
+      Un serveur <a href="https://modelcontextprotocol.io">Model Context Protocol</a> sortant qui expose
+      <a href="https://github.com/Peter-N91/hve-squad">hve-squad</a> sous forme d'outils de haut niveau appelables par un modèle — pour qu'un hôte MCP puisse appeler directement le squad au lieu de le réimplémenter.
+    </p>
+    <div class="actions">
+      <a class="btn btn-primary" href="getting-started.html">Démarrer</a>
+      <a class="btn" href="tools.html">Voir les outils</a>
+      <a class="btn" href="https://github.com/Peter-N91/hve-squad-mcp">Code source</a>
+    </div>
+  </div>
+
+  <section>
+    <h2>Présentation</h2>
+    <p>
+      hve-squad fournit un squad multi-agents — un coordinateur, un ensemble de personas correspondant aux différents rôles et un conseil dont le verdict obéit à une règle : la décision la plus restrictive prévaut. Ce squad s'exécute normalement <em>au sein</em> d'un hôte où le package est installé. Ce serveur inverse cette organisation : il s'agit du <strong>propre</strong> serveur MCP du squad, utilisé par d'autres hôtes.
+    </p>
+    <p>
+      Il constitue le pendant sortant du modèle MCP entrant du squad. Le générateur accède aux sources déployées du squad en lecture seule et ne duplique jamais la logique des agents : les personas et les instructions de routage restent donc l'unique référence pour le comportement — et non ce package.
+    </p>
+  </section>
+
+  <section>
+    <h2>Deux modes d'exécution</h2>
+    <p>Précisez à quel mode se rapporte chaque affirmation. Leurs niveaux de maturité diffèrent.</p>
+
+    <table>
+      <thead>
+        <tr><th>Mode</th><th>Hôte</th><th>État</th><th>Se comporte comme le package complet ?</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Délégué</strong> (stdio)</td>
+          <td>VS Code GitHub Copilot, local</td>
+          <td><span class="pill ok">fonctionne</span></td>
+          <td><strong>Oui.</strong> VS Code invoque les agents réellement déployés. Nécessite le package compilé ainsi que l'installation de l'ensemble d'agents avec <code>apm install</code>.</td>
+        </tr>
+        <tr>
+          <td><strong>Mode consultatif intégré</strong></td>
+          <td>Copilot Studio, HTTP distant</td>
+          <td><span class="pill ok">fonctionne</span></td>
+          <td><strong>Parité des fonctions consultatives.</strong> Chaque appel déclenche une invocation côté serveur du persona réel, chargé depuis le disque parmi les agents fournis, avec authentification Entra, points de contrôle, isolation des locataires et plafonds de coûts. Texte uniquement.</td>
+        </tr>
+        <tr>
+          <td><strong>Pipeline asynchrone intégré</strong></td>
+          <td>Copilot Studio, HTTP distant</td>
+          <td><span class="pill optin">sur activation explicite</span></td>
+          <td><strong>Parité des fonctions consultatives, ensemble d'agents complet.</strong> Le routage piloté par les données enchaîne recherche → plan → conseil → revue → backlog et produit un artefact structuré en sections. Désactivé par défaut.</td>
+        </tr>
+        <tr>
+          <td><strong>Rendu déterministe</strong></td>
+          <td>Copilot Studio, HTTP distant</td>
+          <td><span class="pill optin">sur activation explicite</span></td>
+          <td><strong>Fichier en sortie.</strong> Génère un <code>.pptx</code> à partir du contenu YAML et renvoie un lien SAS de délégation utilisateur à courte durée de validité. Aucun appel au modèle.</td>
+        </tr>
+        <tr>
+          <td>Implémentation/déploiement avec exécution de code</td>
+          <td>—</td>
+          <td><span class="pill soon">reporté</span></td>
+          <td>Un véritable backend capable d'appeler des outils et un espace de travail persistant. Non disponible — ne présentez pas cette fonctionnalité comme disponible.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout">
+      <p>
+        <strong>En résumé.</strong> Ce déploiement vous donne accès au package complet en local dans VS Code, aux outils consultatifs dès aujourd'hui dans Copilot Studio et — si le pipeline est activé — au squad consultatif complet, exécuté de bout en bout sous forme de pipeline asynchrone. Le périmètre consultatif couvre des livrables <em>textuels</em> finalisés.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Pour aller plus loin</h2>
+    <div class="cards">
+      <a class="card" href="scenario-product-backlog.html">
+        <h3>Scénario : idée → backlog</h3>
+        <p>La procédure complète — déployer, exécuter le profil produit depuis Copilot Studio et créer les epics, user stories et tâches dans Azure DevOps, Jira ou GitHub.</p>
+      </a>
+      <a class="card" href="getting-started.html">
+        <h3>Démarrage</h3>
+        <p>Compiler le serveur et l'enregistrer dans VS Code pour que Copilot puisse appeler le squad localement.</p>
+      </a>
+      <a class="card" href="tools.html">
+        <h3>Outils</h3>
+        <p>Chaque outil exposé, l'étendue d'autorisation requise et les environnements depuis lesquels il est accessible.</p>
+      </a>
+      <a class="card" href="deploy.html">
+        <h3>Déployer</h3>
+        <p>Déployer le serveur HTTP distant sur Azure Container Apps et y accéder depuis Copilot Studio.</p>
+      </a>
+      <a class="card" href="configuration.html">
+        <h3>Configuration</h3>
+        <p>Les paramètres d'exploitation, les backends de stockage et la mémoire du squad alimentée automatiquement par le serveur.</p>
+      </a>
+      <a class="card" href="contributing.html">
+        <h3>Contribution</h3>
+        <p>Les exigences de publication de version, la version épinglée de l'ensemble d'agents et les invariants de sécurité que toute modification doit respecter.</p>
+      </a>
+      <a class="card" href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/docs/planning/adrs/0001-dual-mode-mcp-exposure-delegated-vs-embedded.md">
+        <h3>Décision d'architecture</h3>
+        <p>ADR-0001 : pourquoi l'interface distingue les modes délégué et intégré, et où se situe la frontière de confiance.</p>
+      </a>
+    </div>
+  </section>
+
+  <section>
+    <h2>La frontière de confiance</h2>
+    <p>
+      Ce serveur <strong>n'écrit jamais</strong> dans Azure DevOps, Jira ou GitHub. Il produit le plan ; un connecteur natif certifié effectue chaque écriture via la connexion propre à l'utilisateur final, en appliquant l'authentification, les règles de prévention de la perte de données (DLP) et les limites de débit de ce connecteur. Les entrées de l'appelant sont toujours des données, jamais des instructions — seule la charte d'un persona fait autorité. Chaque chemin de stockage est limité au locataire et protégé contre les traversées de répertoires.
+    </p>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>Sous licence MIT. Fondé sur <a href="https://github.com/Peter-N91/hve-squad">hve-squad</a>.</span>
+    <span><a href="https://github.com/Peter-N91/hve-squad-mcp">GitHub</a> · <a href="https://github.com/Peter-N91/hve-squad-mcp/blob/main/CHANGELOG.md">Journal des modifications</a></span>
+  </div>
+</footer>
+</body>
+</html>

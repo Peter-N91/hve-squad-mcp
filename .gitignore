@@ -4,6 +4,7 @@
 node_modules/
 dist/
 *.tsbuildinfo
+_site/
 
 # Disposable Step 0.1 spike — kept locally as a design record but never shipped.
 # Its purpose (answer Questions A/B, recorded in FINDINGS.md) is complete; it is
