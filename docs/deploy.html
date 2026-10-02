@@ -47,7 +47,9 @@
     <li><strong>Azure Container Registry</strong> — the image, built in ACR from <code>host/Containerfile</code>.</li>
     <li><strong>Azure Key Vault</strong> — operator secrets; the app reads them through its managed identity.</li>
     <li><strong>Azure OpenAI</strong> — the model backend. <strong>This is where real spend begins.</strong></li>
-    <li><strong>An Entra app registration</strong> — the resource server whose Application ID URI becomes the token audience.</li>
+    <li><strong>An Entra app registration</strong> — the default resource server whose Application ID URI becomes the token audience.</li>
+    <li><strong>Optionally, MISE Container v2</strong> — a tightly coupled, pod-local sidecar that validates Entra tokens and emits Microsoft identity compliance telemetry.</li>
+    <li><strong>Optionally</strong> a server-owned OAuth authority for generic MCP clients, backed by Key Vault and Azure Table one-time grants.</li>
     <li><strong>Optionally</strong> Azure Table Storage for durable run state, and Blob Storage for renders and memory overflow.</li>
   </ul>
   <p>Everything is expressed as Bicep in <code>host/infra/</code>. There is no click-through path.</p>
@@ -83,6 +85,20 @@
     Tenant isolation is enforced on top: every store path is prefixed by the caller's tenant and traversal-guarded, so
     one tenant cannot address another's runs, artifacts, or memory. The <code>test/conformance/</code> suites exist
     specifically to make a regression in any of this loud.
+  </p>
+  <p>
+    When MISE is enabled, it replaces the application's direct JWKS signature check for Entra tokens. The application
+    still enforces its exact audience, issuer, tenant, and per-tool scope rules after MISE returns HTTP 200. The bearer
+    token is sent only to <code>127.0.0.1:5000/ValidateRequest</code>; configuration cannot redirect it off the replica.
+  </p>
+
+  <h3>Optional local OAuth issuer</h3>
+  <p>
+    When a generic MCP client cannot register an Entra application, the deployment can expose an additional,
+    server-owned OAuth 2.1 issuer. It uses RFC 9728/8414 discovery, RFC 7591 dynamic registration, loopback-only
+    redirects, mandatory PKCE S256, and operator-issued single-use browser codes. Access tokens are short lived and
+    refresh tokens rotate on every use. This path is opt-in, does not disable Entra, and cannot grant
+    <code>Squad.Operate</code> or release a Human Gate.
   </p>
 
   <h2>Releasing a held run</h2>

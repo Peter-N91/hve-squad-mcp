@@ -50,7 +50,11 @@ export function buildWorker(
   const backend = new AzureOpenAIBackend({
     endpoint: config.modelEndpoint,
     deployment: config.modelDeployment,
+    api: config.modelApi,
     apiVersion: config.modelApiVersion,
+    defaultMaxOutputTokens: config.modelMaxOutputTokens,
+    reasoningEffort: config.modelReasoningEffort,
+    verbosity: config.modelVerbosity,
     getAccessToken: createManagedIdentityTokenProvider(),
     logger,
     pricing: readPricing(env),

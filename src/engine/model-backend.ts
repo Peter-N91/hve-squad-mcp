@@ -35,6 +35,8 @@ export interface BackendRequest {
 export interface BackendUsage {
   inputTokens?: number;
   outputTokens?: number;
+  /** Hidden reasoning tokens included in `outputTokens` by reasoning models. */
+  reasoningTokens?: number;
   /** Best-effort realized cost; fed into the per-tenant cost ceiling (COST-2). */
   estimatedCostUsd?: number;
 }
@@ -47,6 +49,41 @@ export interface BackendResult {
   usage?: BackendUsage;
   /** The backend that produced this result. */
   backendId: string;
+}
+
+export type ModelBackendFailureKind =
+  | "input_too_large"
+  | "output_limit"
+  | "content_policy"
+  | "invalid_request"
+  | "upstream";
+
+export interface ModelBackendErrorOptions {
+  status?: number;
+  providerCode?: string;
+}
+
+/**
+ * A provider failure reduced to non-sensitive metadata. Provider response
+ * messages are deliberately excluded because they can echo caller input.
+ */
+export class ModelBackendError extends Error {
+  readonly kind: ModelBackendFailureKind;
+  readonly status?: number;
+  readonly providerCode?: string;
+
+  constructor(
+    kind: ModelBackendFailureKind,
+    options: ModelBackendErrorOptions = {},
+  ) {
+    const status = options.status === undefined ? "" : `, status ${options.status}`;
+    const code = options.providerCode ? `, code ${options.providerCode}` : "";
+    super(`Model backend request failed (${kind}${status}${code}).`);
+    this.name = "ModelBackendError";
+    this.kind = kind;
+    this.status = options.status;
+    this.providerCode = options.providerCode;
+  }
 }
 
 /** A pluggable model backend. */

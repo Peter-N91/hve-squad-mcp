@@ -16,7 +16,7 @@
 
 @description('Squad MCP application + security configuration (operator-controlled; never caller input).')
 type SquadConfig = {
-  @description('Token audience this resource server accepts (RFC 8707; SEC-1).')
+  @description('Token audience(s) this resource server accepts (RFC 8707; SEC-1). Comma-separate to serve several front doors, for example a Copilot Studio connector and a Cowork Entra SSO auth config.')
   audience: string
   @description('Comma-separated strict Origin allow-list (SEC-8). Never "*".')
   allowedOrigins: string
@@ -32,8 +32,16 @@ type SquadConfig = {
   allowedModelEndpoints: string
   @description('Azure OpenAI deployment name.')
   modelDeployment: string
-  @description('Azure OpenAI REST API version.')
+  @description('Azure OpenAI API surface: responses (recommended) or chat-completions.')
+  modelApi: string
+  @description('Azure OpenAI REST API version (legacy Chat Completions only).')
   modelApiVersion: string
+  @description('Default maximum output tokens per model dispatch.')
+  modelMaxOutputTokens: int
+  @description('Responses API reasoning effort; leave empty for the model default.')
+  modelReasoningEffort: string
+  @description('Responses API visible-output verbosity; leave empty for the model default.')
+  modelVerbosity: string
   @description('Per-tenant concurrency cap (SEC-9 / COST-1).')
   tenantConcurrency: int
   @description('Hard monthly per-tenant cost ceiling in USD (COST-2).')
@@ -60,6 +68,20 @@ param authClientId string
 @description('Entra OpenID issuer URL for the ACA built-in auth, e.g. https://login.microsoftonline.com/<tenant>/v2.0.')
 param authOpenIdIssuer string
 
+@description('Enable Microsoft Identity Service Essentials (MISE) 2.4.1+ as a pod-local sidecar for Entra token validation. Local simple-OAuth HS256 tokens remain validated by the application.')
+param enableMise bool = false
+
+@description('Immutable MISE sidecar image reference. Required when enableMise is true; prefer an ACR digest or a source-commit-specific tag.')
+param miseContainerImage string = ''
+
+@description('Protected-resource Entra application id attributed in MISE telemetry. Empty uses authClientId; set this explicitly when ACA Easy Auth and the protected MCP resource use different app registrations.')
+param miseClientId string = ''
+
+@description('Fail-closed application timeout for one pod-local MISE validation request.')
+@minValue(100)
+@maxValue(60000)
+param miseValidationTimeoutMs int = 10000
+
 @description('Squad MCP application configuration.')
 param squad SquadConfig
 
@@ -72,6 +94,16 @@ param minReplicas int = 0
 @minValue(1)
 @maxValue(30)
 param maxReplicas int = 5
+
+@description('Seconds of idle traffic before the app scales back to zero. The default 300 is tuned for cost; a longer window keeps the app warm across the pauses in an interactive session, which is what a Copilot Studio or Cowork user actually generates. Scale-to-zero still happens once the session ends.')
+@minValue(60)
+@maxValue(3600)
+param scaleCooldownSeconds int = 300
+
+@description('Idle seconds before an MCP session id is forgotten (SEC-8). This must comfortably exceed the think-time between turns of an interactive session: the streamable-HTTP session lives in the replica\'s memory, so once it lapses the next turn is rejected with a 404 and the client reports the connector as unavailable mid-conversation. Keep it aligned with scaleCooldownSeconds, since a session cannot outlive the replica that holds it. Bounded to 1 hour so a leaked id still has a short life.')
+@minValue(60)
+@maxValue(3600)
+param sessionIdleSeconds int = 1800
 
 @description('Monthly cost budget in USD for this resource group (COST-2).')
 param budgetAmountUsd int = 500
@@ -169,6 +201,42 @@ param memoryOverflowContainer string = 'squadmemory'
 @description('Enable the business-facing tools squad_business_plan and squad_backlog (advisory only; the ADO/Jira write stays in the native certified connector). Off by default.')
 param enableBusinessTools bool = false
 
+@description('Enable the server-owned OAuth 2.1 authority (RFC 9728/8414/7591, loopback public clients, PKCE S256, and operator-issued one-time login codes). Off by default; existing Entra auth remains enabled.')
+param enableSimpleOAuth bool = false
+
+@description('Optional public HTTPS origin for simple OAuth metadata and endpoints. Empty derives https://<app>.<managed-environment-domain>.')
+param simpleOAuthExternalUrl string = ''
+
+@description('Azure Table name for one-time simple OAuth login, authorization, and refresh grants.')
+param simpleOAuthTableName string = 'squadoauth'
+
+@description('Comma-separated local OAuth scopes to expose. Empty uses every ordinary Squad.* tool scope except Squad.Operate.')
+param simpleOAuthAllowedScopes string = ''
+
+@description('Current base64 32-byte simple OAuth signing key, followed by optional previous keys separated by commas for rotation. Stored in Key Vault and exposed to the app only by managed identity.')
+@secure()
+param simpleOAuthSigningKeysBase64 string = ''
+
+@description('Simple OAuth access-token lifetime in seconds.')
+@minValue(300)
+@maxValue(3600)
+param simpleOAuthAccessTokenTtlSeconds int = 3600
+
+@description('Simple OAuth authorization-code lifetime in seconds.')
+@minValue(60)
+@maxValue(600)
+param simpleOAuthAuthCodeTtlSeconds int = 300
+
+@description('Simple OAuth refresh-token lifetime in seconds.')
+@minValue(3600)
+@maxValue(7776000)
+param simpleOAuthRefreshTokenTtlSeconds int = 2592000
+
+@description('Maximum lifetime in seconds an operator may assign to a single-use browser login code.')
+@minValue(60)
+@maxValue(3600)
+param simpleOAuthLoginCodeMaxTtlSeconds int = 900
+
 var tenantId = subscription().tenantId
 var keyVaultSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
 // Storage Table Data Contributor — the app + worker identity reads/writes run records.
@@ -180,7 +248,7 @@ var storageBlobDataContributorRoleId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
 // Table: async run state (WI-06) and/or the table-backed memory broker.
 // Blob:  rendered decks and/or the memory overflow channel (WI-03).
 var enableMemoryTable = enableMemory && memoryBackend == 'table'
-var enableTableStorage = enableRemotePipeline || enableMemoryTable
+var enableTableStorage = enableRemotePipeline || enableMemoryTable || enableSimpleOAuth
 var enableBlobStorage = enableRenderPptx || enableMemoryOverflow
 var enableStorage = enableTableStorage || enableBlobStorage
 var storageAccountName = toLower(take('${namePrefix}st${uniqueString(resourceGroup().id)}', 24))
@@ -209,6 +277,35 @@ var encryptionSecrets = !empty(runEncryptionKeyBase64)
 var encryptionEnv = (enableRemotePipeline && !empty(runEncryptionKeyBase64))
   // checkov:skip=CKV_SECRET_6:The high-entropy match is the NAME of an environment variable, not a secret. Its value is a secretRef into the Container App secret store, which is the pattern this check exists to encourage.
   ? [ { name: 'SQUAD_MCP_RUN_ENCRYPTION_KEY_B64', secretRef: 'run-encryption-key' } ]
+  : []
+
+var simpleOAuthSigningKeySecretName = 'simple-oauth-signing-keys'
+var simpleOAuthResolvedExternalUrl = empty(simpleOAuthExternalUrl)
+  ? 'https://${namePrefix}-app.${environment.properties.defaultDomain}'
+  : simpleOAuthExternalUrl
+var simpleOAuthSecrets = enableSimpleOAuth
+  ? [
+      {
+        name: simpleOAuthSigningKeySecretName
+        // Versionless reference lets ACA refresh the secret and restart active
+        // replicas when the operator rotates the signing-key value.
+        keyVaultUrl: simpleOAuthSigningKeySecret!.properties.secretUri
+        identity: identity.id
+      }
+    ]
+  : []
+var simpleOAuthEnv = enableSimpleOAuth
+  ? [
+      { name: 'SQUAD_MCP_SIMPLE_OAUTH_ENABLED', value: 'true' }
+      { name: 'SQUAD_MCP_SIMPLE_OAUTH_EXTERNAL_URL', value: simpleOAuthResolvedExternalUrl }
+      { name: 'SQUAD_MCP_SIMPLE_OAUTH_TABLE_NAME', value: simpleOAuthTableName }
+      { name: 'SQUAD_MCP_SIMPLE_OAUTH_ALLOWED_SCOPES', value: simpleOAuthAllowedScopes }
+      { name: 'SQUAD_MCP_SIMPLE_OAUTH_SIGNING_KEYS_B64', secretRef: simpleOAuthSigningKeySecretName }
+      { name: 'SQUAD_MCP_SIMPLE_OAUTH_ACCESS_TOKEN_TTL_SECONDS', value: string(simpleOAuthAccessTokenTtlSeconds) }
+      { name: 'SQUAD_MCP_SIMPLE_OAUTH_AUTH_CODE_TTL_SECONDS', value: string(simpleOAuthAuthCodeTtlSeconds) }
+      { name: 'SQUAD_MCP_SIMPLE_OAUTH_REFRESH_TOKEN_TTL_SECONDS', value: string(simpleOAuthRefreshTokenTtlSeconds) }
+      { name: 'SQUAD_MCP_SIMPLE_OAUTH_LOGIN_CODE_MAX_TTL_SECONDS', value: string(simpleOAuthLoginCodeMaxTtlSeconds) }
+    ]
   : []
 
 // Render env (squad_render_pptx). The storage account name comes from storageEnv.
@@ -285,7 +382,38 @@ var businessEnv = enableBusinessTools
   ? [ { name: 'SQUAD_MCP_ENABLE_BUSINESS_TOOLS', value: 'true' } ]
   : []
 
-// Base web-app env; pipeline + encryption env are concatenated onto it below.
+// SEC-1: the accepted audiences, split from the operator's comma-separated value.
+// The app receives the raw string and parses it the same way, so the ingress and
+// the app can never disagree about which audiences are accepted.
+var squadAudiences = filter(map(split(squad.audience, ','), a => trim(a)), a => !empty(a))
+var miseResolvedClientId = empty(miseClientId) ? authClientId : miseClientId
+var miseTenantIds = filter(map(split(squad.allowedTenants, ','), tenant => trim(tenant)), tenant => !empty(tenant))
+var miseValidTenantIds = length(miseTenantIds) > 0 ? miseTenantIds : [ '*' ]
+var miseAuthorityTenant = length(miseTenantIds) == 1 ? first(miseTenantIds) : 'common'
+var miseClientEnv = enableMise
+  ? [
+      { name: 'SQUAD_MCP_MISE_ENABLED', value: 'true' }
+      { name: 'SQUAD_MCP_MISE_ENDPOINT', value: 'http://127.0.0.1:5000/ValidateRequest' }
+      { name: 'SQUAD_MCP_MISE_TIMEOUT_MS', value: string(miseValidationTimeoutMs) }
+    ]
+  : []
+var miseAudienceEnv = map(squadAudiences, (audience, index) => {
+  name: 'MISE_CONTAINER_AzureAd__Audiences__${index}'
+  value: audience
+})
+var miseValidTenantEnv = map(miseValidTenantIds, (tenant, index) => {
+  name: 'MISE_CONTAINER_AzureAd__ValidTenantIds__${index}'
+  value: tenant
+})
+var miseSidecarEnv = concat([
+  { name: 'MISE_CONTAINER_Container__DeploymentMode', value: 'Sidecar' }
+  { name: 'MISE_CONTAINER_AzureAd__ClientId', value: miseResolvedClientId }
+  { name: 'MISE_CONTAINER_AzureAd__TenantId', value: miseAuthorityTenant }
+  { name: 'MISE_CONTAINER_AzureAd__PrefetchOidcMetadata', value: 'true' }
+  { name: 'MISE_CONTAINER_AzureAd__ShowPII', value: 'false' }
+  { name: 'MISE_CONTAINER_Logging__LogLevel__Default', value: 'Warning' }
+  { name: 'MISE_CONTAINER_Logging__LogLevel__Microsoft', value: 'Warning' }
+], miseAudienceEnv, miseValidTenantEnv)
 var webBaseEnv = [
   { name: 'PORT', value: '3000' }
   { name: 'SQUAD_MCP_AUDIENCE', value: squad.audience }
@@ -296,9 +424,14 @@ var webBaseEnv = [
   { name: 'SQUAD_MCP_MODEL_ENDPOINT', value: squad.modelEndpoint }
   { name: 'SQUAD_MCP_ALLOWED_MODEL_ENDPOINTS', value: squad.allowedModelEndpoints }
   { name: 'SQUAD_MCP_MODEL_DEPLOYMENT', value: squad.modelDeployment }
+  { name: 'SQUAD_MCP_MODEL_API', value: squad.modelApi }
   { name: 'SQUAD_MCP_MODEL_API_VERSION', value: squad.modelApiVersion }
+  { name: 'SQUAD_MCP_MODEL_MAX_OUTPUT_TOKENS', value: string(squad.modelMaxOutputTokens) }
+  { name: 'SQUAD_MCP_MODEL_REASONING_EFFORT', value: squad.modelReasoningEffort }
+  { name: 'SQUAD_MCP_MODEL_VERBOSITY', value: squad.modelVerbosity }
   { name: 'SQUAD_MCP_TENANT_CONCURRENCY', value: string(squad.tenantConcurrency) }
   { name: 'SQUAD_MCP_TENANT_COST_CEILING_USD', value: string(squad.tenantCostCeilingUsd) }
+  { name: 'SQUAD_MCP_SESSION_IDLE_MS', value: string(sessionIdleSeconds * 1000) }
   { name: 'AZURE_CLIENT_ID', value: identity.properties.clientId }
 ]
 
@@ -331,8 +464,17 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     tenantId: tenantId
     enableRbacAuthorization: true
     enableSoftDelete: true
+    enablePurgeProtection: true
     softDeleteRetentionInDays: 90
     publicNetworkAccess: 'Enabled'
+  }
+}
+
+resource simpleOAuthSigningKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (enableSimpleOAuth) {
+  parent: keyVault
+  name: simpleOAuthSigningKeySecretName
+  properties: {
+    value: simpleOAuthSigningKeysBase64
   }
 }
 
@@ -361,9 +503,14 @@ resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
   }
 }
 
-resource app 'Microsoft.App/containerApps@2024-03-01' = {
+resource app 'Microsoft.App/containerApps@2025-01-01' = {
   name: '${namePrefix}-app'
   location: location
+  dependsOn: [
+    // Key Vault references are resolved while the revision is created. Make the
+    // role assignment complete before ACA attempts to read the signing-key secret.
+    keyVaultSecretsUser
+  ]
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {
@@ -374,7 +521,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
     managedEnvironmentId: environment.id
     configuration: {
       activeRevisionsMode: 'Single'
-      secrets: encryptionSecrets
+      secrets: concat(encryptionSecrets, simpleOAuthSecrets)
       ingress: {
         external: true
         targetPort: 3000
@@ -390,7 +537,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
       ]
     }
     template: {
-      containers: [
+      containers: concat([
         {
           name: 'hve-squad-mcp'
           image: containerImage
@@ -398,13 +545,65 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             cpu: json('0.5')
             memory: '1Gi'
           }
-          env: concat(webBaseEnv, storageEnv, pipelineEnv, encryptionEnv, memoryEncryptionEnv, renderEnv, memoryEnv, businessEnv, artifactsEnv, advisoryAutopilotEnv)
+          env: concat(webBaseEnv, storageEnv, pipelineEnv, encryptionEnv, memoryEncryptionEnv, renderEnv, memoryEnv, businessEnv, artifactsEnv, advisoryAutopilotEnv, simpleOAuthEnv, miseClientEnv)
         }
-      ]
+      ], enableMise
+        ? [
+            {
+              name: 'mise'
+              image: miseContainerImage
+              resources: {
+                cpu: json('0.5')
+                memory: '1Gi'
+              }
+              env: miseSidecarEnv
+              probes: [
+                {
+                  type: 'Startup'
+                  httpGet: {
+                    path: '/readyz'
+                    port: 5000
+                  }
+                  initialDelaySeconds: 2
+                  periodSeconds: 2
+                  timeoutSeconds: 2
+                  failureThreshold: 60
+                }
+                {
+                  type: 'Liveness'
+                  httpGet: {
+                    path: '/healthz'
+                    port: 5000
+                  }
+                  initialDelaySeconds: 10
+                  periodSeconds: 30
+                  timeoutSeconds: 2
+                  failureThreshold: 3
+                }
+                {
+                  type: 'Readiness'
+                  httpGet: {
+                    path: '/readyz'
+                    port: 5000
+                  }
+                  initialDelaySeconds: 2
+                  periodSeconds: 5
+                  timeoutSeconds: 2
+                  failureThreshold: 12
+                }
+              ]
+            }
+          ]
+        : [])
       scale: {
         // COST-3 / ARCH-2: scale-to-zero with HTTP-driven scale-out.
         minReplicas: minReplicas
         maxReplicas: maxReplicas
+        // An interactive caller pauses between turns to read the previous
+        // artifact. With the platform default (300s) the app sleeps inside those
+        // pauses and the next turn hits a cold start, which surfaces to the
+        // caller as an unreachable connector rather than as latency.
+        cooldownPeriod: scaleCooldownSeconds
         rules: [
           {
             name: 'http-concurrency'
@@ -432,6 +631,20 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-03-01' = {
     }
     globalValidation: {
       unauthenticatedClientAction: 'Return401'
+      // The app validates both Entra and local OAuth bearer tokens. Exclude only
+      // resource/OAuth paths so MCP clients receive the RFC 9728 challenge;
+      // /admin/approve remains protected by ACA Easy Auth plus its own app role.
+      excludedPaths: enableSimpleOAuth
+        ? [
+            '/mcp'
+            '/.well-known/oauth-protected-resource'
+            '/.well-known/oauth-protected-resource/mcp'
+            '/.well-known/oauth-authorization-server'
+            '/oauth/register'
+            '/oauth/authorize'
+            '/oauth/token'
+          ]
+        : []
     }
     identityProviders: {
       azureActiveDirectory: {
@@ -441,9 +654,7 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-03-01' = {
           clientId: authClientId
         }
         validation: {
-          allowedAudiences: [
-            squad.audience
-          ]
+          allowedAudiences: squadAudiences
         }
       }
     }
@@ -481,6 +692,11 @@ resource runTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-0
 resource memoryTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-05-01' = if (enableMemoryTable) {
   parent: tableService
   name: memoryTableName
+}
+
+resource simpleOAuthTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-05-01' = if (enableSimpleOAuth) {
+  parent: tableService
+  name: simpleOAuthTableName
 }
 
 // Let the app + worker identity read/write run + memory records. Account-scoped RBAC.
@@ -636,3 +852,6 @@ output appClientId string = identity.properties.clientId
 
 @description('Where squad memory is persisted, or empty when the memory broker is disabled.')
 output memoryBackendInUse string = enableMemory ? memoryBackend : ''
+
+@description('The simple OAuth issuer URL, or empty when the feature is disabled.')
+output simpleOAuthIssuer string = enableSimpleOAuth ? simpleOAuthResolvedExternalUrl : ''

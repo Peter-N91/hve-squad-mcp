@@ -29,7 +29,13 @@ test("HIGH-1: with the pipeline disabled, tools/list is hero-only", async () => 
     token: "all-scopes",
     tenantId: TENANT,
     subject: "a",
-    scopes: ["Squad.Research", "Squad.Review", "Squad.Run"],
+    scopes: [
+      "Squad.Research",
+      "Squad.Review",
+      "Squad.Plan",
+      "Squad.Architect",
+      "Squad.Run",
+    ],
   });
   const sessionId = await initializeSession(harness.handler, "all-scopes");
 

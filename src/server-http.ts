@@ -18,6 +18,13 @@ import { ToolRouter } from "./router/router.js";
 import { loadOperatorConfig, type OperatorConfig } from "./config/operator-config.js";
 import { EntraAuthenticator } from "./auth/entra.js";
 import { createJoseVerifier } from "./auth/jose-verifier.js";
+import { createMiseVerifier } from "./auth/mise-verifier.js";
+import { createOAuthAwareVerifier } from "./auth/oauth-key-ring.js";
+import { AzureTableOAuthGrantStore } from "./auth/azure-table-oauth-store.js";
+import {
+  SimpleOAuthAuthority,
+  SimpleOAuthHttpHandler,
+} from "./auth/simple-oauth.js";
 import { EmbeddedCoordinator } from "./engine/embedded.js";
 import { EphemeralWorkspaceManager } from "./engine/workspace.js";
 import { GateKeeper, RunStoreApprovalChannel, TenantQuotaTracker, type HumanApprovalChannel } from "./engine/gates.js";
@@ -45,7 +52,7 @@ import { createManagedIdentityTokenProvider } from "./engine/backends/managed-id
 import { RedactingLogger } from "./observability/logger.js";
 import { SessionStore } from "./transports/session-store.js";
 import { HttpMcpHandler } from "./transports/http-core.js";
-import { createHttpServer } from "./transports/http.js";
+import { createHttpServer, type HttpRequestHandler } from "./transports/http.js";
 
 /** The Azure Storage OAuth scope for the managed-identity Table token. */
 const STORAGE_SCOPE = "https://storage.azure.com/.default";
@@ -115,6 +122,26 @@ export function buildRunStateStack(
 /** The shared-state memory broker stack (undefined when the feature is off). */
 export interface SquadMemoryStack {
   memoryStore: SquadMemoryStore;
+}
+
+/** Optional server-owned OAuth authority and its shared one-time grant store. */
+export function buildSimpleOAuthAuthority(
+  config: OperatorConfig,
+  logger: RedactingLogger,
+): SimpleOAuthAuthority | undefined {
+  if (!config.simpleOAuth.enabled) {
+    return undefined;
+  }
+  return new SimpleOAuthAuthority({
+    config: config.simpleOAuth,
+    store: new AzureTableOAuthGrantStore({
+      account: config.storageAccount,
+      tableName: config.simpleOAuth.tableName,
+      getAccessToken: createManagedIdentityTokenProvider(STORAGE_SCOPE),
+      logger,
+    }),
+    logger,
+  });
 }
 
 /**
@@ -237,25 +264,46 @@ export function buildHttpHandler(
   config: OperatorConfig,
   env: NodeJS.ProcessEnv = process.env,
   logger: RedactingLogger = new RedactingLogger({ name: "hve-squad-mcp-http" }),
-): HttpMcpHandler {
+): HttpRequestHandler {
   const router = new ToolRouter(loadCatalog());
 
   const jwksUri = (env.SQUAD_MCP_JWKS_URI ?? "").trim();
-  if (jwksUri.length === 0) {
+  if (!config.mise.enabled && jwksUri.length === 0) {
     throw new Error("SQUAD_MCP_JWKS_URI is required to validate Entra tokens (SEC-1).");
   }
+  const simpleOAuth = buildSimpleOAuthAuthority(config, logger);
+  const entraIssuers = config.simpleOAuth.enabled
+    ? config.allowedIssuers.filter(
+        (issuer) => issuer !== config.simpleOAuth.externalUrl,
+      )
+    : config.allowedIssuers;
+  const entraVerifier = config.mise.enabled
+    ? createMiseVerifier({
+        endpoint: config.mise.endpoint,
+        timeoutMs: config.mise.timeoutMs,
+      })
+    : createJoseVerifier({
+        jwksUri,
+        issuer: entraIssuers.length > 0 ? entraIssuers : undefined,
+      });
   const authenticator = new EntraAuthenticator({
-    audience: config.audience,
+    audiences: config.audiences,
     allowedIssuers: config.allowedIssuers,
     allowedTenants: config.allowedTenants,
-    verifier: createJoseVerifier({ jwksUri, issuer: config.allowedIssuers }),
+    verifier: simpleOAuth
+      ? createOAuthAwareVerifier(entraVerifier, simpleOAuth.verifier)
+      : entraVerifier,
     logger,
   });
 
   const backend = new AzureOpenAIBackend({
     endpoint: config.modelEndpoint,
     deployment: config.modelDeployment,
+    api: config.modelApi,
     apiVersion: config.modelApiVersion,
+    defaultMaxOutputTokens: config.modelMaxOutputTokens,
+    reasoningEffort: config.modelReasoningEffort,
+    verbosity: config.modelVerbosity,
     getAccessToken: createManagedIdentityTokenProvider(),
     logger,
     pricing: readPricing(env),
@@ -332,7 +380,7 @@ export function buildHttpHandler(
     logger,
   });
 
-  return new HttpMcpHandler({
+  const mcpHandler = new HttpMcpHandler({
     router,
     authenticator,
     embedded,
@@ -344,7 +392,11 @@ export function buildHttpHandler(
     renderService,
     memoryStore: memoryStack?.memoryStore,
     businessToolsExposed: config.enableBusinessTools,
+    oauthResourceMetadataUrl: simpleOAuth?.resourceMetadataUrl,
   });
+  return simpleOAuth
+    ? new SimpleOAuthHttpHandler(simpleOAuth, mcpHandler, logger)
+    : mcpHandler;
 }
 
 /** Start the live HTTP server. */
