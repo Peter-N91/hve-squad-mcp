@@ -22,6 +22,7 @@ import { OAuthKeyRing } from "./oauth-key-ring.js";
 import type { OAuthGrantKind, OAuthGrantStore } from "./oauth-store.js";
 import type { RedactingLogger } from "../observability/logger.js";
 import type { HttpRequestLike, HttpResponseLike } from "../transports/http-core.js";
+import type { ReadinessProbe } from "../transports/readiness.js";
 
 const OFFLINE_ACCESS_SCOPE = "offline_access";
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -982,11 +983,16 @@ export class SimpleOAuthAuthority {
 
 /** Wrapper that serves public OAuth routes and delegates everything else to MCP. */
 export class SimpleOAuthHttpHandler {
+  /** The wrapped handler's readiness probe; `/healthz` and `/readyz` are delegated to it. */
+  readonly readiness?: ReadinessProbe;
+
   constructor(
     private readonly oauth: SimpleOAuthAuthority,
-    private readonly next: { handle(req: HttpRequestLike): Promise<HttpResponseLike> },
+    private readonly next: { handle(req: HttpRequestLike): Promise<HttpResponseLike>; readonly readiness?: ReadinessProbe },
     private readonly logger: RedactingLogger,
-  ) {}
+  ) {
+    this.readiness = next.readiness;
+  }
 
   async handle(req: HttpRequestLike): Promise<HttpResponseLike> {
     try {

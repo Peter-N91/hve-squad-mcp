@@ -9,6 +9,7 @@ import { FileSquadMemoryStore } from "../../src/engine/backends/file-squad-memor
 import { AutoMemory } from "../../src/engine/auto-memory.js";
 import { MemoryBackedArtifactStore } from "../../src/engine/artifact-store.js";
 import { SquadRunRecorder } from "../../src/engine/squad-run-recorder.js";
+import { EphemeralRunStateStore } from "../../src/engine/run-state.js";
 import {
   buildHarness,
   callTool,
@@ -36,9 +37,11 @@ test("HTTP project context is acknowledged and identity collisions fail before i
   try {
     const verifier = new FakeJwtVerifier();
     const memoryStore = new FileSquadMemoryStore({ baseDir: dir });
+    const runStateStore = new EphemeralRunStateStore();
     const harness = buildHarness({
       verifier,
       memoryStore,
+      runStateStore,
       artifactsEnabled: true,
       autoMemory: new AutoMemory({
         store: memoryStore,
@@ -203,6 +206,9 @@ test("HTTP project context is acknowledged and identity collisions fail before i
     });
     assert.match(resultText(wrongPoll), /project_identity_conflict/);
 
+    const workerPath = `.copilot-tracking/research/${runId}/between-polls.md`;
+    await memoryStore.write(TENANT, "legora-storyboard", workerPath, "Persisted by the worker before the status request.");
+    await new Promise((resolve) => setTimeout(resolve, 10));
     const boundPoll = await callTool(harness.handler, {
       token: "project-context",
       sessionId,
@@ -213,7 +219,11 @@ test("HTTP project context is acknowledged and identity collisions fail before i
     const boundResult = (boundPoll.body as {
       result?: {
         structuredContent?: {
-          contextBridge?: { project?: string; projectId?: string };
+          contextBridge?: {
+            project?: string;
+            projectId?: string;
+            trackingUpdates?: { path: string; content: string }[];
+          };
         };
       };
     }).result;
@@ -225,6 +235,25 @@ test("HTTP project context is acknowledged and identity collisions fail before i
       boundResult?.structuredContent?.contextBridge?.projectId,
       PROJECT_CONTEXT.projectId,
     );
+    assert.ok(boundResult?.structuredContent?.contextBridge?.trackingUpdates?.some(
+      (update) => update.path === workerPath && update.content === "Persisted by the worker before the status request.",
+    ), "status projects persisted worker artifacts written between HTTP calls");
+    await runStateStore.update(runId, {
+      status: "failed",
+      failureReason: "stage_artifact_gate",
+      artifact: "BRD Builder stopped without a verified completion receipt.",
+    });
+    const failedPoll = await callTool(harness.handler, {
+      token: "project-context", sessionId, name: "squad_status",
+      args: { runId }, id: 8,
+    });
+    const failedText = resultText(failedPoll);
+    assert.match(failedText, /stage_artifact_gate/);
+    assert.match(failedText, /"outcome": "denied"/);
+    assert.match(failedText, /"acceptedRevision": 4/);
+    assert.ok(failedText.includes(workerPath),
+      "text-only clients receive partial artifact paths and the bridge receipt even on failure");
+    assert.equal((failedPoll.body as { result?: { isError?: boolean } }).result?.isError, true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

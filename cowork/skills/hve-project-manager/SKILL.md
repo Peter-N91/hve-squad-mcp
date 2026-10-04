@@ -2,20 +2,43 @@
 name: hve-project-manager
 description: >
   Creates, opens, and advances HVE Squad projects in OneDrive or SharePoint.
-  Use when a user asks to start, resume, manage, plan, research, review, or take
-  a project end to end while keeping its state, decisions, and artifacts.
+  Use when a user asks to start, resume, or manage a project with HVE Squad.
+  Relays task context, presents decisions, mirrors server files, and maintains
+  a stakeholder library for coordinated continuation.
 license: MIT
 metadata:
   author: hve-squad
-  version: "1.3"
+  version: "1.21"
+  orchestrator-entry-tool: squad_run
+  status-tool: squad_status
+  output-read-tool: squad_history
+  approval-tool: squad_approve
+  human-response-tool: squad_respond
+  responsibility: project-io-bridge
+  artifact-sync-protocol: references/artifact-sync.md
+  artifact-layout: server-canonical
+  stakeholder-library-protocol: references/stakeholder-library.md
+  context-preflight-protocol: references/context-preflight.md
 ---
 
 # HVE Squad project manager
 
-Use Cowork's native Microsoft 365 file capabilities for the project workspace
-and the connected HVE Squad MCP tools for governed research, architecture,
-planning, review, business planning, backlog generation, and long-running
-advisory work.
+Use Cowork's native Microsoft 365 file capabilities for the project workspace.
+This skill is an input/output bridge between that workspace and the connected
+HVE Squad MCP server. Every work-producing HVE request must enter through
+`squad_run`, whose server-owned Squad Coordinator classifies the request and
+controls research, routing, workers, stage order, execution, review, and gates.
+Cowork must not make those orchestration decisions.
+
+Starting squad work and coordinating its handoff are different responsibilities.
+The MCP lifecycle (`initialize` and `tools/list`), `squad_status` for an existing
+run, read-only `squad_history` for that run's accepted project, `squad_respond`
+for its human question, and authorized `squad_approve` for its operator gate are support
+operations, not alternative work entry points. Presenting a server decision,
+collecting the human's answer, retrieving server outputs, and continuing the
+server-directed workflow are required duties of this skill.
+
+For operator gates, follow **4b. Submit the saved approval contract**.
 
 This skill manages project artifacts. It does not turn an advisory MCP result
 into proof that code was changed, infrastructure was deployed, a work item was
@@ -42,6 +65,11 @@ created, or a gate was approved.
 
 Read [references/project-contract.md](references/project-contract.md) before
 creating, adopting, or repairing a project.
+Read [references/stakeholder-library.md](references/stakeholder-library.md)
+on every managed turn. Maintain `START-HERE.md` and `library/` views for
+deliverables, decisions and next steps; they link evidence, never replace it.
+If unavailable, checkpoint the blocker and do not proceed. Navigation-only
+repairs do not start a squad run.
 
 ## Start or resume
 
@@ -55,16 +83,19 @@ At the beginning of an HVE project request:
 5. If it does not exist:
    - create a project only after the user confirms the folder and project name;
    - offer to adopt a nonempty folder rather than overwriting it;
-   - create the standard project structure and initial files from the project
-     contract.
+   - create only the minimal bridge metadata from the project contract.
+     Include stakeholder navigation, not generic artifact or tracking folders.
+     Mirror actual persisted server paths on demand, not a parallel scaffold.
 6. When creating a project, ask whether the interaction journal should store
    full visible requests or concise summaries. Do not change that choice
    silently later.
-7. Prefer stable drive and item identifiers when Cowork exposes them. Keep the
-   display path for people, but do not use a mutable path as the sole identity.
+7. Bind the immutable project UUID to the actual M365 provider, drive id, and
+   folder item id. Never fabricate identifiers. Require them for bridge schema 2;
+   keep names and paths as human labels, not identity. Follow the project
+   contract for renames, copied folders, and safe legacy upgrades.
 8. Migrate a schema 1 project to schema 2 using the project contract before
-   invoking an HVE tool. Preserve its history and create the tracking root; never
-   infer prior squad state.
+   invoking an HVE tool. Preserve history; create tracking parents only for
+   actual server files, never inferred prior squad state.
 
 If the manifest is missing, malformed, has an unsupported schema version, or
 points at a different folder, stop and explain the mismatch. Never invent
@@ -72,197 +103,195 @@ project history.
 
 ## Managed-turn protocol
 
-Follow this protocol for every interaction handled as part of an open project.
+For navigation-only repair, use steps 1-2 and 6; do not invoke HVE tools.
+For sync-only recovery, use steps 1-2 and 5-6 with the existing run;
+skip work submission. File-sync consent never answers or approves a gate.
 
 ### 1. Load the checkpoint
 
-Read:
-
-- `hve-project.json`;
-- `state.md`;
-- `next-actions.md`;
-- the current decision index;
-- `.copilot-tracking/squad/team.md`, `routing.md`, and `state.json` when they
-  exist;
-- the recent tail of `.copilot-tracking/squad/decisions.md`;
-- only the prior artifacts relevant to this request.
-
-Do not load the whole project indiscriminately. Prefer concise, relevant
-context and preserve the current manifest `revision` and activity `sequence`.
+Read [references/execution-protocol.md](references/execution-protocol.md)
+and follow its checkpoint-loading rules. Load only relevant project context,
+preserving the manifest revision and activity sequence.
 
 ### 2. Start the activity record
 
-Create the next activity record under `activity/` before substantive work
-begins. Mark it `in-progress`; it becomes immutable after finalization. Record:
+Create the in-progress journal entry using the execution protocol and project
+contract before substantive work. If it cannot be saved, report the blocker
+and do not start the workflow.
 
-- sequence and timestamp;
-- the visible user request or its summary, according to `journalMode`;
-- intended HVE stages;
-- starting project revision.
-- the bridge `project`, revision, and sequence that will be sent.
+### 3. Resolve the single orchestrator entry point
 
-Use the colon-free UTC filename format defined in the project contract. Keep
-ordinary ISO 8601 timestamps inside the JSON content only.
+At the start of every managed turn, use Cowork's live connector discovery or
+tool-search facility for HVE Squad. The MCP lifecycle uses `initialize` and
+`tools/list`; let the host manage it rather than inventing protocol tools.
+Follow every `nextCursor` when discovery is paginated. Read the current
+`squad_run` definition, including its exact `inputSchema`, advertised output
+schema, description, and safety annotations.
 
-Redact credentials and secrets. If the activity record cannot be created, tell
-the user that the project cannot be safely checkpointed and do not start an
-end-to-end workflow.
+Discovery verifies the fixed entry contract and current schema. It is not a
+routing exercise:
 
-### 3. Select and invoke HVE tools
+- `squad_run` is the only work-producing HVE capability this skill may invoke.
+- `squad_status` may be invoked only with a real run id returned by
+  `squad_run`, to poll or recover that same run.
+- `squad_history` may be used only to index, list, and read outputs in the
+  accepted project partition after the orchestrator entry call. Read its live
+  schema; it is output retrieval, not a worker invocation.
+- `squad_approve` is a control-plane exception for an explicit, saved and
+  verified approval of the existing run. It never starts new work; requires
+  `Squad.Operate`, not merely `Squad.Run`; and cannot represent rejection.
+- `squad_respond` is a separate control-plane exception for the explicit human
+  answer to an existing run's exact `questionId`. It requires `Squad.Run`, NOT
+  `Squad.Operate`; it cannot release an operator gate. Operator `squad_approve`
+  cannot answer human questions. Neither permits a replacement run.
+- Never invoke a direct research, planning, architecture, review, business,
+  backlog, federation, rendering, memory-write, or maintenance capability
+  from this skill, even when one appears narrower or faster.
+- Never choose or infer HVE workers, roles, stages, stage order, council members,
+  validation passes, or parallelism. Never decompose one user request into
+  specialist HVE calls.
+- Never infer `profile`, `mode`, `tier`, `owner`, `discovery`, or `squad`.
+  Forward one only when explicitly supplied by the user or confirmed with the
+  user from the live schema and server guidance. Translate a confirmed choice
+  into the exact schema value and record it. Do not silently select a profile
+  to avoid a gate, or change one on an existing run.
+- Never copy server worker or routing definitions into the project as future
+  routing authority. Returned tracking files are persisted only as server
+  output.
 
-Use the narrowest currently available HVE tool:
+If `squad_run` is not discovered or is not authorized, do not substitute
+another HVE tool and do not produce the requested HVE artifact natively.
+Checkpoint the blocked activity and report that the canonical orchestrator
+entry point is unavailable.
 
-- Business idea, opportunity, business case, or sponsor narrative:
-  `squad_business_plan`.
-- Backlog, epics, stories, or work-item contract: `squad_backlog`.
-- Investigation, evidence, options, or unknowns: `squad_research`.
-- Architecture, boundaries, components, or design tradeoffs:
-  `squad_architect`.
-- Work breakdown, sequence, dependencies, or validation plan: `squad_plan`.
-- Review, validation, quality, or go/no-go: `squad_review`.
-- A governed multi-stage advisory package: `squad_run`.
-- Independently owned sub-squads or federation setup: `squad_federate`.
+### 4. Relay to the orchestrator and negotiate project tracking
 
-The MCP server's live tool descriptions and schemas are authoritative. A tool
-may be disabled by the operator. If a required tool is unavailable, say so and
-record the blocked activity; do not simulate its result.
+For new work, follow [context preflight](references/context-preflight.md):
+validate task-only context and save its selection receipt before dispatch.
+Missing instructions or failed preflight block submission, not provider safety.
 
-Distinguish two different causes before you record anything, because they need
-opposite responses:
+Before any run or poll, read and follow
+[references/execution-protocol.md](references/execution-protocol.md), including
+its bridge validation, bounded context, failure recovery, persistence, and
+checkpoint rules. Read the project contract for file schemas and safe paths.
+If either reference cannot be read, checkpoint the blocker and do not proceed.
 
-- **Whole squad missing.** Every `squad_*` tool has disappeared at once. This is
-  almost always a dropped connection, not a configuration change: the MCP
-  session lives in the server's memory and lapses after an idle period, so a
-  long pause between turns can end it. Treat this as transient. Re-establish the
-  connection to the HVE Squad connector and retry the stage once. Only if the
-  retry still finds no tools should you tell the user the connector is
-  disconnected and record the activity as `blocked`. Say plainly that project
-  state is safe and the stage can resume once reconnected — an expired
-  connection never loses committed project files.
-- **One tool missing while others remain.** That is a genuine operator decision
-  to disable a capability. Do not retry. Record the blocked activity and offer
-  the closest supported stage instead.
+Check for an unfinished run or pending decision before starting new work.
+Call `squad_run` once for new work, not for approval or retrying an uncertain
+outcome. Send only schema-supported inputs and the current project checkpoint.
+Use `squad_status` for the existing run; verify identity and bridge acceptance
+before merging tracking updates. Persist outputs after every response,
+including partial results while held. Cowork does not choose dependent HVE stages.
 
-In both cases the rule against fabrication is absolute: never write a stage
-artifact that a tool did not actually produce.
+### 4a. Surface decisions and coordinate continuation
 
-For every project-aware HVE call, pass:
+When `squad_run` returns a run id, persist it before polling. Inspect the whole
+response: structured content, machine-readable status/reason, approval request,
+questions, output references, and next-step guidance. A routing summary is not
+evidence that research or any other stage ran.
 
-- `project`: `hve-project.json.contextBridge.project`;
-- `projectContext.schemaVersion`: `1`;
-- `projectContext.projectId`, `revision`, and `sequence` from the manifest;
-- `projectContext.trackingRoot`: `.copilot-tracking`;
-- `projectContext.storage.provider`, plus stable `driveId` and `folderItemId`
-  whenever available;
-- `context`: the bounded context bundle described below.
+1. **Queued or running:** reasons such as `queued`, `queued_for_worker`, or
+   `run_already_in_flight` describe work in progress, even if the generic response
+   heading says Human Gate or `outcome` is `held`. Poll the same run, respecting
+   any server retry guidance. Limit to three polls per managed turn; if still
+   pending, checkpoint it as running and report the next same-run poll rather
+   than busy-looping or requesting approval that the server did not require.
+2. **Human decision or clarification:** show the actual server question in
+   Cowork, with the relevant artifact link/excerpt, options and consequences
+   supplied by the squad, and run/decision identity. Ask one focused question
+   using a discovered native selectable-question tool whenever its live schema
+   represents the question/choices losslessly. Follow **Same-run human handoff**
+   for minimal bound hold capture, exact native mapping, and concrete fallback
+   reasons. "Surface immediately" does not waive native choices or require bulk
+   mirroring first. Do not bury it in a final status report or replace
+   it with a generic "approve out-of-band" instruction. If no concrete question
+   was returned, say so; do not invent a squad verdict from the source brief.
+3. **Record the answer:** store the exact human response, timestamp, decision
+   reference and source run in a new `activity/decisions/` record, or the
+   existing saved decision path, and the activity record. Distinguish
+   `answered` from `submitted` and server-acknowledged `accepted`. User consent
+   to a file write or tool call is not a squad decision.
+4. **Relay through a supported channel:** inspect the live schema before sending
+   the answer. For `reason: "awaiting human input"` and `humanInput`, follow
+   **Same-run human handoff** in the required execution protocol. Display
+   `notice` (when present) and `question` verbatim, collect an explicit answer,
+   save/read it back bound to run/question/project, and use discovered
+   `squad_respond`. Verify the receipt, then poll the SAME run. Never invent an
+   answer, phase signoff, or claim a notice was displayed merely because it
+   was loaded. If the tool is missing, checkpoint the handoff as blocked.
+   If the user needs collaborators or more time, follow **Collaborative
+   deferral and later resumption** in the execution protocol: save the pending
+   question in the shared project, leave it awaiting input/deferred, stop
+   polling/work, and invite them to return with a completed decision.
+   Do not invent a tool or a parameter. The current
+   `squad_status` schema polls only; it cannot submit decisions or approvals.
+5. **Operator gate:** present the approval request and affected run in Cowork,
+   collect the human's choice, and follow the saved-approval submission protocol
+   below. A chat "approve" does not release this gate until the server accepts
+   the submission. Do not write approval state into memory or start another run
+   to bypass it.
+6. **Completed step or terminal request for revised input:** retrieve and verify
+   its outputs first. Present the server's next action and any human decision
+   needed. If the server directs a new orchestrator turn and the user authorizes
+   it, start a new `squad_run` with the accepted outputs, decision answers, and
+   previous run id as context. Link both runs in the journal. This is a new
+   handoff, not a retry of an unfinished run. Do not start a new run when the
+   server only asked for operator approval or same-run human input, or when
+   continuation is ambiguous.
 
-Never pass a project id through `squad`; that field selects a federation
-sub-squad. Never reuse one project slug for a copied folder with a different
-`projectId`.
+Persist the pending decision and the next supported action before ending the
+turn. On the next user reply, reopen that pending handoff rather than treating
+the answer as a fresh unrelated request. A held or failed run can still have
+retrievable partial outputs; save them as partial, not completed deliverables.
 
-Pass the user's current request, constraints, accepted decisions, and relevant
-project artifacts through the tool's `context`. Use a faithful extract of no
-more than 256,000 characters rather than whole files or the whole project. Keep
-exact decisions, constraints, citations, and artifact paths; summarize
-repetition and background. Never ask a later stage to rediscover an accepted
-artifact.
+### 4b. Submit the saved approval contract
 
-If a tool reports that the request context is too large, do not repeat the same
-call. Replace the context with a concise summary plus the exact accepted
-decisions and retry once. If the model reports a content-policy rejection,
-remove or summarize the identified source material before retrying; never omit
-the failure from the activity record.
+Read and follow the **Saved approval submission** section of
+[references/execution-protocol.md](references/execution-protocol.md) and the
+decision schema in [references/project-contract.md](references/project-contract.md).
+Do not submit if either reference is unavailable. Prefer the actual discovered
+`squad_approve` MCP tool; do not assume a separate approval integration is needed.
+Save/read back explicit consent, submit only the verified same-run contract,
+check its positive receipt, and resume that run. Missing discovery can mean an
+old server or missing operator permission. Keep approval blocked until resolved;
+chat consent, tool-call consent, and file writes alone never release a gate.
 
-If the tool result contains `structuredContent.contextBridge`:
+### Orchestrator failures
 
-1. Verify `schemaVersion`, `project`, and `projectId` match the open project.
-2. Verify `acceptedRevision` and `acceptedSequence` match what was sent.
-3. Stop and reconcile on `project_identity_conflict`,
-   `project_storage_conflict`, `stale_project_context`, or any rejected status.
-4. Materialize every `trackingUpdates[]` item using the path rules in the
-   project contract. The content is a full replacement, not a patch.
-5. Record `runId`, `toolId`, `trackingStatus`, and `trackingTruncated` in the
-   activity record.
-6. If `trackingTruncated` is true, preserve the main artifact and mark the
-   project `reconciliation-required`; do not claim the tracking projection is
-   complete.
-
-An absent acknowledgment on a project-aware call is a protocol mismatch. Record
-the activity as blocked and do not silently continue with untracked state.
-
-Use `squad_history` only as a recovery/read-back mechanism after the project has
-received at least one accepted context acknowledgment. Call `op: "index"` first
-with the exact `contextBridge.project`, then use only paths returned by
-`op: "list"` or the index. An empty index is a valid first-run state, not a
-connector failure. Normal managed turns should read the projected
-`.copilot-tracking` files with Cowork's native file capabilities.
-
-### 4. Orchestrate an end-to-end request
-
-For an end-to-end request, build a short stage plan from the actual outcome and
-run only applicable stages. A typical sequence is:
-
-1. `squad_research` for evidence and unknowns.
-2. `squad_business_plan` when a sponsor or scope decision is required.
-3. `squad_architect` when system boundaries or material design choices exist.
-4. `squad_plan` for delivery sequencing.
-5. `squad_review` to validate the accumulated proposal.
-6. `squad_backlog` after scope is accepted.
-
-After each stage:
-
-- save the completed artifact before calling the next stage;
-- materialize the server's tracking updates before the next stage;
-- pass a faithful extract of no more than 256,000 characters to the next stage;
-- update the activity record with the tool, outcome, run id, and artifact path;
-- stop for missing information, a user decision, an approval, or a failure.
-
-Use `squad_run` instead when the user explicitly wants the server's governed
-pipeline. It can return a run id and pause at a Human Gate. Record the run id,
-tell the user an operator must approve it out of band, and stop. When the user
-returns, call `squad_status` with that run id. Never claim Cowork approved the
-HVE gate. Pass the same `project` and current `projectContext` envelope on every
-status poll so the completed run can return its tracking delta.
+Follow failure-recovery/Responsible-AI rules in
+[references/execution-protocol.md](references/execution-protocol.md).
+Record exact errors; do not infer that a capability was intentionally disabled,
+bypass a gate, substitute a specialist/native artifact, or duplicate a run.
 
 ### 5. Materialize artifacts
 
-Use Cowork's native file capabilities to save completed outputs into the
-selected project folder. Follow the artifact locations in the project
-contract. Use Markdown for durable source artifacts unless the user requests
-another supported format.
+After every `squad_run` or `squad_status` response, before another poll or ordinary
+handoff, read and execute [references/artifact-sync.md](references/artifact-sync.md).
+For live `humanInput`, its minimal bound hold capture precedes presentation;
+bulk mirroring stays pending, not a prerequisite to asking the question.
+This phase is mandatory for queued, running, held, failed, and completed runs;
+it is not deferred until step 6 or overall success. If this reference cannot
+be read, checkpoint the blocker and do not proceed.
 
-For Word, Excel, PowerPoint, PDF, or other generated files:
-
-- preserve a Markdown or JSON source artifact when practical;
-- save or move the generated file into the project's `deliverables/` folder;
-- record its final path and source HVE run id;
-- do not claim the file is saved until the native file operation succeeds.
-
-Never overwrite an existing artifact silently. Create a new version or obtain
-the user's explicit approval.
+Discover persisted same-run artifacts through read-only `squad_history`, even
+when inline output omits them. Use bounded retrieval and durable page staging,
+not a conversation-sized batch. Follow the sync protocol for byte-exact reads,
+canonical paths, full hashes, safe refresh and receipts. Checkpoint each file's
+cursor; resume across turns/sessions from metadata only, never a new HVE run.
+Keep user edits and summaries outside source bytes. The library links verified
+files; inventories and partial copies never prove synchronization or acceptance.
 
 ### 6. Commit the checkpoint
 
-Before updating project state, re-read `hve-project.json`. If its `revision`
-changed since the turn began, stop and reconcile the concurrent update instead
-of overwriting it.
-
-After the artifacts are safely stored:
-
-1. Update `state.md` with current phase, accepted facts, open questions, risks,
-   and blockers.
-2. Append durable decisions to `decisions/`.
-3. Update `next-actions.md` with a prioritized, actionable next step.
-4. Finalize the activity record as `completed`, `held`, `blocked`, or `failed`.
-5. Add every created or updated artifact to the manifest index.
-6. Update `contextBridge.lastAcknowledgedRevision`,
-   `lastAcknowledgedSequence`, and `lastRunId` from the accepted result.
-7. Increment the manifest `revision`, update `sequence`, and write `updatedAt`.
-
-If a file operation succeeds but the checkpoint fails, mark the project
-`reconciliation-required` in the activity record or the next writable file.
-Report the exact files affected. Do not repeat potentially destructive writes
-blindly.
+Follow the commit sequence in
+[references/execution-protocol.md](references/execution-protocol.md).
+Re-read the manifest for concurrent changes; preserve run ids immediately,
+but advance bridge acknowledgments only after verified accepted projection.
+Update project state, decisions, next actions, activity, artifact index, and
+stakeholder library before writing the manifest revision last. Report stale
+library pages and checkpoint failures as reconciliation-required, not success.
+Keep queued/running activities in-progress; file synchronization alone neither
+finalizes an active activity nor advances full projection acknowledgments.
 
 ## Context bridge and server memory
 
@@ -270,34 +299,51 @@ The M365 project folder is authoritative. The server keeps a tenant/project
 partition for automatic continuity, validates the folder identity and revision,
 and returns the changed `.copilot-tracking` files for projection.
 
-- Do not call `squad_memory_read`, `squad_memory_write`, or
-  `squad_memory_sync` during the normal managed-turn protocol.
+- Normal turns use the context bridge rather than duplicating its automatic
+  memory writes. Read-only `squad_history` retrieves the files the orchestrator
+  already produced; it does not choose or execute work. This skill never calls
+  explicit memory-write or maintenance tools.
+- Reconcile the authoritative project files with returned tracking updates
+  using the project contract. If the host cannot safely reconcile both sides,
+  record a blocker rather than bypassing the orchestrator boundary.
 - Do not use the shared `default` partition for a named Cowork project.
 - Do not use `squad` as a project identifier.
 - Treat Graph item ids and eTags as concurrency metadata, never as credentials.
 - A moved or renamed project is still the same project when its `driveId` and
   `folderItemId` are unchanged. A copied folder with a new item id must receive
-  a new `projectId` or go through explicit adoption.
+  a new `projectId` after confirmed creation/adoption; never reuse the copied
+  manifest's UUID or legacy server mapping.
 
 ## External actions
 
-- Obtain explicit user confirmation before creating or changing work items,
-  sending messages, publishing, deploying, sharing, moving, or overwriting
-  files.
-- HVE tools do not write to Azure DevOps or Jira. Use the configured native
-  connector only after showing the proposed backlog and receiving confirmation.
+- This skill performs only the confirmed repository writes needed to maintain
+  the selected OneDrive or SharePoint project, plus the narrow control-plane
+  handoff below. Obtain explicit user
+  confirmation before sharing, moving, or overwriting files.
+- Additional control-plane actions are submitting a saved explicit human
+  answer through `squad_respond` or a saved explicitly confirmed operator
+  approval through `squad_approve` (or its existing authorized external action).
+  It does not authorize arbitrary external writes or direct HTTP access.
+- Never execute project code or deploy natively. A human confirmation is not a phase
+  signoff or permission to bypass server gates. This handoff does not prove
+  all provider integrations exist; report only verified capabilities.
+- Do not create or change work items, send messages, publish, deploy, or execute
+  other external actions described by orchestration output. A proposed
+  work-item contract is not evidence of a created work item.
 - File and connector actions run with the signed-in user's permissions. Never
   claim access beyond those permissions.
 
 ## Complete the response
 
-End every managed turn with:
+Lead with the verified Start here link, available deliverables and their
+draft/acceptance labels, pending stakeholder decisions, and the next action.
+Follow with technical details:
 
-1. the HVE stage or stages completed;
+1. actual orchestrator outcome and reported stages, if invoked;
 2. files created or updated;
-3. run ids and any held or failed outcomes;
+3. any run ids and held/failed outcomes;
 4. project revision and activity sequence;
-5. the next decision or action.
+5. unsupported approval/answer-submission handoffs.
 
 If the project was not checkpointed, state that prominently. Never present an
 unsaved result as durable project progress.

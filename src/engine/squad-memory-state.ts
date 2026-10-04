@@ -95,7 +95,8 @@ export interface SquadMemoryStore {
   read(tenantId: string, project: string, path: string): Promise<SquadMemoryEntry | undefined>;
   /**
    * Write (create or replace) an entry under CAS. When `expectedEtag` is provided
-   * the write applies only if it matches the current revision (else a conflict);
+   * the write applies only if it matches the current revision (else a conflict).
+   * An empty expectedEtag means atomic create-only (conflict if already present);
    * when omitted the write is an unconditional upsert (first-write / overwrite).
    */
   write(

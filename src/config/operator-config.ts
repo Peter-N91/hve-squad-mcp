@@ -19,6 +19,9 @@
  * this object; they are fetched on demand from Key Vault by the credential
  * provider and registered with the logger for redaction.
  */
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { OPERATOR_APPROVAL_SCOPE, TOOL_SCOPES } from "../auth/scopes.js";
 import type { SimpleOAuthConfig } from "../auth/simple-oauth.js";
 import { normalizeMiseValidationEndpoint } from "../auth/mise-endpoint.js";
@@ -78,11 +81,9 @@ export interface MiseConfig {
 export interface OperatorConfig {
   /**
    * Accepted token audiences — this resource server's identifiers (SEC-1,
-   * RFC 8707). Usually one; several are permitted so a single deployment can
-   * serve front doors that mint tokens for different resource identifiers (for
-   * example a Copilot Studio connector on `api://<client-id>` alongside a Cowork
-   * Entra SSO auth config on the Application ID URI that registration
-   * generates). Every entry is matched exactly — never as a prefix or wildcard.
+   * RFC 8707). Usually one; several are permitted only for registered aliases of
+   * the same protected resource. Every entry is matched exactly — never as a
+   * prefix or wildcard.
    */
   audiences: string[];
   /** Entra issuer allow-list (e.g. `https://login.microsoftonline.com/<tenant>/v2.0`). */
@@ -103,11 +104,13 @@ export interface OperatorConfig {
   modelDeployment: string;
   /** Azure OpenAI API surface used for inference. */
   modelApi: "chat-completions" | "responses";
+  /** Explicit, operator-verified Chat capabilities; never inferred from deployment aliases. */
+  modelChatProfile: "standard" | "reasoning" | "reasoning-no-effort" | "gpt-5.6";
   /** The Azure OpenAI REST API version (legacy Chat Completions only). */
   modelApiVersion: string;
   /** Default output-token ceiling for each model dispatch. */
   modelMaxOutputTokens: number;
-  /** Optional Responses API reasoning effort. */
+  /** Optional reasoning effort for Responses or a compatible Chat profile. */
   modelReasoningEffort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   /** Optional Responses API visible-output verbosity. */
   modelVerbosity?: "low" | "medium" | "high";
@@ -221,7 +224,7 @@ export interface OperatorConfig {
    * {@link memoryOverflowContainer} (fail-fast, mirroring the memory checks).
    */
   memoryOverflowEnabled: boolean;
-  /** WI-03 — Blob container holding the overflow payloads. Required when enabled. */
+  /** Private memory and Table run-state overflow payloads. Required when enabled. */
   memoryOverflowContainer: string;
   /**
    * WI-03 — the encrypted-envelope byte length above which content spills to Blob.
@@ -289,6 +292,51 @@ export interface OperatorConfig {
    * the end user's own connection (ADR-0001 trust boundary).
    */
   enableBusinessTools: boolean;
+  /**
+   * Which engine executes tool-enabled advisory stages. `builtin` (default) is
+   * the server's own runtime. `copilot` drives a GitHub Copilot runtime in a
+   * separate sandbox through the Copilot SDK; it requires durable artifacts and
+   * a reachable sandbox.
+   */
+  stageExecutor: "builtin" | "copilot";
+  /** Copilot sandbox settings; meaningful only when {@link stageExecutor} is `copilot`. */
+  copilot: CopilotExecutorConfig;
+}
+
+export type CopilotIdentitySourceConfig =
+  | { kind: "env"; variable: string }
+  | { kind: "file"; path: string }
+  | { kind: "command"; argv: string[] };
+
+export interface CopilotExecutorConfig {
+  /** `host:port` or URL of the sandbox's headless Copilot runtime. */
+  cliUrl: string;
+  /** Shared secret the sandbox runtime requires on every connection. */
+  connectionToken: string;
+  /**
+   * Where the server reads the GitHub identity it hands to each Copilot session.
+   * The token value is read on demand and is never part of this object.
+   */
+  identity: CopilotIdentitySourceConfig;
+  /** Interval between background re-verifications of the identity. */
+  identityReverifyMs: number;
+  /** Model id; empty = the runtime's default for the signed-in identity. */
+  model: string;
+  /** Built-in tool names; empty = the executor default set. */
+  tools: string[];
+  /** Let a stage fan out the pinned agents its charter permits as parallel Copilot sub-agents. */
+  subagents: boolean;
+  /** Permit shell commands inside the sandbox (screened per command). */
+  allowShell: boolean;
+  /** Public host allow-list for agent URL access; empty = any public host. */
+  allowedHosts: string[];
+  /** Absolute POSIX working directory inside the sandbox. */
+  sandboxWorkspace: string;
+  /**
+   * Directory holding Copilot runtime session state (conversation, checkpoints),
+   * so a stage can resume in a fresh sandbox. Use durable storage in deployment.
+   */
+  sessionStateDir: string;
 }
 
 function splitList(value: string | undefined): string[] {
@@ -449,10 +497,10 @@ function parseMemoryTargets(value: string | undefined): MemoryTargetConfig[] {
  * deployment fails fast at boot rather than at first call.
  */
 export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): OperatorConfig {
-  // SEC-1: comma-separated so one deployment can serve several front doors, each
-  // minting tokens for its own resource identifier. Entries are trimmed and
-  // de-duplicated, and blanks are dropped so a stray comma can never introduce an
-  // empty audience (which a token with no `aud` would otherwise appear to match).
+  // SEC-1: comma-separated to support registered aliases of one protected
+  // resource. Entries are trimmed and de-duplicated, and blanks are dropped so a
+  // stray comma can never introduce an empty audience (which a token with no
+  // `aud` would otherwise appear to match).
   const audiences = [
     ...new Set(
       (env.SQUAD_MCP_AUDIENCE ?? "")
@@ -497,6 +545,11 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
     );
   }
   const modelApi = parseModelApi(env.SQUAD_MCP_MODEL_API);
+  const modelChatProfile = optionalChoice(
+    env.SQUAD_MCP_MODEL_CHAT_PROFILE,
+    ["standard", "reasoning", "reasoning-no-effort", "gpt-5.6"] as const,
+    "SQUAD_MCP_MODEL_CHAT_PROFILE",
+  ) ?? "standard";
   const modelMaxOutputTokens = boundedInteger(
     env.SQUAD_MCP_MODEL_MAX_OUTPUT_TOKENS,
     modelApi === "responses" ? 32_768 : 1_500,
@@ -514,12 +567,18 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
     ["low", "medium", "high"] as const,
     "SQUAD_MCP_MODEL_VERBOSITY",
   );
-  if (
-    modelApi !== "responses" &&
-    (modelReasoningEffort !== undefined || modelVerbosity !== undefined)
-  ) {
+  if (modelApi !== "responses" && modelVerbosity !== undefined) {
     throw new Error(
-      "SQUAD_MCP_MODEL_REASONING_EFFORT and SQUAD_MCP_MODEL_VERBOSITY require SQUAD_MCP_MODEL_API=responses.",
+      "SQUAD_MCP_MODEL_VERBOSITY requires SQUAD_MCP_MODEL_API=responses.",
+    );
+  }
+  if (modelApi === "chat-completions" && modelReasoningEffort !== undefined &&
+    (modelChatProfile === "standard" || modelChatProfile === "reasoning-no-effort" ||
+      modelReasoningEffort === "max" ||
+      (modelChatProfile === "gpt-5.6" && modelReasoningEffort === "minimal"))) {
+    throw new Error(
+      "SQUAD_MCP_MODEL_REASONING_EFFORT is unsupported by the configured SQUAD_MCP_MODEL_CHAT_PROFILE. " +
+      "Select operator-verified model capabilities and a supported effort, or use SQUAD_MCP_MODEL_API=responses.",
     );
   }
 
@@ -753,6 +812,62 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
     allowedIssuers.push(simpleOAuthExternalUrl);
   }
 
+  const stageExecutor = optionalChoice(env.SQUAD_MCP_STAGE_EXECUTOR, ["builtin", "copilot"] as const,
+    "SQUAD_MCP_STAGE_EXECUTOR") ?? "builtin";
+  const tokenSourceKind = optionalChoice(env.SQUAD_MCP_COPILOT_GITHUB_TOKEN_SOURCE, ["env", "file", "command"] as const,
+    "SQUAD_MCP_COPILOT_GITHUB_TOKEN_SOURCE") ??
+    ((env.SQUAD_MCP_COPILOT_GITHUB_TOKEN_FILE ?? "").trim() ? "file"
+      : (env.SQUAD_MCP_COPILOT_GITHUB_TOKEN_COMMAND ?? "").trim() ? "command" : "env");
+  const identity: CopilotIdentitySourceConfig = tokenSourceKind === "file"
+    ? { kind: "file", path: (env.SQUAD_MCP_COPILOT_GITHUB_TOKEN_FILE ?? "").trim() }
+    : tokenSourceKind === "command"
+      ? { kind: "command", argv: [...(env.SQUAD_MCP_COPILOT_GITHUB_TOKEN_COMMAND ?? "").matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map((match) => match[1] ?? match[2] ?? match[3]) }
+      : { kind: "env", variable: "SQUAD_MCP_COPILOT_GITHUB_TOKEN" };
+  const copilot: CopilotExecutorConfig = {
+    cliUrl: (env.SQUAD_MCP_COPILOT_CLI_URL ?? "").trim(),
+    connectionToken: (env.SQUAD_MCP_COPILOT_CONNECTION_TOKEN ?? "").trim(),
+    identity,
+    identityReverifyMs: boundedInteger(env.SQUAD_MCP_COPILOT_IDENTITY_REVERIFY_MS, 600_000, 30_000, 3_600_000,
+      "SQUAD_MCP_COPILOT_IDENTITY_REVERIFY_MS"),
+    model: (env.SQUAD_MCP_COPILOT_MODEL ?? "").trim(),
+    tools: splitList(env.SQUAD_MCP_COPILOT_TOOLS),
+    subagents: (env.SQUAD_MCP_COPILOT_SUBAGENTS ?? "true").trim().toLowerCase() !== "false",
+    allowShell: (env.SQUAD_MCP_COPILOT_ALLOW_SHELL ?? "true").trim().toLowerCase() !== "false",
+    allowedHosts: splitList(env.SQUAD_MCP_COPILOT_ALLOWED_HOSTS).map((host) => host.toLowerCase()),
+    sandboxWorkspace: (env.SQUAD_MCP_COPILOT_SANDBOX_WORKSPACE ?? "/workspace").trim(),
+    sessionStateDir: (env.SQUAD_MCP_COPILOT_SESSION_STATE_DIR ?? "").trim() || join(tmpdir(), "hve-squad-copilot-sessions"),
+  };
+  if (stageExecutor === "copilot") {
+    if (copilot.cliUrl.length === 0 || copilot.connectionToken.length < 32) {
+      throw new Error(
+        "SQUAD_MCP_STAGE_EXECUTOR=copilot requires SQUAD_MCP_COPILOT_CLI_URL and a " +
+          "SQUAD_MCP_COPILOT_CONNECTION_TOKEN of at least 32 characters (the sandbox runtime must not accept unauthenticated control).",
+      );
+    }
+    if (!(enableArtifacts && memoryAutoEnabled && enableMemory)) {
+      throw new Error(
+        "SQUAD_MCP_STAGE_EXECUTOR=copilot requires SQUAD_MCP_ENABLE_ARTIFACTS, SQUAD_MCP_ENABLE_MEMORY and " +
+          "SQUAD_MCP_MEMORY_AUTO_ENABLED (stage artifacts and evidence are persisted server-side).",
+      );
+    }
+    if (!/^\/[^\0]+$/.test(copilot.sandboxWorkspace) || copilot.sandboxWorkspace === "/") {
+      throw new Error("SQUAD_MCP_COPILOT_SANDBOX_WORKSPACE must be an absolute, non-root POSIX path.");
+    }
+    // The sandbox never logs in; without a server-owned identity no agentic stage could run.
+    if (identity.kind === "env" && !(env.SQUAD_MCP_COPILOT_GITHUB_TOKEN ?? "").trim()) {
+      throw new Error(
+        "SQUAD_MCP_STAGE_EXECUTOR=copilot requires a GitHub identity: set SQUAD_MCP_COPILOT_GITHUB_TOKEN, " +
+          "SQUAD_MCP_COPILOT_GITHUB_TOKEN_FILE (a mounted secret), or SQUAD_MCP_COPILOT_GITHUB_TOKEN_COMMAND (e.g. \"gh auth token\").",
+      );
+    }
+    if (identity.kind === "file" && !identity.path) {
+      throw new Error("SQUAD_MCP_COPILOT_GITHUB_TOKEN_SOURCE=file requires SQUAD_MCP_COPILOT_GITHUB_TOKEN_FILE.");
+    }
+    if (identity.kind === "command" && identity.argv.length === 0) {
+      throw new Error("SQUAD_MCP_COPILOT_GITHUB_TOKEN_SOURCE=command requires SQUAD_MCP_COPILOT_GITHUB_TOKEN_COMMAND.");
+    }
+  }
+
   return {
     audiences: [...new Set(audiences)],
     allowedIssuers: [...new Set(allowedIssuers)],
@@ -810,6 +925,7 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
     modelEndpoint,
     modelDeployment: (env.SQUAD_MCP_MODEL_DEPLOYMENT ?? "").trim(),
     modelApi,
+    modelChatProfile,
     modelApiVersion: (env.SQUAD_MCP_MODEL_API_VERSION ?? "2024-10-21").trim(),
     modelMaxOutputTokens,
     modelReasoningEffort,
@@ -851,5 +967,7 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
     memoryTargets,
     memoryDefaultTarget,
     enableBusinessTools,
+    stageExecutor,
+    copilot,
   };
 }

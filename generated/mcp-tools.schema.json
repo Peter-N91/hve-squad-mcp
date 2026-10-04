@@ -29,7 +29,8 @@
               "design",
               "architecture",
               "azure",
-              "product"
+              "product",
+              "brd"
             ],
             "description": "Optional squad profile to seed when the project has no squad yet."
           },
@@ -60,7 +61,7 @@
           "project": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]*$",
-            "description": "Stable lower-kebab project partition. Cowork uses the hve-project.json slug; never overload squad with a project id."
+            "description": "Project label or server-acknowledged partition. With projectContext schema 2, immutable projectId determines storage identity. Never overload squad with a project id."
           },
           "projectContext": {
             "type": "object",
@@ -71,10 +72,38 @@
               "revision",
               "sequence"
             ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 2
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "storage"
+                  ],
+                  "properties": {
+                    "storage": {
+                      "required": [
+                        "provider",
+                        "driveId",
+                        "folderItemId"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
             "properties": {
               "schemaVersion": {
                 "type": "integer",
-                "const": 1
+                "enum": [
+                  1,
+                  2
+                ]
               },
               "projectId": {
                 "type": "string",
@@ -167,7 +196,8 @@
               "design",
               "architecture",
               "azure",
-              "product"
+              "product",
+              "brd"
             ],
             "description": "Optional squad profile to seed when the project has no squad yet."
           },
@@ -198,7 +228,7 @@
           "project": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]*$",
-            "description": "Stable lower-kebab project partition. Cowork uses the hve-project.json slug; never overload squad with a project id."
+            "description": "Project label or server-acknowledged partition. With projectContext schema 2, immutable projectId determines storage identity. Never overload squad with a project id."
           },
           "projectContext": {
             "type": "object",
@@ -209,10 +239,38 @@
               "revision",
               "sequence"
             ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 2
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "storage"
+                  ],
+                  "properties": {
+                    "storage": {
+                      "required": [
+                        "provider",
+                        "driveId",
+                        "folderItemId"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
             "properties": {
               "schemaVersion": {
                 "type": "integer",
-                "const": 1
+                "enum": [
+                  1,
+                  2
+                ]
               },
               "projectId": {
                 "type": "string",
@@ -305,7 +363,8 @@
               "design",
               "architecture",
               "azure",
-              "product"
+              "product",
+              "brd"
             ],
             "description": "Optional squad profile to seed when the project has no squad yet."
           },
@@ -336,7 +395,7 @@
           "project": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]*$",
-            "description": "Stable lower-kebab project partition. Cowork uses the hve-project.json slug; never overload squad with a project id."
+            "description": "Project label or server-acknowledged partition. With projectContext schema 2, immutable projectId determines storage identity. Never overload squad with a project id."
           },
           "projectContext": {
             "type": "object",
@@ -347,10 +406,38 @@
               "revision",
               "sequence"
             ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 2
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "storage"
+                  ],
+                  "properties": {
+                    "storage": {
+                      "required": [
+                        "provider",
+                        "driveId",
+                        "folderItemId"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
             "properties": {
               "schemaVersion": {
                 "type": "integer",
-                "const": 1
+                "enum": [
+                  1,
+                  2
+                ]
               },
               "projectId": {
                 "type": "string",
@@ -449,7 +536,8 @@
               "design",
               "architecture",
               "azure",
-              "product"
+              "product",
+              "brd"
             ],
             "description": "Optional squad profile to seed when the project has no squad yet."
           },
@@ -480,7 +568,7 @@
           "project": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]*$",
-            "description": "Stable lower-kebab project partition. Cowork uses the hve-project.json slug; never overload squad with a project id."
+            "description": "Project label or server-acknowledged partition. With projectContext schema 2, immutable projectId determines storage identity. Never overload squad with a project id."
           },
           "projectContext": {
             "type": "object",
@@ -491,10 +579,38 @@
               "revision",
               "sequence"
             ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 2
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "storage"
+                  ],
+                  "properties": {
+                    "storage": {
+                      "required": [
+                        "provider",
+                        "driveId",
+                        "folderItemId"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
             "properties": {
               "schemaVersion": {
                 "type": "integer",
-                "const": 1
+                "enum": [
+                  1,
+                  2
+                ]
               },
               "projectId": {
                 "type": "string",
@@ -587,7 +703,8 @@
               "design",
               "architecture",
               "azure",
-              "product"
+              "product",
+              "brd"
             ],
             "description": "Optional squad profile to seed when the project has no squad yet."
           },
@@ -625,10 +742,91 @@
             "type": "string",
             "description": "Optional free-form context to frame the pipeline."
           },
+          "review": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "targetPath",
+              "targetSha256",
+              "document",
+              "sources"
+            ],
+            "description": "Explicit independent BRD review-only route. Uses the registered BRD Quality Reviewer without authoring/research/planning or roster mutation. All source hashes are verified before inference; source content is optional exact inline evidence. Document identity is caller-declared and checked against present frontmatter. Refresh tools/list after deployment.",
+            "properties": {
+              "kind": {
+                "const": "brd"
+              },
+              "targetPath": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              },
+              "targetSha256": {
+                "type": "string",
+                "pattern": "^[a-fA-F0-9]{64}$"
+              },
+              "document": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "version",
+                  "phase"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  },
+                  "version": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  },
+                  "phase": {
+                    "enum": [
+                      "Define",
+                      "Govern"
+                    ]
+                  }
+                }
+              },
+              "sources": {
+                "type": "array",
+                "maxItems": 16,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "path",
+                    "sha256"
+                  ],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4000
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[a-fA-F0-9]{64}$"
+                    },
+                    "content": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64000
+                    }
+                  }
+                }
+              }
+            }
+          },
           "project": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]*$",
-            "description": "Stable lower-kebab project partition. Cowork uses the hve-project.json slug; never overload squad with a project id."
+            "description": "Project label or server-acknowledged partition. With projectContext schema 2, immutable projectId determines storage identity. Never overload squad with a project id."
           },
           "projectContext": {
             "type": "object",
@@ -639,10 +837,38 @@
               "revision",
               "sequence"
             ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 2
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "storage"
+                  ],
+                  "properties": {
+                    "storage": {
+                      "required": [
+                        "provider",
+                        "driveId",
+                        "folderItemId"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
             "properties": {
               "schemaVersion": {
                 "type": "integer",
-                "const": 1
+                "enum": [
+                  1,
+                  2
+                ]
               },
               "projectId": {
                 "type": "string",
@@ -748,7 +974,8 @@
               "design",
               "architecture",
               "azure",
-              "product"
+              "product",
+              "brd"
             ],
             "description": "Optional profile hint forwarded to a sub-squad's Init when it has no squad yet."
           },
@@ -789,7 +1016,7 @@
           "project": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]*$",
-            "description": "Stable lower-kebab project partition. Cowork uses the hve-project.json slug; never overload squad with a project id."
+            "description": "Project label or server-acknowledged partition. With projectContext schema 2, immutable projectId determines storage identity. Never overload squad with a project id."
           },
           "projectContext": {
             "type": "object",
@@ -800,10 +1027,38 @@
               "revision",
               "sequence"
             ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 2
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "storage"
+                  ],
+                  "properties": {
+                    "storage": {
+                      "required": [
+                        "provider",
+                        "driveId",
+                        "folderItemId"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
             "properties": {
               "schemaVersion": {
                 "type": "integer",
-                "const": 1
+                "enum": [
+                  1,
+                  2
+                ]
               },
               "projectId": {
                 "type": "string",

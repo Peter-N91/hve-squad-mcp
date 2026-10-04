@@ -1,5 +1,5 @@
 /**
- * Mode-aware ADVISORY pipeline orchestrator.
+ * Mode-aware ADVISORY pipeline orchestrator with verified tool-enabled stages.
  *
  * The dispatch loop runs an ordered list of persona completions; the router
  * turns a request into a routed stage plan. This orchestrator composes the two
@@ -14,10 +14,12 @@
  *
  * It performs NO code execution and NO impactful action — those are the deferred
  * execution expansion. The advisory scope produces finished TEXT artifacts only,
- * so the only human gate is the existing final hold applied to the compiled
+ * with an optional final operator hold applied to the compiled
  * artifact before it is returned (modeled here by an injectable
  * {@link AdvisoryFinalHold}; in a deployed run this is the existing
- * `GateKeeper`/approval machinery, unchanged).
+ * `GateKeeper`/approval machinery, unchanged). Tool-enabled stages can also
+ * pause for explicit human clarification/confirmation without completing the
+ * stage or bypassing operator gates.
  *
  * Mode handling:
  *   * default / `interactive` — returns after EACH stage with a resume token so
@@ -27,7 +29,7 @@
  *     is no per-stage human gate).
  *
  * SEC-5 is preserved by construction: every stage's `system` is the resolved
- * persona charter ONLY (AUTHORITY); the caller request/context and every prior
+ * persona plus server-owned runtime/pinned-skill instructions (AUTHORITY); the caller request/context and every prior
  * artifact (including the council verdict) are carried as delimited DATA via
  * `composeEmbeddedPrompt` / the council dispatch.
  *
@@ -41,9 +43,19 @@ import { runCouncil, resolveCouncilMembers, type CouncilDeps, type CouncilVerdic
 import { loadRosterMap, route, type RoutePlan } from "./routing.js";
 import type { RunCostLedger } from "./gates.js";
 import type { PersonaRecord } from "./persona-loader.js";
-import type { PersistedCouncilVerdict, PersistedStageArtifact } from "./run-state.js";
-import type { BackendUsage, ModelBackend } from "./model-backend.js";
+import type { HumanInputRequest, PersistedCouncilVerdict, PersistedStageArtifact } from "./run-state.js";
+import {
+  completionEventFromResult,
+  completeWithObserver,
+  ModelBackendError,
+  type AttributedCompletionObserver,
+  type BackendCompletionEvent,
+  type BackendUsage,
+  type CompletionContext,
+  type ModelBackend,
+} from "./model-backend.js";
 import type { CoordinatorRequest } from "./coordinator-engine.js";
+import { requiresStageRuntime, StageBlockedError, StageInputRequired, type ResearchCheckpoint, type AdvisoryStageExecutor } from "./research-runtime.js";
 
 /** The normalized advisory execution mode. */
 export type AdvisoryMode = "interactive" | "autopilot" | "autonomous";
@@ -91,6 +103,8 @@ export interface AdvisoryStageResult {
   /** The raw stage text (persona completion, or the rendered verdict markdown). */
   text: string;
   backendId?: string;
+  model?: string;
+  deployment?: string;
   usage?: BackendUsage;
 }
 
@@ -139,6 +153,11 @@ export interface AdvisoryRunPersistence {
   recordStage(stage: PersistedStageArtifact): Promise<void>;
   /** Persist the council verdict once the council stage has synthesized it. */
   recordVerdict(verdict: PersistedCouncilVerdict): Promise<void>;
+  /** Append one prompt-free provider attempt record; false means its event ID already exists. */
+  recordCompletion?(
+    event: BackendCompletionEvent,
+    context: CompletionContext,
+  ): Promise<boolean>;
 }
 
 /**
@@ -153,6 +172,10 @@ export function compilePersistedStages(stages: readonly PersistedStageArtifact[]
 
 export interface AdvisoryPipelineDeps {
   backend: ModelBackend;
+  /** Server-owned tools and artifact verification, bound to this run's tenant/workspace. */
+  stageExecutor?: AdvisoryStageExecutor;
+  /** Per-provider-attempt accounting for direct (non-runtime) stages. */
+  onCompletion?: AttributedCompletionObserver;
   /** Per-run cost ceiling (COST-2, run scope). Optional; when absent, no ceiling. */
   costLedger?: RunCostLedger;
   /** The existing final human hold applied to the compiled artifact before return. */
@@ -187,10 +210,12 @@ export interface AdvisoryLedgerSink {
     roleKey?: string;
     agentName: string;
     artifact: string;
-    /** Measured token counts and realized cost for this dispatch, when reported. */
+    /** Measured token counts and configured cost estimate, when reported. */
     usage?: BackendUsage;
     /** The backend that produced the completion, used as the model attribution. */
     backendId?: string;
+    model?: string;
+    deployment?: string;
   }): Promise<void>;
   /** Record a council or intake verdict in the decision log. */
   recordDecision(block: string): Promise<void>;
@@ -220,7 +245,7 @@ export interface AdvisoryPipelineResult {
   councilVerdict?: CouncilVerdict;
   /** Per-stage usage (for cost accounting). */
   usage: BackendUsage[];
-  /** Accumulated realized cost across the run so far. */
+  /** Accumulated configured USD estimate across the run so far. */
   costUsd: number;
   /** Reason for a non-`completed` outcome (`run_cost_ceiling` | `council_stop` | hold reason). */
   reason?: string;
@@ -228,6 +253,8 @@ export interface AdvisoryPipelineResult {
   approvalRequest?: string;
   /** The resume token when `paused` (interactive). */
   resume?: AdvisoryResumeState;
+  humanInput?: HumanInputRequest;
+  checkpoint?: ResearchCheckpoint;
 }
 
 function personaStage(persona: PersonaRecord, backlog = false): AdvisoryStagePlan {
@@ -335,7 +362,7 @@ export function planAdvisoryStages(
   }
 
   // The fan-out already dispatched product-owner; a second pass would duplicate it.
-  if (!fannedOutRoles.has(BACKLOG_ROLE_KEY)) {
+  if (!plan.focusedDeliverable && !fannedOutRoles.has(BACKLOG_ROLE_KEY)) {
     const backlogPersona = resolveBacklogPersona(roots, rosterMap);
     if (backlogPersona) {
       ordered.push({ ...personaStage(backlogPersona, true), roleKey: BACKLOG_ROLE_KEY });
@@ -348,6 +375,28 @@ export function planAdvisoryStages(
 /** Compile the accumulated stage sections into one artifact. */
 function compileArtifact(stages: AdvisoryStageResult[]): string {
   return stages.map((stage) => stage.section).join("\n\n");
+}
+
+/** Safe durable diagnostics; the original exception stays on the server as cause. */
+export class AdvisoryStageFailure extends Error {
+  readonly reason: string;
+  readonly artifact: string;
+  runId?: string;
+
+  constructor(
+    readonly failedStage: string,
+    stages: AdvisoryStageResult[],
+    cause: unknown,
+    phase: "execution" | "persistence" = "execution",
+  ) {
+    const reason = phase === "persistence" ? "stage_persistence_failed"
+      : cause instanceof ModelBackendError ? `model_backend_${cause.kind}` : "stage_execution_failed";
+    const detail = `Advisory stage ${phase} failed (${reason}). The run did not complete; persisted files may be partial or unreviewed.`;
+    super(detail, { cause });
+    this.name = "AdvisoryStageFailure";
+    this.reason = reason;
+    this.artifact = [compileArtifact(stages), `## ${failedStage} - failed\n\n${detail}`].filter(Boolean).join("\n\n");
+  }
 }
 
 /** The three verdicts the intake gate may return. */
@@ -413,11 +462,32 @@ export async function runAdvisoryPipeline(
       mode: request.mode,
       tier: request.tier,
       owner: request.owner,
+      review: request.review,
     });
     orderedPlan = planAdvisoryStages(routePlan, opts.roots, opts.rosterMap);
+    if (routePlan.missingRoles?.length ||
+        (routePlan.requiredAgent && !orderedPlan.some((stage) => stage.persona?.role === routePlan.requiredAgent))) {
+      return {
+        outcome: "halted", artifact: "BRD authoring requires a rostered analyst resolving to the pinned BRD Builder. Explicitly update the existing roster before retrying; no substitute author was dispatched.",
+        stages, usage: [], costUsd: 0, reason: "required_deliverable_role_unavailable",
+      };
+    }
   }
 
-  const councilDeps: CouncilDeps = { backend: deps.backend };
+  const observeDirectCompletion: AttributedCompletionObserver = async (event, context) => {
+    deps.costLedger?.record(event.usage?.estimatedCostUsd);
+    if (deps.onCompletion) {
+      await deps.onCompletion(event, context);
+    } else {
+      await deps.persistence?.recordCompletion?.(event, context);
+    }
+  };
+  const councilDeps: CouncilDeps = {
+    backend: deps.backend,
+    stageExecutor: deps.stageExecutor,
+    costLedger: deps.costLedger,
+    onCompletion: observeDirectCompletion,
+  };
 
   for (let i = startIndex; i < orderedPlan.length; i += 1) {
     // COST-2 (run scope) — check BEFORE the stage; halt with 0 further calls.
@@ -437,11 +507,22 @@ export async function runAdvisoryPipeline(
     const stage = orderedPlan[i];
 
     if (stage.kind === "council" && stage.members) {
-      const verdict = await runCouncil(stage.members, priorArtifact ?? "", request, councilDeps);
-      councilVerdict = verdict;
-      for (const usage of verdict.usage) {
-        deps.costLedger?.record(usage.estimatedCostUsd);
+      let verdict: CouncilVerdict;
+      try {
+        verdict = await runCouncil(stage.members, priorArtifact ?? "", request, councilDeps);
+      } catch (error) {
+        if (!(error instanceof StageBlockedError)) throw new AdvisoryStageFailure(stage.role, stages, error);
+        return {
+          outcome: "halted",
+          artifact: [compileArtifact(stages), `## Council - blocked\n\n${error.detail}`].filter(Boolean).join("\n\n"),
+          stages,
+          councilVerdict,
+          usage: collectUsage(stages),
+          costUsd: deps.costLedger?.spentUsd() ?? 0,
+          reason: error.reason,
+        };
       }
+      councilVerdict = verdict;
       const result: AdvisoryStageResult = {
         kind: "council",
         role: "Council Verdict",
@@ -454,13 +535,17 @@ export async function runAdvisoryPipeline(
 
       // Phase 4 — persist the verdict section + structured verdict as the run
       // advances (durable/async run only; a no-op in the in-process case).
-      await deps.persistence?.recordStage({ role: "Council Verdict", artifact: verdict.markdown });
-      await deps.persistence?.recordVerdict({
-        class: verdict.verdict,
-        conditions: verdict.conditions,
-        rendered: verdict.markdown,
-      });
-      await deps.ledger?.recordDecision(verdict.markdown);
+      try {
+        await deps.persistence?.recordStage({ role: "Council Verdict", artifact: verdict.markdown });
+        await deps.persistence?.recordVerdict({
+          class: verdict.verdict,
+          conditions: verdict.conditions,
+          rendered: verdict.markdown,
+        });
+        await deps.ledger?.recordDecision(verdict.markdown);
+      } catch (error) {
+        throw new AdvisoryStageFailure(stage.role, stages, error, "persistence");
+      }
 
       // A Stop verdict halts the advisory pipeline (no implement stage to gate).
       if (verdict.verdict === "Stop") {
@@ -476,40 +561,92 @@ export async function runAdvisoryPipeline(
       }
     } else if (stage.persona) {
       // SEC-5 — persona charter is the ONLY authority; caller input + prior artifact are DATA.
-      const prompt = composeEmbeddedPrompt({
-        systemAuthority: stage.persona.charter,
-        request: request.request,
-        context: request.context,
-        priorArtifact,
-      });
-      const completion = await deps.backend.complete({
-        system: prompt.system,
-        messages: prompt.messages,
-      });
-      deps.costLedger?.record(completion.usage?.estimatedCostUsd);
+      let completion;
+      try {
+        const prompt = composeEmbeddedPrompt({
+          systemAuthority: stage.persona.charter,
+          request: request.request,
+          context: request.context,
+          priorArtifact,
+        });
+        if (!deps.stageExecutor && requiresStageRuntime(stage.persona)) {
+          throw new StageBlockedError("stage_runtime_unavailable", "This charter requires skill, delegation and artifact tools that are not configured.");
+        }
+        if (deps.stageExecutor) {
+          completion = await deps.stageExecutor.execute(
+            stage.persona,
+            request,
+            priorArtifact,
+            stage.roleKey,
+            deps.costLedger,
+          );
+          if (!completion.usageEventsEmitted) {
+            await observeDirectCompletion(
+              completionEventFromResult(completion),
+              { stage: stage.role, actor: stage.persona.role },
+            );
+          }
+        } else {
+          completion = await completeWithObserver(
+            deps.backend,
+            { system: prompt.system, messages: prompt.messages },
+            (event) => observeDirectCompletion(
+              event,
+              { stage: stage.role, actor: stage.persona!.role },
+            ),
+          );
+        }
+      } catch (error) {
+        if (error instanceof StageInputRequired) {
+          return {
+            outcome: "held", reason: "awaiting human input", artifact: compileArtifact(stages),
+            stages, councilVerdict, usage: collectUsage(stages), costUsd: deps.costLedger?.spentUsd() ?? 0,
+            humanInput: error.input, checkpoint: error.checkpoint,
+            resume: { plan: orderedPlan, stages, priorArtifact, councilVerdict, nextIndex: i },
+          };
+        }
+        if (!(error instanceof StageBlockedError)) throw new AdvisoryStageFailure(stage.role, stages, error);
+        return {
+          outcome: "halted",
+          artifact: [compileArtifact(stages), `## ${stage.role} - blocked\n\n${error.detail}`].filter(Boolean).join("\n\n"),
+          stages,
+          councilVerdict,
+          usage: collectUsage(stages),
+          costUsd: deps.costLedger?.spentUsd() ?? 0,
+          reason: error.reason,
+        };
+      }
       const result: AdvisoryStageResult = {
         kind: "persona",
         role: stage.role,
         section: `## ${stage.role}\n\n${completion.text}`,
         text: completion.text,
         backendId: completion.backendId,
+        model: completion.model,
+        deployment: completion.deployment,
         usage: completion.usage,
       };
       stages.push(result);
       priorArtifact = completion.text;
 
       // Phase 4 — persist the completed stage section (durable/async run only).
-      await deps.persistence?.recordStage({ role: stage.role, artifact: result.section });
+      try {
+        await deps.persistence?.recordStage({ role: stage.role, artifact: result.section });
 
-      // The ledger stores the WORK: this stage's deliverable under its roster
-      // root, plus the per-agent and per-run history entries.
-      await deps.ledger?.recordStage({
-        roleKey: stage.roleKey,
-        agentName: stage.role,
-        artifact: completion.text,
-        usage: completion.usage,
-        backendId: completion.backendId,
-      });
+        // The ledger stores the WORK: this stage's deliverable under its roster
+        // root, plus the per-agent and per-run history entries.
+        await deps.ledger?.recordStage({
+          roleKey: stage.roleKey,
+          agentName: stage.role,
+          artifact: completion.text,
+          usage: completion.usage,
+          backendId: completion.backendId,
+          model: completion.model,
+          deployment: completion.deployment,
+        });
+      } catch (error) {
+        throw new AdvisoryStageFailure(stage.role, stages, error, "persistence");
+      }
 
       // The intake gate is a PRE-work readiness check: a Not-Ready verdict must
       // stop the run rather than let downstream roles build on inputs the

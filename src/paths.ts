@@ -73,7 +73,7 @@ export function resolveSquadGithubRoot(fromPackageRoot = packageRoot()): string 
     // or tests and the generator would validate the install instead of the bundle.
     // It is absent in the container, where the bundle is COPYed to /app/.github and
     // the package-root candidate below resolves it.
-    join(fromPackageRoot, "host", "cast", ".github"),
+    join(fromPackageRoot, "host", "cast-active", ".github"),
     join(repoRoot, "squad-src", ".github"),
     join(repoRoot, ".github"),
     // Also allow the package root itself to host a `.github` (the container layout).
@@ -101,7 +101,7 @@ export function resolveSquadGithubRoot(fromPackageRoot = packageRoot()): string 
 export function resolveSquadAgentsRoots(fromPackageRoot = packageRoot()): string[] {
   const repoRoot = dirname(fromPackageRoot);
   const candidates = [
-    join(fromPackageRoot, "host", "cast", ".github", "agents"),
+    join(fromPackageRoot, "host", "cast-active", ".github", "agents"),
     join(repoRoot, "squad-src", ".github", "agents"),
     join(repoRoot, ".github", "agents"),
     // The container layout: the bundle is COPYed to /app/.github/agents.

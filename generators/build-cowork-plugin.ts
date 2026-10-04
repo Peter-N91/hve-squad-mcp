@@ -1,8 +1,9 @@
 /**
  * Validate the Copilot Cowork project-management skill and dynamic MCP connector.
  *
- * The Agent Skill owns the stable project workflow. The server remains the
- * source of truth for its enabled tools through initialize and tools/list.
+ * The Agent Skill owns the stable project I/O workflow. The server remains the
+ * orchestration authority, entered through squad_run, and the source of truth
+ * for its enabled tools through initialize and tools/list.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join, relative, resolve, sep } from "node:path";
@@ -18,11 +19,23 @@ const MANIFEST_SCHEMA =
 const MAX_CONNECTORS = 10;
 const MAX_SKILLS = 20;
 const MAX_SKILL_FILE_BYTES = 1024 * 1024;
+const MAX_SKILL_CHARACTERS = 20_000;
 const MAX_COMPANION_FILES = 20;
 const MAX_COMPANION_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_COMPANION_TOTAL_BYTES = 10 * 1024 * 1024;
 const REQUIRED_PROJECT_SKILL = "./skills/hve-project-manager";
 const REQUIRED_PROJECT_CONTRACT = "references/project-contract.md";
+const REQUIRED_EXECUTION_PROTOCOL = "references/execution-protocol.md";
+const REQUIRED_ARTIFACT_SYNC_PROTOCOL = "references/artifact-sync.md";
+const REQUIRED_STAKEHOLDER_LIBRARY_PROTOCOL = "references/stakeholder-library.md";
+const REQUIRED_CONTEXT_PREFLIGHT_PROTOCOL = "references/context-preflight.md";
+const REQUIRED_ARTIFACT_LAYOUT = "server-canonical";
+const REQUIRED_ORCHESTRATOR_ENTRY_TOOL = "squad_run";
+const REQUIRED_STATUS_TOOL = "squad_status";
+const REQUIRED_OUTPUT_READ_TOOL = "squad_history";
+const REQUIRED_APPROVAL_TOOL = "squad_approve";
+const REQUIRED_HUMAN_RESPONSE_TOOL = "squad_respond";
+const REQUIRED_PROJECT_RESPONSIBILITY = "project-io-bridge";
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SAFE_FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9 _.!-]*$/;
 const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
@@ -219,6 +232,11 @@ export function validateSkillPackage(
     }
 
     const text = readFileSync(skillPath, "utf8");
+    if (text.length > MAX_SKILL_CHARACTERS) {
+      problems.push(
+        `Agent Skill ${folder}/SKILL.md contains ${text.length} characters; maximum is ${MAX_SKILL_CHARACTERS}.`,
+      );
+    }
     const frontmatter = text.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
     if (!frontmatter) {
       problems.push(`Agent Skill ${folder}/SKILL.md has no YAML frontmatter.`);
@@ -252,13 +270,70 @@ export function validateSkillPackage(
     if (text.slice(frontmatter[0].length).trim().length === 0) {
       problems.push(`Agent Skill ${folder}/SKILL.md needs an instruction body.`);
     }
-    if (
-      folder === REQUIRED_PROJECT_SKILL &&
-      !existsSync(join(skillDirectory, ...REQUIRED_PROJECT_CONTRACT.split("/")))
-    ) {
-      problems.push(
-        `Agent Skill ${folder} is missing ${REQUIRED_PROJECT_CONTRACT}.`,
-      );
+    if (folder === REQUIRED_PROJECT_SKILL) {
+      for (const reference of [
+        REQUIRED_PROJECT_CONTRACT,
+        REQUIRED_EXECUTION_PROTOCOL,
+        REQUIRED_ARTIFACT_SYNC_PROTOCOL,
+        REQUIRED_STAKEHOLDER_LIBRARY_PROTOCOL,
+        REQUIRED_CONTEXT_PREFLIGHT_PROTOCOL,
+      ]) {
+        if (!existsSync(join(skillDirectory, ...reference.split("/")))) {
+          problems.push(`Agent Skill ${folder} is missing ${reference}.`);
+        }
+      }
+
+      const behavior = isRecord(metadata.metadata) ? metadata.metadata : {};
+      if (behavior["context-preflight-protocol"] !== REQUIRED_CONTEXT_PREFLIGHT_PROTOCOL) {
+        problems.push(
+          `Agent Skill ${folder} must declare metadata.context-preflight-protocol=${REQUIRED_CONTEXT_PREFLIGHT_PROTOCOL}.`,
+        );
+      }
+      if (behavior["stakeholder-library-protocol"] !== REQUIRED_STAKEHOLDER_LIBRARY_PROTOCOL) {
+        problems.push(
+          `Agent Skill ${folder} must declare metadata.stakeholder-library-protocol=${REQUIRED_STAKEHOLDER_LIBRARY_PROTOCOL}.`,
+        );
+      }
+      if (behavior["artifact-sync-protocol"] !== REQUIRED_ARTIFACT_SYNC_PROTOCOL) {
+        problems.push(
+          `Agent Skill ${folder} must declare metadata.artifact-sync-protocol=${REQUIRED_ARTIFACT_SYNC_PROTOCOL}.`,
+        );
+      }
+      if (behavior["artifact-layout"] !== REQUIRED_ARTIFACT_LAYOUT) {
+        problems.push(
+          `Agent Skill ${folder} must declare metadata.artifact-layout=${REQUIRED_ARTIFACT_LAYOUT}.`,
+        );
+      }
+      if (behavior["orchestrator-entry-tool"] !== REQUIRED_ORCHESTRATOR_ENTRY_TOOL) {
+        problems.push(
+          `Agent Skill ${folder} must declare metadata.orchestrator-entry-tool=${REQUIRED_ORCHESTRATOR_ENTRY_TOOL}.`,
+        );
+      }
+      if (behavior["status-tool"] !== REQUIRED_STATUS_TOOL) {
+        problems.push(
+          `Agent Skill ${folder} must declare metadata.status-tool=${REQUIRED_STATUS_TOOL}.`,
+        );
+      }
+      if (behavior["output-read-tool"] !== REQUIRED_OUTPUT_READ_TOOL) {
+        problems.push(
+          `Agent Skill ${folder} must declare metadata.output-read-tool=${REQUIRED_OUTPUT_READ_TOOL}.`,
+        );
+      }
+      if (behavior["approval-tool"] !== REQUIRED_APPROVAL_TOOL) {
+        problems.push(
+          `Agent Skill ${folder} must declare metadata.approval-tool=${REQUIRED_APPROVAL_TOOL}.`,
+        );
+      }
+      if (behavior["human-response-tool"] !== REQUIRED_HUMAN_RESPONSE_TOOL) {
+        problems.push(
+          `Agent Skill ${folder} must declare metadata.human-response-tool=${REQUIRED_HUMAN_RESPONSE_TOOL}.`,
+        );
+      }
+      if (behavior.responsibility !== REQUIRED_PROJECT_RESPONSIBILITY) {
+        problems.push(
+          `Agent Skill ${folder} must declare metadata.responsibility=${REQUIRED_PROJECT_RESPONSIBILITY}.`,
+        );
+      }
     }
 
     const companionFiles = collectFiles(skillDirectory).filter(
@@ -320,8 +395,8 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   console.log(
     `Cowork project package OK: ${(manifest.agentSkills ?? []).length} skill(s), ` +
-      `${(manifest.agentConnectors ?? []).length} connector(s); tools resolve at runtime through ` +
-      "initialize + tools/list.",
+      `${(manifest.agentConnectors ?? []).length} connector(s); orchestrator=${REQUIRED_ORCHESTRATOR_ENTRY_TOOL}, ` +
+      "tools resolve at runtime through initialize + tools/list.",
   );
   if (check) {
     console.log("Check mode: no files written.");

@@ -41,7 +41,7 @@ schemaVersion: "0.1.0"
 # for documentation; each tool restates them inline so every tool input is a
 # complete, self-contained JSON Schema.
 conventions:
-  profiles: [default, full, security, design, architecture, azure, product]
+  profiles: [default, full, security, design, architecture, azure, product, brd]
   tiers: [fast, default]
   modes: [autonomous, autopilot]
   # Discovery-gate depths, offered only on the attended (delegated) path — the
@@ -57,15 +57,25 @@ conventions:
   projectInput: &projectInput
     type: string
     pattern: "^[a-z0-9][a-z0-9-]*$"
-    description: "Stable lower-kebab project partition. Cowork uses the hve-project.json slug; never overload squad with a project id."
+    description: "Project label or server-acknowledged partition. With projectContext schema 2, immutable projectId determines storage identity. Never overload squad with a project id."
   projectContextInput: &projectContextInput
     type: object
     additionalProperties: false
     required: [schemaVersion, projectId, revision, sequence]
+    allOf:
+      - if:
+          properties:
+            schemaVersion:
+              const: 2
+        then:
+          required: [storage]
+          properties:
+            storage:
+              required: [provider, driveId, folderItemId]
     properties:
       schemaVersion:
         type: integer
-        const: 1
+        enum: [1, 2]
       projectId:
         type: string
         pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
@@ -128,7 +138,7 @@ tools:
           description: "The research question or topic for the squad this turn."
         profile:
           type: string
-          enum: [default, full, security, design, architecture, azure, product]
+          enum: [default, full, security, design, architecture, azure, product, brd]
           description: "Optional squad profile to seed when the project has no squad yet."
         tier:
           type: string
@@ -180,7 +190,7 @@ tools:
           description: "The work to plan this turn."
         profile:
           type: string
-          enum: [default, full, security, design, architecture, azure, product]
+          enum: [default, full, security, design, architecture, azure, product, brd]
           description: "Optional squad profile to seed when the project has no squad yet."
         tier:
           type: string
@@ -245,7 +255,7 @@ tools:
           description: "What to review, validate, or take to council this turn."
         profile:
           type: string
-          enum: [default, full, security, design, architecture, azure, product]
+          enum: [default, full, security, design, architecture, azure, product, brd]
           description: "Optional squad profile to seed when the project has no squad yet."
         tier:
           type: string
@@ -297,7 +307,7 @@ tools:
           description: "The architecture or system-design question this turn."
         profile:
           type: string
-          enum: [default, full, security, design, architecture, azure, product]
+          enum: [default, full, security, design, architecture, azure, product, brd]
           description: "Optional squad profile to seed when the project has no squad yet."
         tier:
           type: string
@@ -353,7 +363,7 @@ tools:
           description: "The work for the squad this turn (any intent; the Coordinator classifies it)."
         profile:
           type: string
-          enum: [default, full, security, design, architecture, azure, product]
+          enum: [default, full, security, design, architecture, azure, product, brd]
           description: "Optional squad profile to seed when the project has no squad yet."
         tier:
           type: string
@@ -373,6 +383,40 @@ tools:
         context:
           type: string
           description: "Optional free-form context to frame the pipeline."
+        review:
+          type: object
+          additionalProperties: false
+          required: [kind, targetPath, targetSha256, document, sources]
+          description: "Explicit independent BRD review-only route. Uses the registered BRD Quality Reviewer without authoring/research/planning or roster mutation. All source hashes are verified before inference; source content is optional exact inline evidence. Document identity is caller-declared and checked against present frontmatter. Refresh tools/list after deployment."
+          properties:
+            kind:
+              const: brd
+            targetPath:
+              type: string
+              minLength: 1
+              maxLength: 4000
+            targetSha256:
+              type: string
+              pattern: "^[a-fA-F0-9]{64}$"
+            document:
+              type: object
+              additionalProperties: false
+              required: [id, version, phase]
+              properties:
+                id: { type: string, minLength: 1, maxLength: 4000 }
+                version: { type: string, minLength: 1, maxLength: 4000 }
+                phase: { enum: [Define, Govern] }
+            sources:
+              type: array
+              maxItems: 16
+              items:
+                type: object
+                additionalProperties: false
+                required: [path, sha256]
+                properties:
+                  path: { type: string, minLength: 1, maxLength: 4000 }
+                  sha256: { type: string, pattern: "^[a-fA-F0-9]{64}$" }
+                  content: { type: string, minLength: 1, maxLength: 64000 }
         project: *projectInput
         projectContext: *projectContextInput
         squad:
@@ -429,7 +473,7 @@ tools:
           description: "When true on an existing single-squad project (a top-level team.md, no federation.md), run Federation Promotion Mode: adopt the existing squad into a federation as its first sub-squad, relocating its state intact, before routing."
         profile:
           type: string
-          enum: [default, full, security, design, architecture, azure, product]
+          enum: [default, full, security, design, architecture, azure, product, brd]
           description: "Optional profile hint forwarded to a sub-squad's Init when it has no squad yet."
         tier:
           type: string

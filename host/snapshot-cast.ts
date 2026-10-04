@@ -1,7 +1,7 @@
 /**
  * Cast snapshot resolver (build-time, reproducible from PUBLIC sources).
  *
- * Produces the pinned cast bundle under `host/cast/.github` that the container
+ * Produces the pinned cast bundle under `host/cast-active/.github` that the container
  * `Containerfile` COPYs to `/app/.github`, so `resolveSquadAgentsRoots()` /
  * `resolveSquadGithubRoot()` resolve REAL persona bytes at runtime (the
  * single-source invariant) instead of the paraphrased fallback.
@@ -31,10 +31,8 @@
  * recorded in `manifest.json` — lives in `test/cast-bundle.test.ts` and needs no
  * network.
  *
- * DEFERRED (recorded, not silently skipped): this bundles personas plus the squad
- * and boundary instructions only. The full referenced SKILL trees are deferred to
- * the execution expansion to keep image size bounded; untrusted-content-boundary
- * enforcement does not depend on skill files being present.
+ * This runtime ships only the pinned agents and instructions. Agent Skill trees
+ * are deliberately rejected: the native runtime does not expose skill loading.
  */
 import { createHash } from "node:crypto";
 import {
@@ -46,18 +44,22 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, posix, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse as parseYaml } from "yaml";
 
 const HOST_DIR = dirname(fileURLToPath(import.meta.url));
-const CAST_DIR = join(HOST_DIR, "cast");
+const CAST_DIR = join(HOST_DIR, "cast-active");
 const PACKAGE_PIN_PATH = join(CAST_DIR, "package-pin.json");
 const MANIFEST_PATH = join(CAST_DIR, "manifest.json");
 
 const CAST_ROOT = join(CAST_DIR, ".github");
 const CAST_AGENTS = join(CAST_ROOT, "agents");
 const CAST_INSTRUCTIONS = join(CAST_ROOT, "instructions");
+export const RESEARCH_DEST = "skills/rpi/rpi-research";
+export const TRACKING_DEST = "instructions/hve-core/copilot-tracking.instructions.md";
+export const DISCLAIMER_DEST = "instructions/shared/disclaimer-language.instructions.md";
+export const LICENSING_DEST = "instructions/hve-core/licensing-posture.instructions.md";
 
 const BOUNDARY_FILE = "untrusted-content-boundary.instructions.md";
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
@@ -101,9 +103,15 @@ interface CastManifest {
   generatedAt: string;
   agentFileCount: number;
   instructionFileCount: number;
+  skillFileCount: number;
+  dataFileCount: number;
+  skillCount: number;
+  skills: SkillRecord[];
+  excludedFiles: ExcludedFile[];
+  referenceIssues: ReferenceIssue[];
   agentNames: string[];
   duplicateAgentNames: string[];
-  files: { path: string; sha256: string; source: string }[];
+  files: { path: string; sha256: string; source: string; kind?: "data" }[];
   note: string;
 }
 
@@ -113,6 +121,48 @@ interface Resolution {
   sourceManifestSha256: string;
   upstreamCommits: Record<string, string>;
   duplicateAgentNames: string[];
+  skills: SkillRecord[];
+  excludedFiles: ExcludedFile[];
+  referenceIssues: ReferenceIssue[];
+}
+
+interface SkillRecord {
+  name: string;
+  path: string;
+  source: string;
+}
+
+interface ExcludedFile {
+  source: string;
+  reason: "execution-unavailable" | "non-markdown-asset";
+}
+
+export interface ReferenceIssue {
+  from: string;
+  target: string;
+  reason: "outside-bundle" | "missing-markdown" | "non-markdown-resource";
+}
+
+/** Preserve upstream skill categories, including package-owned and root-level skills. */
+export function skillDestination(sourcePath: string): string | undefined {
+  const match = sourcePath.match(/(?:^|\/)(skills\/.+)$/);
+  return match?.[1];
+}
+
+export function validateBundlePath(dest: string): void {
+  if (!dest || /[\\:]/.test(dest) || dest.startsWith("/") ||
+    dest.split("/").some((part) => part === "" || part === "." || part === "..")) {
+    throw new Error(`Unsafe bundle destination: ${dest}`);
+  }
+}
+
+function isLicenseNotice(path: string): boolean {
+  return /^(?:LICENSE(?:[-.].*)?|COPYING|NOTICE|THIRD-PARTY-NOTICES)$/i.test(posix.basename(path));
+}
+
+/** An extension allowlist admits inert reference data, never interpreter entrypoints. */
+export function isDeclarativeDataFile(path: string): boolean {
+  return /\.(?:json|yaml|yml|txt|csv)$/i.test(path) && !isLicenseNotice(path);
 }
 
 /**
@@ -203,6 +253,79 @@ export function bundleDestination(dep: Dependency, packageSlug: string): string 
   return undefined;
 }
 
+/** Static relative links and explicitly path-shaped inline resource references. */
+function referenceCandidates(content: string): string[] {
+  return [...new Set([
+    // Bare code-formatted filenames in schema prose include illustrative future
+    // versions, not links. Explicit relative reference/template paths are dependencies.
+    ...Array.from(content.matchAll(/`([^`\r\n]+)`/g), (match) => match[1])
+      .filter((target) => /^(?:references\/|templates\/|assets\/|scripts\/|\.\.?[\\/]|[\\/]|[a-z]:)/i.test(target) ||
+        target === "copilot-tracking.instructions.md"),
+    ...Array.from(content.matchAll(/\[[^\]\r\n]*\]\(\s*<?([^\s)>]+)>?(?:\s+"[^"]*")?\s*\)/g), (match) => match[1]),
+    ...Array.from(content.matchAll(/^\s*\[[^\]]+\]:\s*<?([^\s>]+)>?/gm), (match) => match[1]),
+  ])].filter((target) => !/^(?:https?:|mailto:|#)/i.test(target) &&
+    !/[{}<>*]|\s/.test(target) && !target.startsWith(".copilot-tracking/"));
+}
+
+function declarativeReferences(content: string): string[] {
+  return [...new Set([
+    ...Array.from(content.matchAll(/"\$ref"\s*:\s*"([^"]+)"/g), (match) => match[1]),
+    ...Array.from(content.matchAll(/^\s*\$ref:\s*["']?([^"'\s]+)["']?\s*$/gm), (match) => match[1]),
+  ])].filter((target) => !/^(?:https?:|#)/i.test(target));
+}
+
+function resolveReference(candidate: string, from: string): string {
+  const target = decodeURIComponent(candidate.split(/[?#]/)[0]);
+  // This instruction is named, rather than linked, in the upstream skill.
+  if (target === "copilot-tracking.instructions.md") return TRACKING_DEST;
+  if (/^[\\/]|^[a-z]:|\\/i.test(target)) {
+    throw new Error(`Unsafe skill reference in ${from}: ${candidate}`);
+  }
+  const resolved = posix.normalize(posix.join(posix.dirname(from), target));
+  if (resolved === ".." || resolved.startsWith("../") || posix.isAbsolute(resolved)) {
+    throw new Error(`Skill reference escapes the bundle in ${from}: ${candidate}`);
+  }
+  return resolved;
+}
+
+/** Resolve static Markdown dependencies, not dynamic output-artifact examples. */
+export function skillReferences(content: string, from: string): string[] {
+  return [...new Set(referenceCandidates(content)
+    .filter((target) => /(?:\.|%2e)md(?:[?#].*)?$/i.test(target))
+    .map((target) => resolveReference(target, from)))].sort();
+}
+
+export function collectReferenceIssues(files: { dest: string; content: string }[]): ReferenceIssue[] {
+  const paths = new Set(files.map((file) => file.dest));
+  const issues: ReferenceIssue[] = [];
+  for (const file of files.filter((entry) => (entry.dest.endsWith(".md") || isDeclarativeDataFile(entry.dest)) &&
+    (entry.dest.startsWith("skills/") || entry.dest.startsWith("instructions/")))) {
+    const candidates = isDeclarativeDataFile(file.dest) ? declarativeReferences(file.content) : referenceCandidates(file.content);
+    for (const target of candidates) {
+      if (!/\.[a-z0-9]+(?:[?#].*)?$/i.test(target)) continue;
+      try {
+        const dest = resolveReference(target, file.dest);
+        if (!paths.has(dest)) {
+          issues.push({ from: file.dest, target, reason: dest.endsWith(".md") ? "missing-markdown" : "non-markdown-resource" });
+        }
+      } catch {
+        issues.push({ from: file.dest, target, reason: "outside-bundle" });
+      }
+    }
+  }
+  return issues.sort((a, b) => a.from.localeCompare(b.from) || a.target.localeCompare(b.target));
+}
+
+export function validateSkillReferences(
+  files: { dest: string; content: string }[],
+  recordedIssues: ReferenceIssue[] = [],
+): void {
+  const actual = collectReferenceIssues(files);
+  if (JSON.stringify(actual) !== JSON.stringify(recordedIssues)) {
+    throw new Error(`Missing skill dependency or unsafe reference: ${JSON.stringify(actual)}`);
+  }
+}
+
 function authHeaders(): Record<string, string> {
   const token = (process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? "").trim();
   // Public repos need no token; one raises the rate limit and lets CI use its own.
@@ -282,7 +405,7 @@ async function resolveBundle(pin: Pin): Promise<Resolution> {
   const declared = String(((parseYaml(apmYaml) ?? {}) as { version?: string }).version ?? "").trim();
   if (declared !== pin.version) {
     throw new Error(
-      `Package version mismatch: host/cast/package-pin.json pins ${pin.package}@${pin.version} ` +
+      `Package version mismatch: host/cast-active/package-pin.json pins ${pin.package}@${pin.version} ` +
         `but ${pin.package}@${tag} declares ${declared || "<none>"}. ` +
         "Bump the pin (and this server's version) or correct the pin.",
     );
@@ -293,6 +416,8 @@ async function resolveBundle(pin: Pin): Promise<Resolution> {
   const upstreamCommits: Record<string, string> = { [pin.package]: sourceCommit };
   const planned: PlannedFile[] = [];
   const byDest = new Map<string, PlannedFile>();
+  const skills: SkillRecord[] = [];
+  const excludedFiles: ExcludedFile[] = [];
 
   for (const dep of parseApmDependencies(apmYaml)) {
     const dest = bundleDestination(dep, pin.package);
@@ -312,25 +437,36 @@ async function resolveBundle(pin: Pin): Promise<Resolution> {
         );
       }
       commit = sourceCommit;
-    } else if (dep.ref) {
+    } else if (dep.ref && /^[a-f0-9]{40}$/i.test(dep.ref)) {
       commit = dep.ref;
+      if (upstreamCommits[dep.slug] && upstreamCommits[dep.slug] !== commit) {
+        throw new Error(`Mixed upstream commits for ${dep.slug}.`);
+      }
       upstreamCommits[dep.slug] ??= dep.ref;
     } else {
       throw new Error(
-        `Unpinned dependency outside the package repo: ${dep.slug}/${dep.path}. ` +
+        `Dependency outside the package repo requires a full commit SHA: ${dep.slug}/${dep.path}. ` +
           "A floating ref cannot produce a reproducible bundle.",
       );
     }
-    const clash = byDest.get(dest);
-    if (clash) {
-      throw new Error(
-        `Two dependencies resolve to the same bundle path "${dest}": ` +
-          `${clash.slug}/${clash.path} and ${dep.slug}/${dep.path}.`,
-      );
+    let entries = [{ path: dep.path, dest }];
+    if (dep.path.endsWith(`/${BOUNDARY_FILE}`)) {
+      // Keep the existing runtime probe and its original source-relative location.
+      entries.push({ path: dep.path, dest: `instructions/shared/${BOUNDARY_FILE}` });
     }
-    const file: PlannedFile = { ...dep, dest, commit };
-    byDest.set(dest, file);
-    planned.push(file);
+    for (const entry of entries) {
+      validateBundlePath(entry.dest);
+      const clash = byDest.get(entry.dest);
+      if (clash) {
+        throw new Error(
+          `Two dependencies resolve to the same bundle path "${entry.dest}": ` +
+            `${clash.slug}/${clash.path} and ${dep.slug}/${entry.path}.`,
+        );
+      }
+      const file: PlannedFile = { ...dep, ...entry, commit };
+      byDest.set(entry.dest, file);
+      planned.push(file);
+    }
   }
 
   if (!planned.some((file) => file.dest.startsWith("agents/"))) {
@@ -342,9 +478,11 @@ async function resolveBundle(pin: Pin): Promise<Resolution> {
   if (!planned.some((file) => file.dest === `instructions/${BOUNDARY_FILE}`)) {
     throw new Error(`apm.yml does not carry ${BOUNDARY_FILE} — boundary enforcement would ship absent.`);
   }
-
+  const contentCache = new Map<string, Promise<string>>();
   const files = await mapWithConcurrency(planned, FETCH_CONCURRENCY, async (file) => {
-    const content = normalizeContent(await fetchText(rawUrl(file.slug, file.commit, file.path)));
+    const url = rawUrl(file.slug, file.commit, file.path);
+    if (!contentCache.has(url)) contentCache.set(url, fetchText(url).then(normalizeContent));
+    const content = await contentCache.get(url)!;
     return {
       ...file,
       content,
@@ -353,6 +491,8 @@ async function resolveBundle(pin: Pin): Promise<Resolution> {
     } satisfies ResolvedFile;
   });
   files.sort((a, b) => a.dest.localeCompare(b.dest));
+  const referenceIssues = collectReferenceIssues(files);
+  validateSkillReferences(files, referenceIssues);
 
   // Two files claiming one `name:` means two candidates for the same dispatch target,
   // resolved by directory-walk order. Upstream ships at least one such pair, so this
@@ -375,6 +515,9 @@ async function resolveBundle(pin: Pin): Promise<Resolution> {
     sourceManifestSha256: sha256(apmYaml),
     upstreamCommits,
     duplicateAgentNames,
+    skills: skills.sort((a, b) => a.path.localeCompare(b.path)),
+    excludedFiles: excludedFiles.sort((a, b) => a.source.localeCompare(b.source)),
+    referenceIssues,
   };
 }
 
@@ -396,15 +539,22 @@ function buildManifest(pin: Pin, resolution: Resolution, generatedAt: string): C
     ),
     generatedAt,
     agentFileCount: agents.length,
-    instructionFileCount: resolution.files.length - agents.length,
+    instructionFileCount: resolution.files.filter((file) => file.dest.startsWith("instructions/")).length,
+    skillFileCount: resolution.files.filter((file) => file.dest.startsWith("skills/")).length,
+    dataFileCount: resolution.files.filter((file) => isDeclarativeDataFile(file.dest)).length,
+    skillCount: resolution.skills.length,
+    skills: resolution.skills,
+    excludedFiles: resolution.excludedFiles,
+    referenceIssues: resolution.referenceIssues,
     agentNames: [...new Set(names)],
     duplicateAgentNames: resolution.duplicateAgentNames,
     files: resolution.files.map((file) => ({
       path: file.dest,
       sha256: file.sha256,
       source: `${file.slug}/${file.path}#${file.commit}`,
+      ...(isDeclarativeDataFile(file.dest) ? { kind: "data" as const } : {}),
     })),
-    note: "Skill file trees are DEFERRED to the execution expansion; personas + squad/boundary instructions only.",
+    note: "Only pinned agent charters and instruction files are bundled. Agent Skill resources are not bundled or executable in this runtime; native server procedures and artifact validators replace those dependencies. Provenance is preserved for every bundled file. Code execution and deployment remain unavailable.",
   };
 }
 
@@ -412,6 +562,7 @@ function writeBundle(resolution: Resolution, manifest: CastManifest): void {
   // Clean the generated subtrees so a removed agent does not linger.
   rmSync(CAST_AGENTS, { recursive: true, force: true });
   rmSync(CAST_INSTRUCTIONS, { recursive: true, force: true });
+  rmSync(join(CAST_ROOT, "skills"), { recursive: true, force: true });
   for (const file of resolution.files) {
     const target = join(CAST_ROOT, file.dest);
     mkdirSync(dirname(target), { recursive: true });
@@ -457,14 +608,14 @@ function checkBundle(resolution: Resolution, manifest: CastManifest): string[] {
   }
 
   if (!existsSync(MANIFEST_PATH)) {
-    problems.push("host/cast/manifest.json is missing");
+    problems.push("host/cast-active/manifest.json is missing");
     return problems;
   }
   const committed = JSON.parse(readFileSync(MANIFEST_PATH, "utf8")) as CastManifest;
   // `generatedAt` is a timestamp, not a fact about the content.
   const comparable = (m: CastManifest): string => JSON.stringify({ ...m, generatedAt: "" });
   if (comparable(committed) !== comparable(manifest)) {
-    problems.push("host/cast/manifest.json does not match what the pin resolves to");
+    problems.push("host/cast-active/manifest.json does not match what the pin resolves to");
   }
   return problems;
 }
@@ -488,7 +639,7 @@ export async function runCli(argv: string[]): Promise<number> {
     }
     process.stdout.write(
       `Cast bundle matches ${pin.package}@${pin.version} ` +
-        `(${manifest.agentFileCount} agents, ${manifest.instructionFileCount} instructions).\n`,
+        `(${manifest.agentFileCount} agents, ${manifest.instructionFileCount} instructions, ${manifest.skillCount} skills / ${manifest.skillFileCount} skill files).\n`,
     );
     return 0;
   }
@@ -501,7 +652,7 @@ export async function runCli(argv: string[]): Promise<number> {
   }
   process.stdout.write(
     `Snapshot: ${manifest.agentFileCount} agent files, ${manifest.agentNames.length} named personas, ` +
-      `${manifest.instructionFileCount} instruction files; ` +
+      `${manifest.instructionFileCount} instruction files, ${manifest.skillCount} skills / ${manifest.skillFileCount} skill files; ` +
       `linked ${pin.package}@${pin.version} (${manifest.sourceCommit.slice(0, 7)}).\n`,
   );
   return 0;

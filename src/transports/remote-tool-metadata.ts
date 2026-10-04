@@ -3,7 +3,7 @@ import { SQUAD_GUIDED_BANNER } from "../engine/render-embedded.js";
 const DELEGATED_SENTENCE = /\s*Delegated execution:.*?(?=\s+Use for\b|$)/i;
 const DELEGATED_PIPELINE = /Research -> Plan -> Implement -> Review/gi;
 
-const MUTATING_TOOLS = new Set(["squad_memory_write", "squad_memory_sync"]);
+const MUTATING_TOOLS = new Set(["squad_memory_write", "squad_memory_sync", "squad_approve", "squad_respond"]);
 const STATEFUL_TOOLS = new Set([
   "squad_research",
   "squad_plan",
@@ -39,16 +39,16 @@ function embeddedExecutionSentence(toolId: string): string {
     return (
       ` Embedded execution (${SQUAD_GUIDED_BANNER}): the server runs the federation meta layer server-side ` +
       "under its gates and methodology. Because the federation layer is gated, the call returns immediately " +
-      "with a run id and PAUSES at the Human Gate; poll squad_status with that run id after an out-of-band " +
-      "approval to retrieve the finished federation decision."
+      "with a run id and PAUSES at the Human Gate; an authorized operator can submit explicit human approval " +
+      "through squad_approve or /admin/approve, then poll squad_status for the same run."
     );
   }
   if (toolId === "squad_run") {
     return (
       ` Embedded execution (${SQUAD_GUIDED_BANNER}): the server runs the full advisory pipeline server-side ` +
       "under its gates and methodology. Because the pipeline is gated, the call returns immediately with a " +
-      "run id and PAUSES at the Human Gate; poll squad_status with that run id after an out-of-band approval " +
-      "to retrieve the finished artifact."
+      "run id and PAUSES at the Human Gate; an authorized operator can submit explicit human approval " +
+      "through squad_approve or /admin/approve, then poll squad_status for the same run."
     );
   }
   return (

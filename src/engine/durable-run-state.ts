@@ -26,10 +26,13 @@ import { join } from "node:path";
 
 import {
   DEFAULT_LEASE_MS,
+  answerRunInput,
+  hasUnansweredHumanInput,
   isRunClaimable,
   isRunExpired,
   type ClaimOptions,
   type CreateRunInit,
+  type HumanInputResponse,
   type PersistedCouncilVerdict,
   type PersistedStageArtifact,
   type RunState,
@@ -39,6 +42,9 @@ import {
 import { NullFieldCipher, decryptField, encryptField, type FieldCipher } from "./field-cipher.js";
 
 const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Human-input state is serialized and sealed as one opaque field on disk. */
+type StoredRunState = Omit<RunState, "humanInput"> & { humanInput?: string };
 
 /** True only for a canonical UUID (guards path construction against traversal). */
 export function isValidRunId(runId: string): boolean {
@@ -62,7 +68,8 @@ export interface DurableRunStateStoreOptions {
  * SINGLE-REPLICA: `claim` is atomic within one process but not across processes,
  * so a multi-replica deployment uses the Azure Table store (cross-replica ETag
  * CAS) instead. When a {@link FieldCipher} is supplied, `request`/`context` are
- * encrypted at rest and decrypted on read (WI-06 / MEDIUM-3).
+ * encrypted at rest and decrypted on read (WI-06 / MEDIUM-3). Human-input state
+ * and advisory checkpoints use that same cipher; answerInput is process-local atomic.
  */
 export class DurableRunStateStore implements RunStateStore {
   readonly kind = "durable" as const;
@@ -83,7 +90,7 @@ export class DurableRunStateStore implements RunStateStore {
   }
 
   /** Encrypt the at-rest fields before writing a record to disk. */
-  private seal(run: RunState): RunState {
+  private seal(run: RunState): StoredRunState {
     return {
       ...run,
       request: encryptField(this.cipher, run.request),
@@ -91,11 +98,13 @@ export class DurableRunStateStore implements RunStateStore {
       params: encryptField(this.cipher, run.params),
       stages: this.sealStages(run.stages),
       councilVerdict: this.sealVerdict(run.councilVerdict),
+      humanInput: encryptField(this.cipher, run.humanInput === undefined ? undefined : JSON.stringify(run.humanInput)),
+      advisoryCheckpoint: encryptField(this.cipher, run.advisoryCheckpoint),
     };
   }
 
   /** Decrypt the at-rest fields after reading a record from disk. */
-  private open(run: RunState): RunState {
+  private open(run: StoredRunState): RunState {
     return {
       ...run,
       request: decryptField(this.cipher, run.request),
@@ -103,6 +112,9 @@ export class DurableRunStateStore implements RunStateStore {
       params: decryptField(this.cipher, run.params),
       stages: this.openStages(run.stages),
       councilVerdict: this.openVerdict(run.councilVerdict),
+      humanInput: run.humanInput === undefined
+        ? undefined : JSON.parse(this.cipher.decrypt(run.humanInput)) as RunState["humanInput"],
+      advisoryCheckpoint: decryptField(this.cipher, run.advisoryCheckpoint),
     };
   }
 
@@ -159,14 +171,14 @@ export class DurableRunStateStore implements RunStateStore {
   }
 
   /** Read the raw (still-sealed) record, honoring lazy TTL expiry. */
-  private readRaw(runId: string): RunState | undefined {
+  private readRaw(runId: string): StoredRunState | undefined {
     const path = this.pathFor(runId);
     if (!path) {
       return undefined;
     }
-    let run: RunState;
+    let run: StoredRunState;
     try {
-      run = JSON.parse(readFileSync(path, "utf8")) as RunState;
+      run = JSON.parse(readFileSync(path, "utf8")) as StoredRunState;
     } catch {
       return undefined;
     }
@@ -216,18 +228,29 @@ export class DurableRunStateStore implements RunStateStore {
     return Promise.resolve();
   }
 
+  answerInput(runId: string, questionId: string, response: HumanInputResponse): Promise<RunState | undefined> {
+    const raw = this.readRaw(runId);
+    if (!raw) return Promise.resolve(undefined);
+    const current = this.open(raw);
+    const next = answerRunInput(current, questionId, response, Date.now());
+    if (next && next !== current) this.writeRun(next);
+    return Promise.resolve(next);
+  }
+
   claim(runId: string, from: RunStatus[], to: RunStatus, options: ClaimOptions = {}): Promise<RunState | undefined> {
     const now = options.now ?? Date.now();
     // read+check+write with no await between: atomic within one process.
-    const existing = this.readRaw(runId);
-    if (!existing || !from.includes(existing.status)) {
+    const raw = this.readRaw(runId);
+    const existing = raw ? this.open(raw) : undefined;
+    if (!existing || isRunExpired(existing, now) || !from.includes(existing.status) ||
+        hasUnansweredHumanInput(existing)) {
       return Promise.resolve(undefined);
     }
     if (existing.status === "running" && (existing.leaseExpiresAt ?? 0) > now) {
       return Promise.resolve(undefined);
     }
     const next: RunState = {
-      ...this.open(existing),
+      ...existing,
       status: to,
       leaseExpiresAt: now + (options.leaseMs ?? DEFAULT_LEASE_MS),
       updatedAt: now,
@@ -236,14 +259,14 @@ export class DurableRunStateStore implements RunStateStore {
     return Promise.resolve(next);
   }
 
-  private allRuns(): RunState[] {
+  private allRuns(): StoredRunState[] {
     let entries: string[];
     try {
       entries = readdirSync(this.baseDir);
     } catch {
       return [];
     }
-    const runs: RunState[] = [];
+    const runs: StoredRunState[] = [];
     for (const entry of entries) {
       if (!entry.endsWith(".json")) {
         continue;
@@ -258,8 +281,8 @@ export class DurableRunStateStore implements RunStateStore {
   }
 
   listClaimable(now: number = Date.now()): Promise<RunState[]> {
-    // Claimability is decided on metadata only; request/context stay sealed.
-    return Promise.resolve(this.allRuns().filter((run) => isRunClaimable(run, now)).map((run) => this.open(run)));
+    // Human-input state is encrypted and must be opened before deciding claimability.
+    return Promise.resolve(this.allRuns().map((run) => this.open(run)).filter((run) => isRunClaimable(run, now)));
   }
 
   sweepExpired(now: number = Date.now()): Promise<number> {
@@ -280,7 +303,7 @@ export class DurableRunStateStore implements RunStateStore {
         continue;
       }
       try {
-        const run = JSON.parse(readFileSync(path, "utf8")) as RunState;
+        const run = JSON.parse(readFileSync(path, "utf8")) as StoredRunState;
         if (isRunExpired(run, now)) {
           this.removeFile(runId);
           removed += 1;

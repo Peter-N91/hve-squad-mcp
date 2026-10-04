@@ -23,6 +23,7 @@
  * would imply a resumed run might honor it.
  */
 import type { CoordinatorRequest } from "./coordinator-engine.js";
+import { parseBrdReview, type BrdReviewRequest } from "./brd-review.js";
 import {
   parseProjectContextEnvelope,
   type ProjectContextEnvelope,
@@ -39,6 +40,7 @@ export interface PersistedRunParams {
   squad?: string;
   init?: boolean;
   promote?: boolean;
+  review?: BrdReviewRequest;
 }
 
 function optionalString(value: unknown): string | undefined {
@@ -60,10 +62,11 @@ export function encodeRunParams(request: CoordinatorRequest): string | undefined
   if (request.squad) params.squad = request.squad;
   if (request.init === true) params.init = true;
   if (request.promote === true) params.promote = true;
+  if (request.review !== undefined) params.review = parseBrdReview(request.review);
   return Object.keys(params).length === 0 ? undefined : JSON.stringify(params);
 }
 
-/** Parse a persisted params blob. Never throws; unknown/invalid input yields `{}`. */
+/** Legacy invalid blobs yield {}; an explicit invalid review must never become an authoring run. */
 export function decodeRunParams(blob: string | undefined): PersistedRunParams {
   if (!blob) {
     return {};
@@ -94,6 +97,7 @@ export function decodeRunParams(blob: string | undefined): PersistedRunParams {
     squad: optionalString(record.squad),
     init: record.init === true,
     promote: record.promote === true,
+    ...(record.review === undefined ? {} : { review: parseBrdReview(record.review) }),
   };
 }
 
@@ -121,5 +125,6 @@ export function coordinatorRequestFromRun(run: {
     squad: params.squad,
     init: params.init,
     promote: params.promote,
+    ...(params.review === undefined ? {} : { review: params.review }),
   };
 }

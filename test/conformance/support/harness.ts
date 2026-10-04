@@ -31,6 +31,9 @@ import type { SquadRunRecorder } from "../../../src/engine/squad-run-recorder.js
 import { MockModelBackend } from "./mock-backend.js";
 import { FakeJwtVerifier, TEST_AUDIENCE, TEST_ISSUER, bearer } from "./fake-auth.js";
 import { createCapturingLogger } from "./log-capture.js";
+import { scriptedStageExecutor } from "../../helpers/scripted-stage-executor.js";
+import { MemoryBackedArtifactStore } from "../../../src/engine/artifact-store.js";
+import type { ReadinessProbe } from "../../../src/transports/readiness.js";
 
 const DEFAULT_ORIGIN = "https://copilotstudio.microsoft.com";
 
@@ -69,10 +72,14 @@ export interface HarnessOptions {
   businessToolsExposed?: boolean;
   /** Optional RFC 9728 metadata URL advertised on 401 responses. */
   oauthResourceMetadataUrl?: string;
+  /** Optional instance readiness served at GET /readyz. */
+  readiness?: ReadinessProbe;
   /** Deterministic server-side memory continuity; absent = the manual-memory default. */
   autoMemory?: AutoMemory;
   /** Optional .copilot-tracking ledger writer over the same memory store. */
   runRecorder?: SquadRunRecorder;
+  /** Default fakes isolate protocol/auth tests; opt in to test actual tool/artifact gates. */
+  useRealStageExecutor?: boolean;
 }
 
 export interface Harness {
@@ -120,6 +127,9 @@ export function buildHarness(options: HarnessOptions = {}): Harness {
 
   const embedded = new EmbeddedCoordinator({
     backend,
+    stageExecutorFactory: options.useRealStageExecutor ? undefined : () => scriptedStageExecutor(backend),
+    researchArtifacts: options.useRealStageExecutor && options.memoryStore
+      ? new MemoryBackedArtifactStore(options.memoryStore) : undefined,
     workspaceManager,
     quota,
     gates,
@@ -147,6 +157,7 @@ export function buildHarness(options: HarnessOptions = {}): Harness {
     artifactsEnabled: options.artifactsEnabled,
     businessToolsExposed: options.businessToolsExposed ?? false,
     oauthResourceMetadataUrl: options.oauthResourceMetadataUrl,
+    readiness: options.readiness,
   });
 
   return {

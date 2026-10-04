@@ -33,6 +33,8 @@ const STRUCTURAL_PATTERNS: { label: string; pattern: RegExp }[] = [
   { label: "jwt", pattern: /\beyJ[\w-]+\.[\w-]+\.[\w-]+/g },
   // Azure OpenAI / Cognitive Services style 32+ char hex/base64 keys near a key hint.
   { label: "api-key", pattern: /\b(api[_-]?key|ocp-apim-subscription-key)\b\s*[:=]\s*[\w.\-+/=]{16,}/gi },
+  // GitHub tokens (OAuth, PAT, user-to-server, server-to-server, refresh, fine-grained PAT).
+  { label: "github-token", pattern: /\b(?:gh[opusr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g },
 ];
 
 /** Escape a string for safe use inside a `RegExp`. */

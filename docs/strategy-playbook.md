@@ -278,6 +278,30 @@ Use it only after `squad_run` or `squad_federate`. Preserve the run ID in the
 outer agent's conversation state. Apply bounded polling with backoff; do not
 start duplicate runs because a previous one is still held.
 
+### `squad_respond`
+
+- Scope: `Squad.Run`; `Squad.Operate` alone is insufficient.
+- Availability: remote HTTP only, with the pipeline enabled.
+- Input: UUID `runId`, UUID `questionId`, nonblank `answer` of at most 16,000
+  characters, and optional existing-schema `projectContext`.
+- Workflow: when status reports `held` / `awaiting human input`, show the returned
+  `humanInput.question`, choices, and notice to the human. Submit their answer
+  against that exact question and run. Tenant/project context is reconciled
+  before mutation; the response actor comes from the authenticated principal.
+- Output: `accepted`, `runId`, `questionId`, optional rejection `reason`, and a
+  verified receipt (`respondedBy`, epoch-millisecond `respondedAt`) on acceptance.
+  A project-bound call also returns `contextBridge`.
+- Side effect: persists the response and queues continuation of the same run;
+  the response handler itself makes no model call. Poll `squad_status` afterward.
+
+This is a mutating tool, not a read-only poll. Retry only the same answer to the
+same question as the same authenticated principal to retain the original
+receipt. A conflicting answer or stale question is rejected. Never fabricate a
+human answer, start a replacement run, or treat a confirmation answer as
+operator approval. `squad_approve` / `Squad.Operate` remains a separate gate.
+Public status includes the question contract, never the private continuation
+checkpoint. Answer text is not included in the response receipt or logged.
+
 ### `squad_business_plan`
 
 - Scope: `Squad.Business`.

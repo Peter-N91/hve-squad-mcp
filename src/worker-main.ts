@@ -13,28 +13,31 @@
  * behavior and does NOT run a worker.
  */
 import { pathToFileURL } from "node:url";
+import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 
 import { loadOperatorConfig, type OperatorConfig } from "./config/operator-config.js";
 import { EmbeddedCoordinator } from "./engine/embedded.js";
 import { EphemeralWorkspaceManager } from "./engine/workspace.js";
 import { GateKeeper, TenantQuotaTracker } from "./engine/gates.js";
-import { RunWorker } from "./engine/run-worker.js";
-import { AzureOpenAIBackend, type ModelPricing } from "./engine/backends/azure-openai.js";
+import { RunWorker, WORKER_EXECUTION_OPTIONS } from "./engine/run-worker.js";
+import { AzureOpenAIBackend, modelPricingFromEnvironment } from "./engine/backends/azure-openai.js";
 import { createManagedIdentityTokenProvider } from "./engine/backends/managed-identity-credential.js";
 import { RedactingLogger } from "./observability/logger.js";
-import { buildRunStateStack } from "./server-http.js";
-
-function readPricing(env: NodeJS.ProcessEnv): ModelPricing | undefined {
-  const input = Number(env.SQUAD_MCP_PRICE_INPUT_PER_MTOK);
-  const output = Number(env.SQUAD_MCP_PRICE_OUTPUT_PER_MTOK);
-  if (Number.isFinite(input) && Number.isFinite(output)) {
-    return { inputPerMTokUsd: input, outputPerMTokUsd: output };
-  }
-  return undefined;
-}
+import { buildRunStateStack, buildSquadMemoryStack } from "./server-http.js";
+import { AutoMemory } from "./engine/auto-memory.js";
+import { MemoryBackedArtifactStore } from "./engine/artifact-store.js";
+import { SquadRunRecorder } from "./engine/squad-run-recorder.js";
 
 /** Default seconds between worker ticks. */
 const DEFAULT_WORKER_INTERVAL_MS = 5000;
+
+/** Hash-only evidence from naturally scheduled jobs; never starts a model run. */
+export function workerDiagnosticRuntime(read: (url: URL) => Uint8Array = readFileSync) {
+  return Object.fromEntries([
+    "./engine/backends/provider-validation.js", "./engine/backends/azure-openai.js", "./worker-main.js",
+  ].map(path => [path, createHash("sha256").update(read(new URL(path, import.meta.url))).digest("hex")]));
+}
 
 /** Build a {@link RunWorker} bound to the shared cross-replica run-state stack. */
 export function buildWorker(
@@ -51,35 +54,50 @@ export function buildWorker(
     endpoint: config.modelEndpoint,
     deployment: config.modelDeployment,
     api: config.modelApi,
+    chatProfile: config.modelChatProfile,
     apiVersion: config.modelApiVersion,
     defaultMaxOutputTokens: config.modelMaxOutputTokens,
     reasoningEffort: config.modelReasoningEffort,
     verbosity: config.modelVerbosity,
     getAccessToken: createManagedIdentityTokenProvider(),
     logger,
-    pricing: readPricing(env),
+    pricing: modelPricingFromEnvironment(env),
   });
 
+  const memoryStack = buildSquadMemoryStack(config, logger);
+  const artifactStore = config.enableArtifacts && config.memoryAutoEnabled && memoryStack
+    ? new MemoryBackedArtifactStore(memoryStack.memoryStore) : undefined;
   const coordinator = new EmbeddedCoordinator({
+    ...WORKER_EXECUTION_OPTIONS,
     backend,
     workspaceManager: new EphemeralWorkspaceManager(),
     quota: new TenantQuotaTracker({
       concurrency: config.tenantConcurrency,
       monthlyCeilingUsd: config.tenantMonthlyCostCeilingUsd,
     }),
-    gates: new GateKeeper(),
+    gates: new GateKeeper({ advisoryAutopilotEnabled: config.advisoryAutopilotEnabled }),
     runStateStore: stack.runStateStore,
     approvals: stack.approvals,
+    autoMemory: config.memoryAutoEnabled && memoryStack
+      ? new AutoMemory({ store: memoryStack.memoryStore, defaultProject: config.memoryDefaultProject, logger })
+      : undefined,
+    runRecorder: artifactStore ? new SquadRunRecorder({ store: artifactStore, logger }) : undefined,
+    researchArtifacts: artifactStore,
     logger,
   });
 
-  return new RunWorker({ coordinator, logger });
+  return new RunWorker({ coordinator, logger, batchSize: 1 });
 }
 
 /** Start the live worker. Runs a single drain pass when `SQUAD_MCP_WORKER_ONCE=true`
  * (the scheduled ACA Job model), otherwise loops until SIGTERM (continuous model). */
 export async function mainWorker(): Promise<void> {
   const logger = new RedactingLogger({ name: "hve-squad-mcp-worker" });
+  try {
+    logger.info("Provider diagnostic runtime", { schemaVersion: 2, moduleSha256: workerDiagnosticRuntime() });
+  } catch {
+    logger.warn("Provider diagnostic runtime hashes unavailable");
+  }
   const config = loadOperatorConfig();
   const worker = buildWorker(config, process.env, logger);
 

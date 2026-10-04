@@ -106,7 +106,7 @@ export class TenantQuotaTracker {
     };
   }
 
-  /** Record realized inference cost so the ceiling reflects actual spend (COST-2). */
+  /** Record a configured inference-cost estimate for the process-local ceiling (COST-2). */
   recordCostUsd(tenantId: string, usd: number): void {
     if (usd <= 0) {
       return;
@@ -117,6 +117,13 @@ export class TenantQuotaTracker {
   /** Current month's spend for a tenant. */
   spentUsd(tenantId: string): number {
     return this.usageFor(tenantId).spentUsd;
+  }
+
+  /** Re-check between bounded tool/worker completions without acquiring another slot. */
+  checkCost(tenantId: string): void {
+    if (this.usageFor(tenantId).spentUsd >= this.monthlyCeilingUsd) {
+      throw new Error("Tenant model cost ceiling reached.");
+    }
   }
 
   /** Current in-flight dispatch count for a tenant. */
@@ -136,13 +143,13 @@ export type RunCostCheck =
   | { ok: false; reason: "run_cost_ceiling"; spentUsd: number; ceilingUsd: number };
 
 /**
- * COST-2 (run scope) — a per-run cost ledger that accumulates realized stage cost
+ * COST-2 (run scope) — a per-run cost ledger that accumulates configured stage-cost estimates
  * across a single multi-stage advisory run and refuses the NEXT stage once the
  * accumulated spend has reached the ceiling.
  *
  * This is the run-scoped sibling of {@link TenantQuotaTracker}'s monthly ceiling:
  * it reuses the exact same COST-2 accumulate-then-refuse style (accumulate
- * realized `estimatedCostUsd`; refuse when `spent >= ceiling`) rather than
+ * reported `estimatedCostUsd`; refuse when `spent >= ceiling`) rather than
  * inventing a parallel accounting system, but at a per-run granularity so a
  * single advisory pipeline cannot run away across its stages. The check is made
  * BEFORE each stage's model call, so exceeding the ceiling halts the run with a
@@ -169,7 +176,7 @@ export class RunCostLedger {
     return { ok: true, spentUsd: this.spent, ceilingUsd: this.ceilingUsd };
   }
 
-  /** Record a stage's realized inference cost so the ceiling reflects actual spend. */
+  /** Record a stage's configured inference-cost estimate. */
   record(usd: number | undefined): void {
     if (typeof usd === "number" && usd > 0) {
       this.spent += usd;
@@ -182,19 +189,19 @@ export class RunCostLedger {
   }
 }
 
-/** A gate decision: proceed immediately, or hold for out-of-band human approval. */
+/** A gate decision: proceed immediately, or hold for operator-authorized human approval. */
 export type GateDecision =
   | { kind: "proceed" }
   | { kind: "hold"; reason: string; approvalRequest: string };
 
 /**
- * The out-of-band human approval channel (SEC-6). A held run proceeds ONLY when
+ * The human approval channel (SEC-6). A held run proceeds ONLY when
  * an operator records approval for its run id through {@link approve} — an action
- * outside the request/response path. Nothing in the engine calls `approve` from
- * caller input or model output.
+ * separately authorized by the transport. Work prompts and model output are
+ * never interpreted as approval.
  */
 export interface HumanApprovalChannel {
-  /** True when an operator has approved this run id out-of-band. */
+  /** True when an operator has explicitly approved this run id. */
   isApproved(runId: string): Promise<boolean>;
   /** Operator action — the only release path. Never called from caller content. */
   approve(runId: string, approver: string): Promise<void>;
@@ -382,7 +389,8 @@ export class GateKeeper {
         reason: why,
         approvalRequest:
           "This action is paused for human approval and will not proceed until an " +
-          "operator approves it through the out-of-band approval channel. The squad " +
+          "operator submits explicit human approval through squad_approve (Squad.Operate) " +
+          "or /admin/approve. Poll the same run afterward. The squad " +
           "never auto-releases a gate across the remote boundary.",
       };
     }

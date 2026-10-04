@@ -25,9 +25,19 @@
 import { composeEmbeddedPrompt } from "./embedded-prompt.js";
 import { resolvePersonaForRole } from "./embedded-roles.js";
 import type { PersonaRecord } from "./persona-loader.js";
-import type { BackendUsage, ModelBackend } from "./model-backend.js";
+import {
+  completionEventFromResult,
+  completeWithObserver,
+  type AttributedCompletionObserver,
+  type BackendCompletionEvent,
+  type BackendUsage,
+  type ModelBackend,
+} from "./model-backend.js";
 import type { CoordinatorRequest } from "./coordinator-engine.js";
 import type { RoutePlan } from "./routing.js";
+import type { RunCostLedger } from "./gates.js";
+import { requiresStageRuntime, StageBlockedError, type AdvisoryStageExecutor } from "./research-runtime.js";
+import { slugForPath } from "./squad-ledger.js";
 
 /** The three canonical Council Verdict classes (advisory subset). */
 export type CouncilVerdictClass = "Go" | "Go-With-Conditions" | "Stop";
@@ -44,6 +54,8 @@ export interface CouncilMemberOpinion {
   text: string;
   /** The backend that produced the finding. */
   backendId: string;
+  model?: string;
+  deployment?: string;
   /** Per-member usage (for cost accounting). */
   usage?: BackendUsage;
 }
@@ -64,6 +76,9 @@ export interface CouncilVerdict {
 
 export interface CouncilDeps {
   backend: ModelBackend;
+  stageExecutor?: AdvisoryStageExecutor;
+  costLedger?: RunCostLedger;
+  onCompletion?: AttributedCompletionObserver;
 }
 
 // ---------------------------------------------------------------------------
@@ -244,30 +259,64 @@ export async function runCouncil(
   request: CoordinatorRequest,
   deps: CouncilDeps,
 ): Promise<CouncilVerdict> {
-  const opinions = await Promise.all(
-    members.map(async (member): Promise<CouncilMemberOpinion> => {
-      // SEC-5 — member charter is the ONLY authority; plan + caller input are DATA.
-      const prompt = composeEmbeddedPrompt({
-        systemAuthority: member.charter,
-        request: request.request,
-        context: request.context,
-        priorArtifact: planArtifact,
-      });
-      const completion = await deps.backend.complete({
-        system: prompt.system,
-        messages: prompt.messages,
-      });
-      const parsed = parseMemberVerdict(completion.text);
-      return {
-        agentName: member.role,
-        verdict: parsed.verdict,
-        conditions: parsed.conditions,
-        text: completion.text,
-        backendId: completion.backendId,
-        usage: completion.usage,
-      };
-    }),
-  );
+  const observe = async (
+    event: BackendCompletionEvent,
+    actor: string,
+  ): Promise<void> => {
+    if (deps.onCompletion) {
+      await deps.onCompletion(event, { stage: "Council Verdict", actor });
+    } else {
+      deps.costLedger?.record(event.usage?.estimatedCostUsd);
+    }
+  };
+  const evaluate = async (member: PersonaRecord): Promise<CouncilMemberOpinion> => {
+    const prompt = composeEmbeddedPrompt({
+      systemAuthority: member.charter,
+      request: request.request,
+      context: request.context,
+      priorArtifact: planArtifact,
+    });
+    if (!deps.stageExecutor && requiresStageRuntime(member)) {
+      throw new StageBlockedError("stage_runtime_unavailable", "A council charter requires unavailable skill and artifact tools.");
+    }
+    let completion;
+    if (deps.stageExecutor) {
+      completion = await deps.stageExecutor.execute(
+        member,
+        request,
+        planArtifact,
+        `council-${slugForPath(member.role)}`,
+        deps.costLedger,
+      );
+      if (!completion.usageEventsEmitted) {
+        await observe(completionEventFromResult(completion), member.role);
+      }
+    } else {
+      completion = await completeWithObserver(
+        deps.backend,
+        { system: prompt.system, messages: prompt.messages },
+        (event) => observe(event, member.role),
+      );
+    }
+    const parsed = parseMemberVerdict(completion.text);
+    return {
+      agentName: member.role,
+      verdict: parsed.verdict,
+      conditions: parsed.conditions,
+      text: completion.text,
+      backendId: completion.backendId,
+      model: completion.model,
+      deployment: completion.deployment,
+      usage: completion.usage,
+    };
+  };
+  const opinions: CouncilMemberOpinion[] = [];
+  if (deps.stageExecutor) {
+    // Tool-enabled members share a bounded workspace and cost ledger.
+    for (const member of members) opinions.push(await evaluate(member));
+  } else {
+    opinions.push(...await Promise.all(members.map(evaluate)));
+  }
 
   const synth = synthesizeVerdict(opinions);
   const usage = opinions.map((o) => o.usage).filter((u): u is BackendUsage => Boolean(u));

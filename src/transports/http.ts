@@ -16,6 +16,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 import type { HttpRequestLike, HttpResponseLike } from "./http-core.js";
+import type { ReadinessProbe } from "./readiness.js";
 
 /** Maximum accepted request body size (defense against oversized payloads). */
 export const MAX_BODY_BYTES = 1_000_000;
@@ -71,6 +72,8 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
 /** Structural handler contract shared by MCP and the optional OAuth route wrapper. */
 export interface HttpRequestHandler {
   handle(req: HttpRequestLike): Promise<HttpResponseLike>;
+  /** The instance readiness probe, when the handler has one (checked before the server listens). */
+  readonly readiness?: ReadinessProbe;
 }
 
 /** Build (but do not listen on) a `node:http` server bound to the HTTP handler. */

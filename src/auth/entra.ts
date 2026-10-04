@@ -89,9 +89,9 @@ export class AuthError extends Error {
 
 export interface EntraAuthenticatorOptions {
   /**
-   * The accepted audiences (this resource server; SEC-1, RFC 8707). Several are
-   * permitted so one deployment can serve front doors that mint tokens for
-   * different resource identifiers; each is matched exactly.
+   * The accepted audiences for this resource server (SEC-1, RFC 8707). Multiple
+   * entries are permitted only for aliases of the same protected-resource
+   * registration; each is matched exactly.
    */
   audiences: readonly string[];
   /** Permitted issuers; empty = accept any issuer the verifier already validated. */
@@ -107,15 +107,13 @@ export interface EntraAuthenticatorOptions {
 /**
  * Resolve which configured audience a token is bound to, or `undefined`.
  *
- * A deployment may serve several front doors that each mint tokens for their own
- * resource identifier — a Copilot Studio connector bound to `api://<client-id>`
- * and a Cowork Entra SSO auth config bound to the Application ID URI that
- * registration generates. Accepting a SET does not weaken SEC-1: every entry is
- * an operator-configured exact string, matched exactly, with no wildcard or
- * prefix matching, so a token minted for any other resource is still rejected.
+ * One registration can have several valid audience forms, such as its client id
+ * and a registered Application ID URI. Every configured alias is matched exactly,
+ * with no wildcard or prefix matching. IDs belonging to another resource
+ * registration must be hosted separately rather than added to this set.
  *
- * Returns the matched value so the caller can record WHICH front door admitted
- * the request rather than the whole configured set.
+ * Returns the matched value so the caller can record which resource alias
+ * admitted the request rather than the whole configured set.
  */
 function matchAudience(
   aud: string | string[] | undefined,
@@ -251,13 +249,13 @@ export class EntraAuthenticator {
   }
 
   /**
-   * Authorize an out-of-band operator approval (the `/admin/approve` route). Throws
+   * Authorize an operator approval (`squad_approve` or `/admin/approve`). Throws
    * {@link AuthError} 403 unless the caller's token carries the distinct
    * high-privilege {@link OPERATOR_APPROVAL_SCOPE} — deliberately NOT `Squad.Run`,
    * so a caller that may start or poll a run cannot release its Human Gate. Like
    * {@link authorizeTool}, no `request`/`context` input can influence this: the
-   * required scope is fixed, and this method is only reached from the admin route,
-   * never from a `tools/call` or model output (SEC-6).
+   * required scope is fixed; ordinary work requests and model output do not
+   * grant authority to invoke the approval action.
    */
   authorizeApproval(context: AuthContext): void {
     if (!context.scopes.includes(OPERATOR_APPROVAL_SCOPE)) {

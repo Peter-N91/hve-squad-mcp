@@ -26,6 +26,8 @@ import {
   isRemotelyExposed,
   isMemoryExposed,
   SQUAD_STATUS_TOOL,
+  SQUAD_RESPOND_TOOL,
+  SQUAD_APPROVE_TOOL,
   SQUAD_RENDER_PPTX_TOOL,
   SQUAD_MEMORY_READ_TOOL,
   SQUAD_HISTORY_TOOL,
@@ -45,11 +47,15 @@ import {
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { ToolInputError, type ToolRouter } from "../router/router.js";
 import { renderEmbeddedResult } from "../engine/render-embedded.js";
+import { isValidRunId } from "../engine/durable-run-state.js";
 import { ModelBackendError } from "../engine/model-backend.js";
+import { AdvisoryStageFailure } from "../engine/advisory-pipeline.js";
+import { responsibleAiBlocker, responsibleAiMessage } from "../engine/responsible-ai.js";
+import { modelFailureDiagnostics, modelFailureMessage } from "../engine/model-backend.js";
 import type { CoordinatorRequest } from "../engine/coordinator-engine.js";
 import {
   PROJECT_CONTEXT_INPUT_SCHEMA,
-  PROJECT_CONTEXT_REGISTRY_PATH,
+  isProjectContextMetadata,
   PROJECT_INPUT_SCHEMA,
   ProjectContextBridge,
   ProjectContextError,
@@ -63,7 +69,7 @@ import type { PptxRenderService } from "../engine/render/pptx-render-service.js"
 import { SquadMemoryResourceProvider } from "../engine/squad-memory-resources.js";
 import { isSafeMemoryPath, type SquadMemoryStore } from "../engine/squad-memory-state.js";
 import { MemoryBackedArtifactStore } from "../engine/artifact-store.js";
-import { SquadHistory } from "../engine/squad-history.js";
+import { HistoryReadRangeError, SquadHistory } from "../engine/squad-history.js";
 import {
   asTargetedStore,
   UnknownMemoryTargetError,
@@ -74,6 +80,7 @@ import { BacklogContractError, parseBacklog } from "../engine/backlog-contract.j
 import type { RedactingLogger } from "../observability/logger.js";
 import type { SessionStore } from "./session-store.js";
 import { projectRemoteToolDescriptor } from "./remote-tool-metadata.js";
+import type { ReadinessProbe } from "./readiness.js";
 
 /** The MCP protocol revision this server speaks. */
 export const MCP_PROTOCOL_VERSION = "2025-06-18";
@@ -100,6 +107,49 @@ const SQUAD_STATUS_DESCRIPTOR = {
         description: "The server-allocated run id returned by squad_run.",
       },
       project: PROJECT_INPUT_SCHEMA,
+      projectContext: PROJECT_CONTEXT_INPUT_SCHEMA,
+    },
+  },
+};
+
+const SQUAD_APPROVE_DESCRIPTOR = {
+  name: SQUAD_APPROVE_TOOL,
+  title: "Approve Squad Run",
+  description:
+    "Submit an explicit human approval for an existing held run. Requires Squad.Operate. " +
+    "Read back the saved decision and obtain human confirmation before calling; files and tool consent " +
+    "alone are not approval. Map sourceRunId to runId and include the saved projectId for a project-bound " +
+    "run. Returns the authenticated approver and receipt; poll squad_status for the same run afterward. " +
+    "Never use this action for rejection or to start new work.",
+  inputSchema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["runId", "decision"],
+    properties: {
+      runId: { type: "string", format: "uuid" },
+      decision: { type: "string", const: "approve" },
+      projectId: PROJECT_CONTEXT_INPUT_SCHEMA.properties.projectId,
+      decisionId: { type: "string", format: "uuid" },
+    },
+  },
+};
+
+const SQUAD_RESPOND_DESCRIPTOR = {
+  name: SQUAD_RESPOND_TOOL,
+  title: "Respond to Squad Question",
+  description:
+    "Submit the human's answer to the current clarification or confirmation on an existing run. " +
+    "Requires Squad.Run, not Squad.Operate. Use the runId and questionId returned by squad_status; " +
+    "do not invent an answer or use this as operator approval. Returns a persisted response receipt; " +
+    "poll squad_status to continue the same run. Optional projectContext must match the saved run.",
+  inputSchema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["runId", "questionId", "answer"],
+    properties: {
+      runId: { type: "string", format: "uuid" },
+      questionId: { type: "string", format: "uuid" },
+      answer: { type: "string", minLength: 1, maxLength: 16000, pattern: "\\S" },
       projectContext: PROJECT_CONTEXT_INPUT_SCHEMA,
     },
   },
@@ -266,7 +316,10 @@ const SQUAD_HISTORY_DESCRIPTOR = {
     "Browse and open what previous squad runs produced for a project: the squad " +
     "state, each role's deliverables, and the per-agent history. Use op='index' for " +
     "a compact picture of what exists, op='list' to enumerate a directory, and " +
-    "op='read' to open one artifact. Deterministic: no model call, no impactful action.",
+    "op='read' to open one artifact. Set offset=0 for exact JSON pages with UTF-8 " +
+    "SHA-256 receipts; continue at nextOffset until null, requiring the same etag " +
+    "and sha256 across pages. Without offset, reads are bounded previews. " +
+    "Deterministic: no model call, no impactful action.",
   inputSchema: {
     type: "object",
     additionalProperties: false,
@@ -289,6 +342,11 @@ const SQUAD_HISTORY_DESCRIPTOR = {
       path: {
         type: "string",
         description: "For op='read': the artifact path from a list result.",
+      },
+      offset: {
+        type: "integer",
+        minimum: 0,
+        description: "For op='read' only: UTF-16 character offset. Start at 0 for exact bounded pages, then use nextOffset. Preserve content verbatim and verify the assembled UTF-8 sha256 and totalBytes.",
       },
     },
   },
@@ -490,6 +548,7 @@ const INTERNAL_DISPATCH_ERROR =
   "The squad encountered an internal error handling this request.";
 
 function dispatchErrorText(error: unknown): string {
+  if (error instanceof AdvisoryStageFailure) error = error.cause;
   if (error instanceof ModelBackendError) {
     if (error.kind === "input_too_large") {
       return (
@@ -504,13 +563,49 @@ function dispatchErrorText(error: unknown): string {
       );
     }
     if (error.kind === "content_policy") {
-      return (
-        "The configured model rejected part of the supplied request context under " +
-        "its content policy. Remove or summarize the flagged material and retry."
-      );
+      return responsibleAiMessage(responsibleAiBlocker(error));
     }
   }
   return INTERNAL_DISPATCH_ERROR;
+}
+
+function dispatchErrorResult(error: unknown): Record<string, unknown> {
+  const cause = error instanceof AdvisoryStageFailure ? error.cause : error;
+  if (cause instanceof ModelBackendError && cause.kind === "content_policy") {
+    const blocker = responsibleAiBlocker(
+      cause,
+      error instanceof AdvisoryStageFailure ? error.failedStage : "unknown",
+      error instanceof AdvisoryStageFailure ? error.runId : undefined,
+    );
+    return {
+      isError: true,
+      content: [{ type: "text", text: responsibleAiMessage(blocker) }],
+      structuredContent: {
+        outcome: "denied", reason: "model_backend_content_policy",
+        ...(blocker.runId ? { runId: blocker.runId } : {}),
+        responsibleAi: blocker,
+      },
+    };
+  }
+  const modelFailure = cause instanceof ModelBackendError
+    ? modelFailureDiagnostics(cause, error instanceof AdvisoryStageFailure ? error.failedStage : "unknown",
+      error instanceof AdvisoryStageFailure ? error.runId : undefined)
+    : undefined;
+  if (modelFailure) {
+    const receipt = {
+      outcome: "denied", reason: `model_backend_${modelFailure.kind}`,
+      ...(modelFailure.runId ? { runId: modelFailure.runId } : {}), modelFailure,
+    };
+    return {
+      isError: true,
+      content: [{ type: "text", text: [
+        ...(modelFailure.kind === "input_too_large" || modelFailure.kind === "output_limit" ? [dispatchErrorText(error)] : []),
+        modelFailureMessage(modelFailure), "## machine-readable", "```json", JSON.stringify(receipt, null, 2), "```",
+      ].join("\n\n") }],
+      structuredContent: receipt,
+    };
+  }
+  return { isError: true, content: [{ type: "text", text: dispatchErrorText(error) }] };
 }
 
 function asJsonRpc(body: unknown): JsonRpcRequest | undefined {
@@ -563,6 +658,8 @@ export interface HttpMcpHandlerDeps {
   businessToolsExposed?: boolean;
   /** RFC 9728 metadata URL advertised on authentication failures. */
   oauthResourceMetadataUrl?: string;
+  /** Instance readiness served at `GET /readyz`; absent = ready whenever the process serves. */
+  readiness?: ReadinessProbe;
 }
 
 export class HttpMcpHandler {
@@ -577,6 +674,7 @@ export class HttpMcpHandler {
   private readonly memoryStore?: SquadMemoryStore;
   private readonly businessToolsExposed: boolean;
   private readonly oauthResourceMetadataUrl?: string;
+  readonly readiness?: ReadinessProbe;
   private readonly projectContexts?: ProjectContextBridge;
   /**
    * The named-destination view of {@link memoryStore}, present only when the
@@ -610,6 +708,7 @@ export class HttpMcpHandler {
     this.memoryStore = deps.memoryStore;
     this.businessToolsExposed = deps.businessToolsExposed ?? false;
     this.oauthResourceMetadataUrl = deps.oauthResourceMetadataUrl;
+    this.readiness = deps.readiness;
     this.projectContexts = deps.memoryStore
       ? new ProjectContextBridge(deps.memoryStore, deps.logger)
       : undefined;
@@ -660,6 +759,7 @@ export class HttpMcpHandler {
           request.project,
           request.projectContext,
         );
+    if (acknowledgement) request.project = acknowledgement.project;
     return { acknowledgement, acceptedAt };
   }
 
@@ -771,6 +871,25 @@ export class HttpMcpHandler {
       return this.handleAdminApprove(req, origin, cors);
     }
 
+    // Platform probes. Unauthenticated, GET only, and booleans only: reasons are
+    // logged, never returned, so the endpoint discloses no configuration.
+    if (req.path === "/healthz" || req.path === "/readyz") {
+      const headers = { "content-type": "application/json", "cache-control": "no-store" };
+      if (req.method !== "GET") return { status: 405, headers: { ...headers, allow: "GET" }, body: { error: "method_not_allowed" } };
+      if (req.path === "/healthz") return { status: 200, headers, body: { status: "ok" } };
+      const report = this.readiness ? await this.readiness.check().catch((error: unknown) => ({
+        ready: false, checks: { readiness: { ok: false, reason: error instanceof Error ? error.message : String(error) } },
+      })) : { ready: true, checks: {} };
+      if (!report.ready) {
+        this.logger.warn("instance not ready", Object.fromEntries(Object.entries(report.checks).map(([name, check]) => [name, check.reason])));
+      }
+      return {
+        status: report.ready ? 200 : 503,
+        headers,
+        body: { ready: report.ready, checks: Object.fromEntries(Object.entries(report.checks).map(([name, check]) => [name, check.ok])) },
+      };
+    }
+
     if (req.path !== "/mcp") {
       return { status: 404, headers: { "content-type": "application/json" }, body: { error: "not_found" } };
     }
@@ -875,7 +994,7 @@ export class HttpMcpHandler {
       case "tools/list": {
         const tools = [
           ...this.router.listToolDescriptors().filter((descriptor) => this.isExposed(descriptor.name)),
-          ...(this.pipelineExposed ? [SQUAD_STATUS_DESCRIPTOR] : []),
+          ...(this.pipelineExposed ? [SQUAD_STATUS_DESCRIPTOR, SQUAD_APPROVE_DESCRIPTOR, SQUAD_RESPOND_DESCRIPTOR] : []),
           ...(this.renderService ? [SQUAD_RENDER_PPTX_DESCRIPTOR] : []),
           ...(this.memoryBrokerEnabled
             ? [
@@ -925,9 +1044,9 @@ export class HttpMcpHandler {
    * approval channel and the keystone that makes a deployed held `squad_run`
    * releasable. Security posture:
    *
-   *   * SEC-6 — off the model/caller surface. It is not an MCP tool, not listed in
-   *     tools/list, and not in the connector manifest; no `request`/`context` or
-   *     model output can reach it. Only served when the operator enabled the gated
+   *   * The HTTP operator alternative to the separately authorized squad_approve
+   *     MCP action; no ordinary `request`/`context` can release a gate.
+   *     Only served when the operator enabled the gated
    *     pipeline (`pipelineExposed`); otherwise it 404s (the route is not revealed).
    *   * SEC-1 — authenticated (no anonymous release); SEC-8 — strict Origin
    *     allow-list. It requires NO MCP session (an operator action, not a caller
@@ -1156,7 +1275,7 @@ export class HttpMcpHandler {
       // Shape-check `project` (a single partition segment) and `path` (the SEC-4
       // traversal guard) BEFORE the store — a bad value never reaches a foreign
       // partition or the filesystem.
-      if (!MEMORY_PROJECT_PATTERN.test(project)) {
+      if (!MEMORY_PROJECT_PATTERN.test(project) || isProjectContextMetadata(project)) {
         return {
           status: 200,
           headers: baseHeaders,
@@ -1194,7 +1313,7 @@ export class HttpMcpHandler {
           // marked failed (not a conflict) and never aborts the rest of the batch.
           if (
             !isSafeMemoryPath(itemPath) ||
-            itemPath === PROJECT_CONTEXT_REGISTRY_PATH ||
+            isProjectContextMetadata(project, itemPath) ||
             content === undefined
           ) {
             results.push({ path: itemPath, ok: false });
@@ -1233,6 +1352,21 @@ export class HttpMcpHandler {
         }
         const op = typeof record.op === "string" ? record.op : "index";
         try {
+          if (record.offset !== undefined &&
+            (op !== "read" || typeof record.offset !== "number" ||
+              !Number.isSafeInteger(record.offset) || record.offset < 0)) {
+            throw new HistoryReadRangeError();
+          }
+          if (op === "read" && typeof record.offset === "number") {
+            const page = await this.history.readPage(auth.tenantId, project, path, record.offset);
+            return {
+              status: 200,
+              headers: baseHeaders,
+              body: page
+                ? rpcResult(message.id, structuredToolResult({ project, ...page }))
+                : rpcResult(message.id, structuredToolResult({ project, path, found: false })),
+            };
+          }
           if (op === "read") {
             const artifact = await this.history.read(auth.tenantId, project, path);
             return {
@@ -1284,7 +1418,9 @@ export class HttpMcpHandler {
           return {
             status: 200,
             headers: baseHeaders,
-            body: rpcError(message.id, -32602, `${name} rejected the request (check 'path'/'prefix').`),
+            body: rpcError(message.id, -32602, error instanceof HistoryReadRangeError
+              ? error.message
+              : `${name} rejected the request (check 'path'/'prefix').`),
           };
         }
       }
@@ -1296,7 +1432,7 @@ export class HttpMcpHandler {
           body: rpcError(message.id, -32602, `${name} requires a safe 'path' (no traversal).`),
         };
       }
-      if (path === PROJECT_CONTEXT_REGISTRY_PATH) {
+      if (isProjectContextMetadata(project, path)) {
         return {
           status: 200,
           headers: baseHeaders,
@@ -1508,10 +1644,7 @@ export class HttpMcpHandler {
         return {
           status: 200,
           headers: baseHeaders,
-          body: rpcResult(message.id, {
-            isError: true,
-            content: [{ type: "text", text: dispatchErrorText(error) }],
-          }),
+          body: rpcResult(message.id, dispatchErrorResult(error)),
         };
       }
     }
@@ -1564,6 +1697,175 @@ export class HttpMcpHandler {
       }
     }
 
+    if (name === SQUAD_APPROVE_TOOL && this.pipelineExposed) {
+      try {
+        this.authenticator.authorizeApproval(auth);
+      } catch (error) {
+        if (error instanceof AuthError) {
+          return { status: error.status, headers: baseHeaders, body: { error: error.reason } };
+        }
+        throw error;
+      }
+      const record = args && typeof args === "object" && !Array.isArray(args)
+        ? args as Record<string, unknown> : undefined;
+      if (
+        !record ||
+        Object.keys(record).some((key) => !["runId", "decision", "projectId", "decisionId"].includes(key)) ||
+        typeof record.runId !== "string" || !isValidRunId(record.runId) ||
+        record.decision !== "approve" ||
+        (record.projectId !== undefined &&
+          (typeof record.projectId !== "string" || !isValidRunId(record.projectId))) ||
+        (record.decisionId !== undefined &&
+          (typeof record.decisionId !== "string" || !isValidRunId(record.decisionId)))
+      ) {
+        return {
+          status: 200, headers: baseHeaders,
+          body: rpcError(message.id, -32602, "squad_approve requires a UUID runId and decision='approve'; optional projectId and decisionId must be UUIDs."),
+        };
+      }
+      try {
+        const result = await this.embedded.approveRun(record.runId, { auth }, {
+          projectId: typeof record.projectId === "string" ? record.projectId : undefined,
+        });
+        if (!result.ok) {
+          return {
+            status: 200, headers: baseHeaders,
+            body: rpcResult(message.id, {
+              isError: true,
+              content: [{ type: "text", text: `Approval was not accepted (${result.reason}).` }],
+              structuredContent: { approved: false, reason: result.reason },
+            }),
+          };
+        }
+        const receipt = {
+          approved: true,
+          runId: record.runId,
+          approver: result.record.approver,
+          at: result.record.at,
+          ...(record.decisionId ? { decisionId: record.decisionId } : {}),
+        };
+        this.logger.info("MCP operator approval accepted", {
+          tenantId: auth.tenantId, ...receipt,
+        });
+        return {
+          status: 200, headers: baseHeaders,
+          body: rpcResult(message.id, {
+            content: [{ type: "text", text: JSON.stringify(receipt) }],
+            structuredContent: receipt,
+          }),
+        };
+      } catch (error) {
+        this.logger.error("MCP operator approval failed", { error: String(error) });
+        return {
+          status: 200, headers: baseHeaders,
+          body: rpcResult(message.id, {
+            isError: true,
+            content: [{ type: "text", text: "Approval could not be confirmed. Reconcile the same run before retrying." }],
+          }),
+        };
+      }
+    }
+
+    if (name === SQUAD_RESPOND_TOOL && this.pipelineExposed) {
+      try {
+        this.authenticator.authorizeTool(auth, name);
+      } catch (error) {
+        if (error instanceof AuthError) {
+          return { status: error.status, headers: baseHeaders, body: { error: error.reason } };
+        }
+        throw error;
+      }
+      const record = args && typeof args === "object" && !Array.isArray(args)
+        ? args as Record<string, unknown> : undefined;
+      if (
+        !record ||
+        Object.keys(record).some((key) => !["runId", "questionId", "answer", "projectContext"].includes(key)) ||
+        typeof record.runId !== "string" || !isValidRunId(record.runId) ||
+        typeof record.questionId !== "string" || !isValidRunId(record.questionId) ||
+        typeof record.answer !== "string" || !record.answer.trim() || record.answer.length > 16000
+      ) {
+        return {
+          status: 200, headers: baseHeaders,
+          body: rpcError(message.id, -32602, "squad_respond requires UUID runId and questionId, a nonblank answer of at most 16000 characters, and optional projectContext."),
+        };
+      }
+      try {
+        const suppliedContext = parseProjectContextEnvelope(record.projectContext);
+        const persisted = await this.embedded.projectContextForRun(record.runId, { auth });
+        if (!persisted) {
+          return {
+            status: 200, headers: baseHeaders,
+            body: rpcResult(message.id, {
+              isError: true,
+              content: [{ type: "text", text: "Response was not accepted (run_not_found_or_cross_tenant)." }],
+              structuredContent: { accepted: false, runId: record.runId, questionId: record.questionId, reason: "run_not_found_or_cross_tenant" },
+            }),
+          };
+        }
+        if (suppliedContext && (!persisted.projectContext ||
+          persisted.projectContext.projectId.toLowerCase() !== suppliedContext.projectId.toLowerCase())) {
+          throw new ProjectContextError("project_identity_conflict", "The response projectId does not match the run's projectId.");
+        }
+        const effectiveContext = suppliedContext ?? persisted.projectContext;
+        const resolvedProject = this.projectContexts
+          ? await this.projectContexts.resolveProject(auth.tenantId, persisted.project, effectiveContext)
+          : persisted.project;
+        if (persisted.project && resolvedProject && persisted.project !== resolvedProject) {
+          throw new ProjectContextError("project_identity_conflict", "The response project does not match the run's project.");
+        }
+        const contextRequest: CoordinatorRequest = {
+          toolId: name, request: "", project: resolvedProject, projectContext: effectiveContext,
+        };
+        const bridge = await this.negotiateProjectContext(auth, contextRequest);
+        // The coordinator verifies persistence before returning this receipt. No model
+        // work happens here, and caller fields cannot replace the authenticated actor.
+        const result = await this.embedded.respondToHumanInput(
+          record.runId, record.questionId, record.answer, { auth },
+          { projectId: effectiveContext?.projectId },
+        );
+        if (result.accepted && (
+          result.runId !== record.runId || result.questionId !== record.questionId ||
+          result.respondedBy !== auth.subject || typeof result.respondedAt !== "number" ||
+          !Number.isFinite(result.respondedAt) || result.respondedAt <= 0
+        )) {
+          throw new Error("Response receipt could not be confirmed.");
+        }
+        const contextBridge = await this.finalizeProjectContext(
+          auth, bridge.acknowledgement, bridge.acceptedAt, record.runId, name,
+        );
+        const receipt = {
+          accepted: result.accepted,
+          runId: result.runId,
+          questionId: result.questionId,
+          ...(result.reason ? { reason: result.reason } : {}),
+          ...(result.respondedBy ? { respondedBy: result.respondedBy } : {}),
+          ...(result.respondedAt !== undefined ? { respondedAt: result.respondedAt } : {}),
+          ...(contextBridge ? { contextBridge } : {}),
+        };
+        return {
+          status: 200, headers: baseHeaders,
+          body: rpcResult(message.id, {
+            ...(!result.accepted ? { isError: true } : {}),
+            content: [{ type: "text", text: JSON.stringify(receipt) }],
+            structuredContent: receipt,
+          }),
+        };
+      } catch (error) {
+        if (error instanceof ProjectContextError) {
+          return this.projectContextErrorResponse(message, error, baseHeaders);
+        }
+        // Even exception messages may echo the answer; never log their contents.
+        this.logger.error("MCP human response could not be confirmed", { tool: name });
+        return {
+          status: 200, headers: baseHeaders,
+          body: rpcResult(message.id, {
+            isError: true,
+            content: [{ type: "text", text: "Response could not be confirmed. Reconcile the same run before retrying." }],
+          }),
+        };
+      }
+    }
+
     // squad_status is the synthetic poll utility (not a catalog tool). It is
     // tenant-scoped and read/advance-only; it never starts new work of its own.
     // Only served when the operator enabled the pipeline surface (HIGH-1).
@@ -1592,38 +1894,83 @@ export class HttpMcpHandler {
         const suppliedContext = parseProjectContextEnvelope(
           record.projectContext,
         );
-        if (
-          persisted?.project &&
-          suppliedProject &&
-          persisted.project !== suppliedProject
-        ) {
-          throw new ProjectContextError(
-            "project_identity_conflict",
-            "The status poll project does not match the run's project.",
-          );
+        if (!persisted) {
+          const result = await this.embedded.pollRun(runId, { auth });
+          return {
+            status: 200, headers: baseHeaders,
+            body: rpcResult(message.id, renderEmbeddedResult(result)),
+          };
         }
         if (
-          persisted?.projectContext &&
           suppliedContext &&
-          persisted.projectContext.projectId !== suppliedContext.projectId
+          (!persisted.projectContext ||
+            persisted.projectContext.projectId.toLowerCase() !== suppliedContext.projectId.toLowerCase())
         ) {
           throw new ProjectContextError(
             "project_identity_conflict",
             "The status poll projectId does not match the run's projectId.",
           );
         }
+        const effectiveContext = suppliedContext ?? persisted.projectContext;
+        if (suppliedProject && !persisted.project) {
+          throw new ProjectContextError(
+            "project_identity_conflict",
+            "An existing run cannot be attached to a different project.",
+          );
+        }
+        const resolvedProject = this.projectContexts
+          ? await this.projectContexts.resolveProject(
+              auth.tenantId, suppliedProject ?? persisted.project, effectiveContext,
+            )
+          : suppliedProject ?? persisted.project;
+        if (
+          persisted.project &&
+          resolvedProject &&
+          persisted.project !== resolvedProject
+        ) {
+          throw new ProjectContextError(
+            "project_identity_conflict",
+            "The status poll project does not match the run's project.",
+          );
+        }
         const contextRequest: CoordinatorRequest = {
           toolId: name,
           request: "",
-          project: suppliedProject ?? persisted?.project,
-          projectContext: suppliedContext ?? persisted?.projectContext,
+          project: resolvedProject,
+          projectContext: effectiveContext,
         };
-        const bridge = await this.negotiateProjectContext(auth, contextRequest);
+        let bridge: Awaited<ReturnType<HttpMcpHandler["negotiateProjectContext"]>>;
+        try {
+          bridge = await this.negotiateProjectContext(auth, contextRequest);
+        } catch (error) {
+          if (!suppliedContext && error instanceof ProjectContextError &&
+              error.reason === "stale_project_context") {
+            const state = await this.embedded.getRunStatus(runId, { auth });
+            if (state?.status === "failed" || state?.status === "complete") {
+              // A terminal read cannot replay work or acknowledge a newer project checkpoint.
+              const rendered = renderEmbeddedResult(await this.embedded.pollRun(runId, { auth }));
+              return {
+                status: 200, headers: baseHeaders,
+                body: rpcResult(message.id, {
+                  ...rendered,
+                  content: [{
+                    type: "text",
+                    text: [
+                      "Read-only terminal status: the run's saved project checkpoint is older than the current binding. No project checkpoint was acknowledged or advanced; no tracking projection or model work was performed.",
+                      ...rendered.content.map((entry) => entry.text),
+                    ].join("\n\n"),
+                  }],
+                }),
+              };
+            }
+          }
+          throw error;
+        }
         const result = await this.embedded.pollRun(runId, { auth });
         const contextBridge = await this.finalizeProjectContext(
           auth,
           bridge.acknowledgement,
-          bridge.acceptedAt,
+          persisted.createdAt,
           result.runId,
           name,
         );
@@ -1643,10 +1990,7 @@ export class HttpMcpHandler {
         return {
           status: 200,
           headers: baseHeaders,
-          body: rpcResult(message.id, {
-            isError: true,
-            content: [{ type: "text", text: dispatchErrorText(error) }],
-          }),
+          body: rpcResult(message.id, dispatchErrorResult(error)),
         };
       }
     }
@@ -1698,7 +2042,7 @@ export class HttpMcpHandler {
       // Dispatch by tool class:
       //   * squad_run / squad_federate — the gated async ADVISORY pipelines: START
       //     them (returns a held run id); the pipeline proceeds only after
-      //     out-of-band approval, driven by squad_status. Both are catch-all tools
+      //     operator approval, driven by squad_status. Both are catch-all tools
       //     with `gates: true`, so the human gate carries across the boundary
       //     identically; squad_federate additionally persists its federation inputs
       //     (squad / init / promote) so they survive approve -> poll.
@@ -1736,10 +2080,7 @@ export class HttpMcpHandler {
       return {
         status: 200,
         headers: baseHeaders,
-        body: rpcResult(message.id, {
-          isError: true,
-          content: [{ type: "text", text: dispatchErrorText(error) }],
-        }),
+        body: rpcResult(message.id, dispatchErrorResult(error)),
       };
     }
   }

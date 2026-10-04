@@ -81,7 +81,7 @@ jobs:
             echo "::error::Could not resolve a target hve-squad version."
             exit 1
           fi
-          CUR=$(jq -r '.version' host/cast/package-pin.json)
+          CUR=$(jq -r '.version' host/cast-active/package-pin.json)
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "current=$CUR" >> "$GITHUB_OUTPUT"
           if [ "$CUR" = "$V" ]; then
@@ -105,8 +105,8 @@ jobs:
         run: |
           set -euo pipefail
           tmp=$(mktemp)
-          jq --arg v "$TARGET" '.version = $v' host/cast/package-pin.json > "$tmp"
-          mv "$tmp" host/cast/package-pin.json
+          jq --arg v "$TARGET" '.version = $v' host/cast-active/package-pin.json > "$tmp"
+          mv "$tmp" host/cast-active/package-pin.json
           # The snapshot fails when the tag does not declare this version, so a
           # mistyped or moved tag stops here rather than producing a bundle
           # labelled as something it is not.
@@ -151,7 +151,7 @@ jobs:
             --bump "$BUMP" \
             --force \
             --title "pin hve-squad $TARGET" \
-            --body "- **Bumped the bundled cast pin from \`$CURRENT\` to \`$PACKAGE_REPO@$TARGET\`** and refreshed \`host/cast/\` from that release's \`apm.yml\`. This tracks $LEVEL release upstream, so it carries the same level here."
+            --body "- **Bumped the bundled cast pin from \`$CURRENT\` to \`$PACKAGE_REPO@$TARGET\`** and refreshed \`host/cast-active/\` from that release's \`apm.yml\`. This tracks $LEVEL release upstream, so it carries the same level here."
 
       - name: Open the pull request
         if: steps.target.outputs.skip != 'true'
@@ -190,14 +190,14 @@ jobs:
             git checkout -B "$BRANCH" "origin/$BRANCH"
           else
             git checkout -b "$BRANCH"
-            git add host/cast .changes/unreleased generated
+            git add host/cast-active .changes/unreleased generated
             git commit -m "chore(cast): pin ${PACKAGE_REPO}@${TARGET}"
             git push origin "$BRANCH"
           fi
           {
             echo "Tracks \`$PACKAGE_REPO\` \`$CURRENT\` -> \`$TARGET\`."
             echo
-            echo "The bundled cast under \`host/cast/\` was regenerated from that release's \`apm.yml\`, and the generated artifacts were rebuilt."
+            echo "The bundled cast under \`host/cast-active/\` was regenerated from that release's \`apm.yml\`, and the generated artifacts were rebuilt."
             echo
             echo "**Review before merging.** A hve-squad release can rename or retire roster roles; the CI drift checks (\`generate:check\`, \`snapshot:cast:check\`, and the cast-bundle suite) are what catch a catalog left bound to an agent that no longer exists."
             echo

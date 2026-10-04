@@ -25,7 +25,7 @@ ENV NODE_ENV=production
 ENV PORT=3000
 # Copy only what the runtime needs. The embedded engine prefers REAL persona bytes
 # loaded from `/app/.github/agents` (the single-source invariant) and falls back to
-# the paraphrased persona records when the bundle is absent; see host/cast/README.md.
+# the paraphrased persona records when the bundle is absent; see host/cast-active/README.md.
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/tools.catalog.yml ./tools.catalog.yml
@@ -33,8 +33,8 @@ COPY --from=build /app/generated ./generated
 # Bundle the pinned full-cast snapshot at /app/.github so resolveSquadAgentsRoots()
 # resolves REAL persona bytes for every roster agent in the image. The tree is
 # produced reproducibly by `npm run snapshot:cast` and drift-checked by
-# test/cast-bundle.test.ts; see host/cast/README.md for the pinned SHA.
-COPY host/cast/.github ./.github
+# test/cast-bundle.test.ts; see host/cast-active/README.md for the pinned SHA.
+COPY host/cast-active/.github ./.github
 # squad_render_pptx (opt-in via SQUAD_MCP_ENABLE_RENDER_PPTX): the deterministic
 # python-pptx build toolchain. lxml/Pillow/PyYAML come from Alpine prebuilt wheels
 # (no musl compilation); python-pptx is pip-installed. LibreOffice/poppler/Copilot

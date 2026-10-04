@@ -127,16 +127,16 @@ test("SEC-1: original request metadata reaches the configured token verifier", a
   assert.deepEqual(verifier.lastVerificationContext, tokenValidation);
 });
 
-test("SEC-1: with SEVERAL accepted audiences, each is admitted and a fourth is still rejected", async () => {
-  // One deployment can front a Copilot Studio connector and a Cowork Entra SSO
-  // auth config, which mint tokens for different resource identifiers. Accepting
-  // a set must not become "accept anything": the negative case below is the point.
-  const studio = "api://11111111-1111-4111-8111-111111111111";
-  const cowork = "api://cowork-auth-config-id";
+test("SEC-1: same-resource audience aliases are admitted and another resource is rejected", async () => {
+  // One app registration can emit its client id or a registered Application ID
+  // URI. Accepting those aliases must not become "accept anything": the negative
+  // case below is the point.
+  const clientId = "11111111-1111-4111-8111-111111111111";
+  const appIdUri = "api://11111111-1111-4111-8111-111111111111";
   const verifier = new FakeJwtVerifier();
-  const { handler, backend } = buildHarness({ verifier, audiences: [studio, cowork] });
+  const { handler, backend } = buildHarness({ verifier, audiences: [clientId, appIdUri] });
 
-  for (const audience of [studio, cowork]) {
+  for (const audience of [clientId, appIdUri]) {
     verifier.register({
       token: `token-for-${audience}`,
       tenantId: TENANT,
@@ -371,8 +371,8 @@ test("PROD-1: tools/list advertises the remotely-exposed tools over HTTP", async
   const tools = (res.body as { result?: { tools?: { name: string }[] } }).result?.tools ?? [];
   assert.deepEqual(
     tools.map((tool) => tool.name).sort(),
-    ["squad_architect", "squad_federate", "squad_plan", "squad_research", "squad_review", "squad_run", "squad_status"],
-    "the remote surface lists the advisory tools plus the gated squad_run / squad_federate and squad_status",
+    ["squad_architect", "squad_federate", "squad_plan", "squad_research", "squad_respond", "squad_review", "squad_run", "squad_status"],
+    "the remote surface lists advisory tools, gated runs, status, and Run-scoped human responses",
   );
 });
 

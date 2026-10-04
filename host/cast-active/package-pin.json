@@ -1,0 +1,5 @@
+{
+  "package": "Peter-N91/hve-squad",
+  "version": "0.17.0",
+  "note": "The active Cowork runtime pin resolves Peter-N91/hve-squad v0.17.0 from its immutable release manifest. Only agents and instructions are shipped. Agent Skill dependencies fail closed until the native runtime is deliberately updated."
+}

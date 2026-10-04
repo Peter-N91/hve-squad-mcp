@@ -107,6 +107,7 @@ export class ToolRouter {
       mode: optionalString(record.mode),
       discovery: optionalString(record.discovery),
       context: optionalString(record.context),
+      ...(record.review === undefined ? {} : { review: record.review as CoordinatorRequest["review"] }),
       project: optionalString(record.project),
       projectContext: parseProjectContextEnvelope(record.projectContext),
       squad: optionalString(record.squad),

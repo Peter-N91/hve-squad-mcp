@@ -1,10 +1,10 @@
 /**
  * Operator config — SQUAD_MCP_AUDIENCE parsing (SEC-1, RFC 8707).
  *
- * The value is comma-separated so one deployment can serve several front doors,
- * each minting tokens for its own resource identifier. Parsing is security
- * relevant in one specific way: a blank entry must never survive, because an
- * empty accepted audience is one a malformed token could appear to satisfy.
+ * The value is comma-separated to support registered aliases for one protected
+ * resource. Parsing is security relevant in one specific way: a blank entry must
+ * never survive, because an empty accepted audience is one a malformed token
+ * could appear to satisfy.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -23,18 +23,18 @@ test("a single audience still parses to exactly one entry (back-compat)", () => 
   assert.deepEqual(audiencesFor("api://squad"), ["api://squad"]);
 });
 
-test("several audiences parse in order, trimmed", () => {
-  assert.deepEqual(audiencesFor("api://squad,  api://cowork-config  ,api://third"), [
+test("same-resource audience aliases parse in order, trimmed", () => {
+  assert.deepEqual(audiencesFor("squad-client-id,  api://squad  ,api://squad/custom"), [
+    "squad-client-id",
     "api://squad",
-    "api://cowork-config",
-    "api://third",
+    "api://squad/custom",
   ]);
 });
 
 test("blank entries from stray commas are dropped, never kept as an empty audience", () => {
-  assert.deepEqual(audiencesFor("api://squad,,  ,api://cowork-config,"), [
+  assert.deepEqual(audiencesFor("squad-client-id,,  ,api://squad,"), [
+    "squad-client-id",
     "api://squad",
-    "api://cowork-config",
   ]);
 });
 

@@ -37,6 +37,13 @@ export interface WorkerTickResult {
 
 const DEFAULT_BATCH_SIZE = 10;
 
+// The claim outlives both active execution and the 35-minute ACA Job timeout.
+export const WORKER_EXECUTION_OPTIONS = {
+  driveOnPoll: false,
+  stageDeadlineMs: 30 * 60 * 1000,
+  leaseMs: 40 * 60 * 1000,
+} as const;
+
 export class RunWorker {
   private readonly coordinator: EmbeddedCoordinator;
   private readonly logger?: RedactingLogger;

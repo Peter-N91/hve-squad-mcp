@@ -85,15 +85,15 @@ The tool surface is **additive-only** with respect to the squad: the generators 
 
 ## Moving the cast pin
 
-`host/cast/.github/` is a SHA-pinned snapshot of the deployed cast, resolved reproducibly from public sources. **Do not hand-edit the copied files.** To move it:
+`host/cast-active/.github/` is the active SHA-pinned snapshot of the deployed v0.17 agent and instruction cast, resolved reproducibly from public sources. **Do not hand-edit the copied files.** The earlier `host/cast/` tree is retained as legacy local work and is not used by the runtime. To move the active pin:
 
 ```bash
-# edit host/cast/package-pin.json to the new hve-squad version, then
+# edit host/cast-active/package-pin.json to the new hve-squad version, then
 npm run snapshot:cast
 npm run snapshot:cast:check
 ```
 
-`host/cast/package-pin.json` and `host/cast/manifest.json` move together, in the same commit. The `bump-on-package-release` workflow opens this pull request for you when a new hve-squad release appears; it deliberately does **not** auto-merge, because a pin move can retire a role the catalog still binds.
+`host/cast-active/package-pin.json` and `host/cast-active/manifest.json` move together, in the same commit. The runtime consumes only agents and instructions; if a future upstream release declares Agent Skill dependencies, the snapshot check fails until the native runtime is deliberately updated. The `bump-on-package-release` workflow opens this pull request for you when a new hve-squad release appears; it deliberately does **not** auto-merge, because a pin move can retire a role the catalog still binds.
 
 ## Security expectations
 

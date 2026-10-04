@@ -12,6 +12,7 @@ test("model API keeps legacy defaults for existing operators", () => {
   const config = loadOperatorConfig(BASE as NodeJS.ProcessEnv);
   assert.equal(config.modelApi, "chat-completions");
   assert.equal(config.modelApiVersion, "2024-10-21");
+  assert.equal(config.modelChatProfile, "standard");
   assert.equal(config.modelMaxOutputTokens, 1_500);
   assert.equal(config.modelReasoningEffort, undefined);
   assert.equal(config.modelVerbosity, undefined);
@@ -63,6 +64,40 @@ test("model API and output budget fail fast when invalid", () => {
         ...BASE,
         SQUAD_MCP_MODEL_REASONING_EFFORT: "medium",
       } as NodeJS.ProcessEnv),
-    /require SQUAD_MCP_MODEL_API=responses/,
+    /SQUAD_MCP_MODEL_CHAT_PROFILE/,
   );
+});
+
+test("operator-selected Chat profiles enable compatible reasoning without deployment-name inference", () => {
+  for (const profile of ["reasoning", "gpt-5.6"]) {
+    const config = loadOperatorConfig({
+      ...BASE,
+      SQUAD_MCP_MODEL_DEPLOYMENT: "arbitrary-production-alias",
+      SQUAD_MCP_MODEL_CHAT_PROFILE: profile,
+      SQUAD_MCP_MODEL_REASONING_EFFORT: "medium",
+    });
+    assert.equal(config.modelChatProfile, profile);
+    assert.equal(config.modelReasoningEffort, "medium");
+  }
+  assert.equal(loadOperatorConfig({
+    ...BASE, SQUAD_MCP_MODEL_DEPLOYMENT: "gpt-5.6-sol",
+  }).modelChatProfile, "standard");
+});
+
+test("incompatible Chat configuration fails before startup without changing Responses configuration", () => {
+  for (const settings of [
+    { SQUAD_MCP_MODEL_CHAT_PROFILE: "guess-from-alias" },
+    { SQUAD_MCP_MODEL_CHAT_PROFILE: "reasoning-no-effort", SQUAD_MCP_MODEL_REASONING_EFFORT: "medium" },
+    { SQUAD_MCP_MODEL_CHAT_PROFILE: "gpt-5.6", SQUAD_MCP_MODEL_REASONING_EFFORT: "minimal" },
+    { SQUAD_MCP_MODEL_CHAT_PROFILE: "gpt-5.6", SQUAD_MCP_MODEL_REASONING_EFFORT: "max" },
+    { SQUAD_MCP_MODEL_VERBOSITY: "medium" },
+  ]) {
+    assert.throws(() => loadOperatorConfig({ ...BASE, ...settings }), /SQUAD_MCP_MODEL_/);
+  }
+  const config = loadOperatorConfig({
+    ...BASE, SQUAD_MCP_MODEL_API: "responses",
+    SQUAD_MCP_MODEL_REASONING_EFFORT: "max", SQUAD_MCP_MODEL_VERBOSITY: "medium",
+  });
+  assert.equal(config.modelReasoningEffort, "max");
+  assert.equal(config.modelChatProfile, "standard");
 });

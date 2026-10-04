@@ -11,7 +11,9 @@ import {
 } from "../src/auth/simple-oauth.js";
 import type { OAuthGrantStore } from "../src/auth/oauth-store.js";
 import { RedactingLogger } from "../src/observability/logger.js";
+import { prepareReadiness } from "../src/server-http.js";
 import type { HttpRequestLike, HttpResponseLike } from "../src/transports/http-core.js";
+import type { ReadinessProbe } from "../src/transports/readiness.js";
 
 const TENANT = "11111111-1111-4111-8111-111111111111";
 const ISSUER = "https://squad.example";
@@ -488,4 +490,28 @@ test("OAuth storage outages return a contained 503 instead of rejecting the HTTP
     error: "temporarily_unavailable",
     error_description: "The authorization service is temporarily unavailable.",
   });
+});
+
+test("with simple OAuth enabled, platform probes reach the MCP handler and startup still checks the Copilot identity", async () => {
+  const logger = new RedactingLogger({ sink: () => undefined });
+  const authority = new SimpleOAuthAuthority({ config: config(), store: new InMemoryOAuthGrantStore(), logger });
+  let ready = true;
+  const probe: ReadinessProbe = {
+    prepare: async () => ({ ready: false, checks: { copilotIdentity: { ok: false, reason: "Bad credentials", fatal: true } } }),
+    check: async () => ({ ready, checks: { copilotIdentity: { ok: ready, reason: "x" } } }),
+  };
+  const seen: string[] = [];
+  const wrapper = new SimpleOAuthHttpHandler(authority, {
+    readiness: probe,
+    handle: async (req) => {
+      seen.push(req.path);
+      return { status: ready ? 200 : 503, headers: {}, body: { ready } };
+    },
+  }, logger);
+  assert.equal(wrapper.readiness, probe, "The wrapper exposes the MCP handler's readiness probe.");
+  assert.equal((await wrapper.handle(request("GET", "/readyz"))).status, 200);
+  ready = false;
+  assert.equal((await wrapper.handle(request("GET", "/readyz"))).status, 503);
+  assert.deepEqual(seen, ["/readyz", "/readyz"]);
+  await assert.rejects(prepareReadiness(wrapper, logger), /Refusing to start: copilotIdentity: Bad credentials/);
 });
