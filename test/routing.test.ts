@@ -11,6 +11,47 @@ import {
   type RoutingTables,
 } from "../src/engine/routing.js";
 import type { ProfileTables } from "../src/engine/profiles.js";
+import { planAdvisoryStages, runAdvisoryPipeline } from "../src/engine/advisory-pipeline.js";
+
+test("BRD authoring selects the focused roster and actual BRD alternate without unrelated fan-out", () => {
+  for (const profile of [undefined, "brd", "product", "full"]) {
+    const plan = route("Produce a business requirements document from the supplied brief.", { profile });
+    assert.deepEqual(plan.fanOut.map((stage) => stage.agentName), ["BRD Builder"]);
+    assert.deepEqual(plan.missingRoles, []);
+    const stages = planAdvisoryStages(plan);
+    assert.ok(stages.some((stage) => stage.role === "BRD Builder"));
+    assert.ok(!stages.some((stage) => stage.backlog || stage.role === "Functional Planner"));
+  }
+});
+
+test("an explicitly selected roster without an analyst fails before any model call", async () => {
+  const result = await runAdvisoryPipeline(
+    { toolId: "squad_run", request: "Produce a BRD.", profile: "default" },
+    { backend: { id: "never", complete: async () => { throw new Error("Must not call model"); } } },
+    { mode: "autopilot" },
+  );
+  assert.equal(result.reason, "required_deliverable_role_unavailable");
+  assert.equal(result.outcome, "halted");
+});
+
+test("BRD research alone does not request authoring or change the default roster", () => {
+  const plan = route("research BRD conventions");
+  assert.equal(plan.profile, "default");
+  assert.equal(plan.requiredAgent, undefined);
+  assert.deepEqual(plan.fanOut, []);
+});
+
+test("the explicit BRD profile always schedules its deliverable, even without authoring keywords", () => {
+  for (const request of ["Continue from the supplied brief.", "Finish the document.", "Research the supplied brief."]) {
+    const plan = route(request, { profile: "brd", mode: "autonomous" });
+    assert.equal(plan.requiredAgent, "BRD Builder");
+    assert.equal(plan.focusedDeliverable, true);
+    assert.deepEqual(plan.fanOut.map((stage) => stage.agentName), ["BRD Builder"]);
+    assert.deepEqual(planAdvisoryStages(plan).map((stage) => stage.role), [
+      "Squad Researcher", "Squad Lead", "BRD Builder", "Squad Reviewer",
+    ]);
+  }
+});
 
 // ---------------------------------------------------------------------------
 // A small deterministic fixture of the routing + roster tables so the pure

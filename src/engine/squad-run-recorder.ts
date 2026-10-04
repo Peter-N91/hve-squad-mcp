@@ -19,6 +19,7 @@ import type { CoordinatorRequest } from "./coordinator-engine.js";
 import {
   defaultProfileTables,
   deliverableRootFor,
+  profileForRequest,
   resolveProfile,
   type ProfileTables,
   type ResolvedProfile,
@@ -76,10 +77,14 @@ export interface RecordedStage {
   agentName: string;
   /** The stage's finished text. */
   artifact: string;
-  /** Measured token counts and realized cost, when the backend reported them. */
+  /** Measured token counts and configured cost estimate, when available. */
   usage?: BackendUsage;
   /** The backend that produced the completion (the model attribution). */
   backendId?: string;
+  /** Provider-resolved model identifier, when available. */
+  model?: string;
+  /** Operator-selected deployment identifier, when available. */
+  deployment?: string;
 }
 
 export class SquadRunRecorder {
@@ -114,7 +119,7 @@ export class SquadRunRecorder {
     project: string,
     request: CoordinatorRequest,
   ): Promise<{ profile: ResolvedProfile; historyBlock?: string }> {
-    const requested = resolveProfile(request.profile, this.tables);
+    const requested = resolveProfile(profileForRequest(request.profile, request.request), this.tables);
     const opts = this.optionsFor(request);
     try {
       const seeded = await this.ledger.seed(tenantId, project, requested, this.tables, opts);
@@ -168,10 +173,20 @@ export class SquadRunRecorder {
                 renderConsumptionBlock({
                   role: roleKey ?? "unmapped",
                   agentName: stage.agentName,
-                  model: stage.backendId ?? "unknown",
-                  inputTokens: stage.usage.inputTokens ?? 0,
-                  outputTokens: stage.usage.outputTokens ?? 0,
-                  costUsd: stage.usage.estimatedCostUsd ?? 0,
+                  model: stage.model ?? stage.deployment ?? stage.backendId ?? "unknown",
+                  completionCount: stage.usage.completionCount,
+                  inputTokens: stage.usage.inputTokens,
+                  outputTokens: stage.usage.outputTokens,
+                  reasoningTokens: stage.usage.reasoningTokens,
+                  cacheReadTokens: stage.usage.cacheReadTokens,
+                  cacheWriteTokens: stage.usage.cacheWriteTokens,
+                  unreportedInputCompletions: stage.usage.unreportedInputCompletions,
+                  unreportedOutputCompletions: stage.usage.unreportedOutputCompletions,
+                  costUsd: stage.usage.estimatedCostUsd,
+                  pricedCompletionCount: stage.usage.pricedCompletionCount,
+                  incompletelyPricedCompletionCount: stage.usage.incompletelyPricedCompletionCount,
+                  unpricedCompletionCount: stage.usage.unpricedCompletionCount,
+                  costStatus: stage.usage.costStatus,
                 }),
               ]
             : []),

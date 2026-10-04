@@ -33,6 +33,8 @@ export interface PersonaRecord {
   applyTo: string[];
   /** Parsed `tools` frontmatter when present. */
   tools?: string[];
+  /** Trusted charter allow-list for bounded server-side delegation. */
+  agents?: string[];
 }
 
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
@@ -51,6 +53,7 @@ interface ParsedPersona {
   name?: string;
   applyTo: string[];
   tools?: string[];
+  agents?: string[];
   body: string;
 }
 
@@ -67,10 +70,12 @@ function parseAgentPersona(text: string): ParsedPersona | undefined {
   }
   const name = typeof frontmatter.name === "string" ? frontmatter.name.trim() : undefined;
   const tools = normalizeList(frontmatter.tools);
+  const agents = normalizeList(frontmatter.agents);
   return {
     name,
     applyTo: normalizeList(frontmatter.applyTo),
     tools: tools.length > 0 ? tools : undefined,
+    agents: frontmatter.agents === undefined ? undefined : agents,
     body: match[2].trim(),
   };
 }
@@ -124,11 +129,40 @@ export function loadPersonaForRole(
           charter: parsed.body,
           applyTo: parsed.applyTo,
           tools: parsed.tools,
+          agents: parsed.agents,
         };
       }
     }
   }
   return undefined;
+}
+
+export function listPersonaNames(roots: string[] = resolveSquadAgentsRoots()): string[] {
+  const names = new Set<string>();
+  for (const root of roots) {
+    const files: string[] = [];
+    collectAgentFiles(root, files);
+    for (const file of files) {
+      const parsed = parseAgentPersona(readFileSync(file, "utf8"));
+      if (parsed?.name && parsed.body) names.add(parsed.name);
+    }
+  }
+  return [...names].sort();
+}
+
+/**
+ * Bundled agents a persona's charter allows it to delegate to: those listed in
+ * its `agents:` frontmatter (`*` for any), or every bundled agent when it
+ * declares a generic agent tool and no list. Never itself, an ancestor, or the
+ * RPI Researcher (which serves only as a read-only research lane).
+ */
+export function delegableAgentNames(persona: PersonaRecord, bundled: readonly string[], ancestors: readonly string[] = [persona.role]): string[] {
+  const declared = persona.agents;
+  const genericAgentTool = persona.tools?.some((name) => /^(?:agent(?:\/|$)|runSubagent$)/.test(name));
+  if (!declared && !genericAgentTool) return [];
+  return bundled.filter((name) =>
+    name !== "RPI Researcher" && name !== persona.role && !ancestors.includes(name) &&
+    (!declared || declared.includes("*") || declared.includes(name)));
 }
 
 /**

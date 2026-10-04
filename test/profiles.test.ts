@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { loadCatalog } from "../src/catalog/catalog.js";
 import {
   DEFAULT_PROFILE,
   DELIVERABLE_PRODUCING_ROLES,
@@ -16,12 +17,26 @@ import { loadRosterMap, route } from "../src/engine/routing.js";
 
 const TABLES = loadProfileTables();
 
+test("every public profile selector advertises the focused BRD profile", () => {
+  const selectors = loadCatalog().tools.filter((tool) => tool.input.properties?.profile);
+  assert.ok(selectors.some((tool) => tool.id === "squad_run"));
+  for (const tool of selectors) {
+    const profile = tool.input.properties?.profile;
+    assert.ok(typeof profile === "object" && profile !== null && "enum" in profile);
+    assert.ok(Array.isArray(profile.enum) && profile.enum.includes("brd"), tool.id);
+    for (const name of profile.enum) {
+      assert.ok(TABLES.profiles.has(name), `${tool.id} advertises unknown profile ${name}`);
+    }
+  }
+});
+
 test("the deployed roster yields every documented profile", () => {
   const names = [...TABLES.profiles.keys()].sort();
   assert.deepEqual(names, [
     "accessibility",
     "architecture",
     "azure",
+    "brd",
     "compliance",
     "default",
     "design",

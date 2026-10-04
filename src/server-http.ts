@@ -18,7 +18,18 @@ import { ToolRouter } from "./router/router.js";
 import { loadOperatorConfig, type OperatorConfig } from "./config/operator-config.js";
 import { EntraAuthenticator } from "./auth/entra.js";
 import { createJoseVerifier } from "./auth/jose-verifier.js";
-import { EmbeddedCoordinator } from "./engine/embedded.js";
+import { EmbeddedCoordinator, type EmbeddedCoordinatorDeps } from "./engine/embedded.js";
+import { CopilotStageExecutor } from "./engine/copilot/copilot-stage-executor.js";
+import { lazyCopilotSdkClient, type CopilotSdkClient } from "./engine/copilot/copilot-sdk-client.js";
+import {
+  CommandCredentialSource,
+  CopilotCredentials,
+  EnvCredentialSource,
+  FileCredentialSource,
+  type GitHubCredentialSource,
+} from "./engine/copilot/copilot-credentials.js";
+import { CopilotReadiness } from "./engine/copilot/copilot-readiness.js";
+import { FileCopilotSessionStateStore } from "./engine/copilot/session-state-store.js";
 import { EphemeralWorkspaceManager } from "./engine/workspace.js";
 import { GateKeeper, RunStoreApprovalChannel, TenantQuotaTracker, type HumanApprovalChannel } from "./engine/gates.js";
 import { DurableRunStateStore } from "./engine/durable-run-state.js";
@@ -37,7 +48,7 @@ import {
 import { AesGcmFieldCipher, NullFieldCipher, type FieldCipher } from "./engine/field-cipher.js";
 import type { RunStateStore } from "./engine/run-state.js";
 import type { SquadMemoryStore } from "./engine/squad-memory-state.js";
-import { AzureOpenAIBackend, type ModelPricing } from "./engine/backends/azure-openai.js";
+import { AzureOpenAIBackend, modelPricingFromEnvironment } from "./engine/backends/azure-openai.js";
 import { AzureBlobArtifactStore } from "./engine/backends/azure-blob-artifact-store.js";
 import { PythonPptxRenderBackend } from "./engine/render/python-pptx-render-backend.js";
 import { PptxRenderService } from "./engine/render/pptx-render-service.js";
@@ -58,15 +69,6 @@ const STORAGE_SCOPE = "https://storage.azure.com/.default";
  * write grant, so the server can reach ONLY the library the operator designated.
  */
 const GRAPH_SCOPE = "https://graph.microsoft.com/.default";
-
-function readPricing(env: NodeJS.ProcessEnv): ModelPricing | undefined {
-  const input = Number(env.SQUAD_MCP_PRICE_INPUT_PER_MTOK);
-  const output = Number(env.SQUAD_MCP_PRICE_OUTPUT_PER_MTOK);
-  if (Number.isFinite(input) && Number.isFinite(output)) {
-    return { inputPerMTokUsd: input, outputPerMTokUsd: output };
-  }
-  return undefined;
-}
 
 /** The cross-replica run-state + approval stack (undefined when the pipeline is off). */
 export interface RunStateStack {
@@ -96,6 +98,13 @@ export function buildRunStateStack(
     config.encryptionKeyBase64.length > 0
       ? AesGcmFieldCipher.fromBase64Key(config.encryptionKeyBase64)
       : new NullFieldCipher();
+  const runBlobs = config.runStateBackend === "table" && config.memoryOverflowEnabled
+    ? new AzureBlobArtifactStore({
+        account: config.storageAccount,
+        container: config.memoryOverflowContainer,
+        getAccessToken: createManagedIdentityTokenProvider(STORAGE_SCOPE),
+        logger,
+      }) : undefined;
   const runStateStore: RunStateStore =
     config.runStateBackend === "table"
       ? new AzureTableRunStateStore({
@@ -104,6 +113,10 @@ export function buildRunStateStack(
           getAccessToken: createManagedIdentityTokenProvider(STORAGE_SCOPE),
           cipher,
           logger,
+          blob: runBlobs ? {
+            put: (path, bytes) => runBlobs.putObject(path, bytes),
+            get: (path) => runBlobs.getObject(path),
+          } : undefined,
         })
       : new DurableRunStateStore({ baseDir: config.runStateDir, cipher });
   // Store-backed approval → cross-replica release (an approval on any replica is
@@ -115,6 +128,76 @@ export function buildRunStateStack(
 /** The shared-state memory broker stack (undefined when the feature is off). */
 export interface SquadMemoryStack {
   memoryStore: SquadMemoryStore;
+}
+
+/** How long a driving status poll waits for its run before answering `run_already_in_flight`. */
+export const POLL_DRIVE_WAIT_MS = 30_000;
+
+/** The opt-in Copilot runtime: stage executor factory plus the readiness it depends on. */
+export interface CopilotRuntime {
+  stageExecutorFactory: NonNullable<EmbeddedCoordinatorDeps["stageExecutorFactory"]>;
+  credentials: CopilotCredentials;
+  readiness: CopilotReadiness;
+}
+
+/** The configured source of the server-owned GitHub identity. */
+export function buildCopilotCredentialSource(config: OperatorConfig, env: NodeJS.ProcessEnv = process.env): GitHubCredentialSource {
+  const identity = config.copilot.identity;
+  if (identity.kind === "file") return new FileCredentialSource(identity.path);
+  if (identity.kind === "command") return new CommandCredentialSource(identity.argv);
+  return new EnvCredentialSource(identity.variable, env);
+}
+
+/**
+ * Opt-in Copilot SDK stage executor (`SQUAD_MCP_STAGE_EXECUTOR=copilot`).
+ * Returns `undefined` for the default built-in runtime, leaving the engine's
+ * own executor in place.
+ */
+export function buildCopilotRuntime(
+  config: OperatorConfig,
+  memoryStack: SquadMemoryStack | undefined,
+  options: { env?: NodeJS.ProcessEnv; logger?: RedactingLogger; client?: CopilotSdkClient } = {},
+): CopilotRuntime | undefined {
+  if (config.stageExecutor !== "copilot") {
+    return undefined;
+  }
+  if (!memoryStack) {
+    throw new Error("SQUAD_MCP_STAGE_EXECUTOR=copilot requires the squad memory broker for durable artifacts.");
+  }
+  const client = options.client ?? lazyCopilotSdkClient({
+    cliUrl: config.copilot.cliUrl,
+    connectionToken: config.copilot.connectionToken,
+    workspaceMount: config.copilot.sandboxWorkspace,
+  });
+  const credentials = new CopilotCredentials({
+    source: buildCopilotCredentialSource(config, options.env),
+    verifier: client.entitlementVerifier(),
+    reverifyMs: config.copilot.identityReverifyMs,
+  });
+  const store = new MemoryBackedArtifactStore(memoryStack.memoryStore);
+  const sessionState = new FileCopilotSessionStateStore(config.copilot.sessionStateDir);
+  return {
+    credentials,
+    readiness: new CopilotReadiness(credentials, client, options.logger),
+    stageExecutorFactory: (workspace, project, runId, stageOptions) => new CopilotStageExecutor({
+      client,
+      workspace,
+      store,
+      sessionState,
+      project: project ?? config.memoryDefaultProject,
+      runId,
+      model: config.copilot.model || undefined,
+      gitHubTokenProvider: credentials.tokenProvider,
+      identityStatus: () => credentials.status(),
+      builtInTools: config.copilot.tools.length > 0 ? config.copilot.tools : undefined,
+      allowShell: config.copilot.allowShell,
+      delegation: config.copilot.subagents,
+      network: { allowedHosts: config.copilot.allowedHosts },
+      sandboxWorkspace: config.copilot.sandboxWorkspace,
+      deadlineMs: stageOptions?.deadlineMs,
+      onCompletion: stageOptions?.onCompletion,
+    }),
+  };
 }
 
 /**
@@ -245,20 +328,28 @@ export function buildHttpHandler(
     throw new Error("SQUAD_MCP_JWKS_URI is required to validate Entra tokens (SEC-1).");
   }
   const authenticator = new EntraAuthenticator({
-    audience: config.audience,
+    audiences: config.audiences,
     allowedIssuers: config.allowedIssuers,
     allowedTenants: config.allowedTenants,
-    verifier: createJoseVerifier({ jwksUri, issuer: config.allowedIssuers }),
+    verifier: createJoseVerifier({
+      jwksUri,
+      issuer: config.allowedIssuers.length > 0 ? config.allowedIssuers : undefined,
+    }),
     logger,
   });
 
   const backend = new AzureOpenAIBackend({
     endpoint: config.modelEndpoint,
     deployment: config.modelDeployment,
+    api: config.modelApi,
+    chatProfile: config.modelChatProfile,
     apiVersion: config.modelApiVersion,
+    defaultMaxOutputTokens: config.modelMaxOutputTokens,
+    reasoningEffort: config.modelReasoningEffort,
+    verbosity: config.modelVerbosity,
     getAccessToken: createManagedIdentityTokenProvider(),
     logger,
-    pricing: readPricing(env),
+    pricing: modelPricingFromEnvironment(env),
   });
 
   // HIGH-1 / WI-06: the gated async pipeline is exposed ONLY when the operator
@@ -270,6 +361,7 @@ export function buildHttpHandler(
   // (off by default). The SAME store instance serves the resource read surface
   // and the write-back tool (wired in later phases).
   const memoryStack = buildSquadMemoryStack(config, logger);
+  const copilotRuntime = buildCopilotRuntime(config, memoryStack, { env, logger });
 
   // The deterministic render tool is built only when the operator enabled it. It
   // reuses the Storage managed-identity token (storage.azure.com) for the Blob
@@ -304,6 +396,10 @@ export function buildHttpHandler(
     // WI-1b4-WORKER: when a worker is enabled, the poll is read-only and the ACA
     // Job drives approved runs off the request path (runs may exceed 240s).
     driveOnPoll: !config.workerEnabled,
+    // Without a worker, a poll that claims a run returns within this budget and the
+    // run continues in-process, so long stages never hold a request past the 240s
+    // ingress ceiling (which MCP clients report as an unreachable connector).
+    pollDriveWaitMs: config.workerEnabled ? undefined : POLL_DRIVE_WAIT_MS,
     // Deterministic server-side memory continuity. Built ONLY when the operator
     // enabled both the memory broker and auto-memory; otherwise the engine keeps
     // its previous behavior exactly (memory stays a manual tool).
@@ -329,6 +425,11 @@ export function buildHttpHandler(
             logger,
           })
         : undefined,
+    researchArtifacts:
+      config.enableArtifacts && config.memoryAutoEnabled && memoryStack
+        ? new MemoryBackedArtifactStore(memoryStack.memoryStore)
+        : undefined,
+    stageExecutorFactory: copilotRuntime?.stageExecutorFactory,
     logger,
   });
 
@@ -344,7 +445,26 @@ export function buildHttpHandler(
     renderService,
     memoryStore: memoryStack?.memoryStore,
     businessToolsExposed: config.enableBusinessTools,
+    readiness: copilotRuntime?.readiness,
   });
+}
+
+/**
+ * Verify the instance can do its work before accepting traffic. With the
+ * Copilot executor that means a GitHub identity verified for Copilot; the
+ * server refuses to start without one rather than serving tools that would fail.
+ */
+export async function prepareReadiness(handler: HttpMcpHandler, logger: RedactingLogger): Promise<void> {
+  if (!handler.readiness) return;
+  const report = await handler.readiness.prepare();
+  const fatal = Object.entries(report.checks).filter(([, check]) => check.fatal && !check.ok);
+  if (fatal.length > 0) {
+    throw new Error(`Refusing to start: ${fatal.map(([name, check]) => `${name}: ${check.reason}`).join("; ")}`);
+  }
+  if (!report.ready) {
+    // Recoverable (for example, the sandbox is not up yet): serve, report 503 at /readyz, keep retrying.
+    logger.warn("starting while not ready", Object.fromEntries(Object.entries(report.checks).map(([name, check]) => [name, check.reason])));
+  }
 }
 
 /** Start the live HTTP server. */
@@ -352,6 +472,7 @@ export async function mainHttp(): Promise<void> {
   const logger = new RedactingLogger({ name: "hve-squad-mcp-http" });
   const config = loadOperatorConfig();
   const handler = buildHttpHandler(config, process.env, logger);
+  await prepareReadiness(handler, logger);
   const server = createHttpServer(handler);
   const port = Number(process.env.PORT ?? 3000);
   await new Promise<void>((resolve) => server.listen(port, resolve));

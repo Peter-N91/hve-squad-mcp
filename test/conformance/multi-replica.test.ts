@@ -22,6 +22,7 @@ import { DurableRunStateStore } from "../../src/engine/durable-run-state.js";
 import { AesGcmFieldCipher } from "../../src/engine/field-cipher.js";
 import type { AuthContext } from "../../src/auth/entra.js";
 import type { BackendRequest, BackendResult, ModelBackend } from "../../src/engine/model-backend.js";
+import { scriptedStageExecutor } from "../helpers/scripted-stage-executor.js";
 
 class FakeBackend implements ModelBackend {
   readonly id = "fake-backend";
@@ -53,6 +54,7 @@ function replica(dir: string): { engine: EmbeddedCoordinator; backend: FakeBacke
   const approvals = new RunStoreApprovalChannel(store);
   const engine = new EmbeddedCoordinator({
     backend,
+    stageExecutorFactory: () => scriptedStageExecutor(backend),
     workspaceManager: new EphemeralWorkspaceManager(),
     quota: new TenantQuotaTracker({ concurrency: 4, monthlyCeilingUsd: 500 }),
     runStateStore: store,

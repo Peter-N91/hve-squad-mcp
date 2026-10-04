@@ -27,9 +27,13 @@ import {
 import type { PptxRenderService } from "../../../src/engine/render/pptx-render-service.js";
 import type { SquadMemoryStore } from "../../../src/engine/squad-memory-state.js";
 import type { AutoMemory } from "../../../src/engine/auto-memory.js";
+import type { SquadRunRecorder } from "../../../src/engine/squad-run-recorder.js";
 import { MockModelBackend } from "./mock-backend.js";
 import { FakeJwtVerifier, TEST_AUDIENCE, TEST_ISSUER, bearer } from "./fake-auth.js";
 import { createCapturingLogger } from "./log-capture.js";
+import { scriptedStageExecutor } from "../../helpers/scripted-stage-executor.js";
+import { MemoryBackedArtifactStore } from "../../../src/engine/artifact-store.js";
+import type { ReadinessProbe } from "../../../src/transports/readiness.js";
 
 const DEFAULT_ORIGIN = "https://copilotstudio.microsoft.com";
 
@@ -40,6 +44,8 @@ export interface HarnessOptions {
   /** Captured log lines paired with `logger`; defaults to the harness sink. */
   lines?: string[];
   audience?: string;
+  /** Accept several audiences; overrides `audience` when supplied. */
+  audiences?: string[];
   allowedIssuers?: string[];
   allowedTenants?: string[];
   allowedOrigins?: string[];
@@ -60,10 +66,20 @@ export interface HarnessOptions {
    * memory feature). Absent by default — the advisory-only posture.
    */
   memoryStore?: SquadMemoryStore;
+  /** Whether the squad-history read surface is enabled. */
+  artifactsEnabled?: boolean;
   /** Whether the business-facing tools are served (default false, as in production). */
   businessToolsExposed?: boolean;
+  /** Optional RFC 9728 metadata URL advertised on 401 responses. */
+  oauthResourceMetadataUrl?: string;
+  /** Optional instance readiness served at GET /readyz. */
+  readiness?: ReadinessProbe;
   /** Deterministic server-side memory continuity; absent = the manual-memory default. */
   autoMemory?: AutoMemory;
+  /** Optional .copilot-tracking ledger writer over the same memory store. */
+  runRecorder?: SquadRunRecorder;
+  /** Default fakes isolate protocol/auth tests; opt in to test actual tool/artifact gates. */
+  useRealStageExecutor?: boolean;
 }
 
 export interface Harness {
@@ -92,7 +108,7 @@ export function buildHarness(options: HarnessOptions = {}): Harness {
   const router = new ToolRouter(loadCatalog());
 
   const authenticator = new EntraAuthenticator({
-    audience: options.audience ?? TEST_AUDIENCE,
+    audiences: options.audiences ?? [options.audience ?? TEST_AUDIENCE],
     allowedIssuers: options.allowedIssuers ?? [TEST_ISSUER],
     allowedTenants: options.allowedTenants ?? [],
     verifier,
@@ -111,12 +127,16 @@ export function buildHarness(options: HarnessOptions = {}): Harness {
 
   const embedded = new EmbeddedCoordinator({
     backend,
+    stageExecutorFactory: options.useRealStageExecutor ? undefined : () => scriptedStageExecutor(backend),
+    researchArtifacts: options.useRealStageExecutor && options.memoryStore
+      ? new MemoryBackedArtifactStore(options.memoryStore) : undefined,
     workspaceManager,
     quota,
     gates,
     runStateStore: options.runStateStore,
     approvals,
     autoMemory: options.autoMemory,
+    runRecorder: options.runRecorder,
     logger,
   });
 
@@ -134,7 +154,10 @@ export function buildHarness(options: HarnessOptions = {}): Harness {
     pipelineExposed: options.pipelineExposed ?? true,
     renderService: options.renderService,
     memoryStore: options.memoryStore,
+    artifactsEnabled: options.artifactsEnabled,
     businessToolsExposed: options.businessToolsExposed ?? false,
+    oauthResourceMetadataUrl: options.oauthResourceMetadataUrl,
+    readiness: options.readiness,
   });
 
   return {

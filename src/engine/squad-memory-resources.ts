@@ -33,6 +33,7 @@ import {
   isSafeMemorySegment,
   type SquadMemoryStore,
 } from "./squad-memory-state.js";
+import { isProjectContextMetadata } from "./project-context-bridge.js";
 
 /** The custom URI scheme the broker publishes memory resources under. */
 export const SQUAD_MEMORY_URI_SCHEME = "squad-memory";
@@ -125,7 +126,12 @@ function parseMemoryUri(uri: string): ParsedMemoryUri | undefined {
   }
   const project = rest.slice(0, slash);
   const path = rest.slice(slash + 1);
-  if (path.length === 0 || !isSafeMemorySegment(project) || !isSafeMemoryPath(path)) {
+  if (
+    path.length === 0 ||
+    isProjectContextMetadata(project, path) ||
+    !isSafeMemorySegment(project) ||
+    !isSafeMemoryPath(path)
+  ) {
     return undefined;
   }
   return { project, path };
@@ -177,14 +183,17 @@ export class SquadMemoryResourceProvider {
    * that actually exist are returned — the templates cover the open-ended families.
    */
   async list(tenantId: string): Promise<MemoryResourceDescriptor[]> {
-    const projects = await this.store.listProjects(tenantId);
+    const projects = (await this.store.listProjects(tenantId))
+      .filter((project) => !isProjectContextMetadata(project));
     const perProject = await Promise.all(
       projects.map((project) => this.store.list(tenantId, project)),
     );
     const descriptors: MemoryResourceDescriptor[] = [];
     projects.forEach((project, index) => {
       for (const entry of perProject[index]) {
-        descriptors.push(toDescriptor(project, entry.path));
+        if (!isProjectContextMetadata(project, entry.path)) {
+          descriptors.push(toDescriptor(project, entry.path));
+        }
       }
     });
     return descriptors;
