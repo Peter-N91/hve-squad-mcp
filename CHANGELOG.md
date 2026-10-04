@@ -10,50 +10,6 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
-## [0.7.1] - 2026-08-23
-
-> Built against `Peter-N91/hve-squad@0.16.1` (see `host/cast/package-pin.json`).
-
-### Changed
-
-- **The bundled cast lagged behind HVE Squad 0.16.1.** Re-pinned and regenerated the cast so autopilot derives multi-artifact fan-out from artifact-owning roster entries and records a Scribe handoff for every stage (`host/cast/package-pin.json`, `host/cast/.github/`).
-
-### Consumer install
-
-Pin to this version:
-
-```powershell
-npm install "Peter-N91/hve-squad-mcp#v0.7.1"
-```
-
-[0.7.1]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.7.1
-
-## [0.7.0] - 2026-08-23
-
-> Built against `Peter-N91/hve-squad@0.16.0` (see `host/cast/package-pin.json`).
-
-### Added
-
-- **The package is ready to publish to the npm registry.** Removed
-  `"private": true` from `package.json`, added a `prepublishOnly` build hook so
-  a stale `dist/` can never ship, and added a manual-only
-  `.github/workflows/publish.yml` (`npm ci && npm run build && npm publish
-  --access public`, authenticated via an `NODE_AUTH_TOKEN` secret, gated on the
-  release tag already existing) that a maintainer runs explicitly — it never
-  fires from a version-bump commit or a cut release. `npm pack --dry-run`
-  confirms the tarball carries `dist/src/server.js`. The README's Status table
-  no longer describes the package as `private`/unpublished.
-
-### Consumer install
-
-Pin to this version:
-
-```powershell
-npm install "Peter-N91/hve-squad-mcp#v0.7.0"
-```
-
-[0.7.0]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.7.0
-
 ## [0.6.3] - 2026-08-19
 
 > Built against `Peter-N91/hve-squad@0.15.3` (see `host/cast/package-pin.json`).
