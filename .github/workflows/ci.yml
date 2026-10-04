@@ -24,9 +24,9 @@
 #                             retired, plus a council seat that `runSubagent` cannot
 #                             reach.
 #   generate:connector:check— the five Copilot Studio connector artifacts are current.
-#   generate:cowork:check   — the Cowork v1.29 package remains connector-only:
-#                             no pinned tool description or Agent Skills can
-#                             displace runtime initialize + tools/list discovery.
+#   generate:cowork:check   — the Cowork v1.29 package and its authored Agent
+#                             Skill pass validation; tools remain dynamically
+#                             discovered through initialize + tools/list.
 #   snapshot:cast:check     — re-resolves host/cast/package-pin.json against the
 #                             hve-squad tag and FAILS when the committed bundle is
 #                             not what that tag produces. This is the check whose

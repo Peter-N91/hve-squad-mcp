@@ -16,7 +16,7 @@
 
 @description('Squad MCP application + security configuration (operator-controlled; never caller input).')
 type SquadConfig = {
-  @description('Token audience(s) this resource server accepts when MISE is disabled (RFC 8707; SEC-1). Comma-separate only aliases of the same protected-resource registration. A MISE-enabled deployment derives its single audience from authClientId.')
+  @description('Token audience(s) this resource server accepts (RFC 8707; SEC-1). Comma-separate to serve several front doors, for example a Copilot Studio connector and a Cowork Entra SSO auth config.')
   audience: string
   @description('Comma-separated strict Origin allow-list (SEC-8). Never "*".')
   allowedOrigins: string

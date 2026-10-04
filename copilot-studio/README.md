@@ -55,7 +55,7 @@ handoff guidance.
 
 ## Historical parent/child example
 
-The superseded parent orchestrator, connected children, descriptions, skills, and
+The superseded parent orchestrator, connected-child configuration, and its
 per-agent instructions are retained for historical reference under:
 
 ```text
@@ -63,3 +63,5 @@ archive/copilot-studio-parent-child/
 ```
 
 They are not generated, tested, packaged, or part of the supported deployment.
+Role-specific materials that may be present under `child/` are roster references,
+not connected child agents in the supported single-agent setup.

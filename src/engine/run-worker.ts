@@ -96,11 +96,20 @@ export class RunWorker {
     while (!signal?.aborted) {
       await this.tickOnce();
       await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, intervalMs);
-        signal?.addEventListener("abort", () => {
-          clearTimeout(timer);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const finish = () => {
+          if (timer !== undefined) {
+            clearTimeout(timer);
+          }
+          signal?.removeEventListener("abort", finish);
           resolve();
-        }, { once: true });
+        };
+        timer = setTimeout(finish, intervalMs);
+        if (signal?.aborted) {
+          finish();
+        } else {
+          signal?.addEventListener("abort", finish, { once: true });
+        }
       });
     }
   }

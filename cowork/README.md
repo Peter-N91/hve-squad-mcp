@@ -19,7 +19,7 @@ the plugin.
 
 ## Before-model context preflight
 
-Plugin 11.0.20 / skill 1.21 selects a versioned, task-only context packet before
+Plugin 11.0.21 / skill 1.21 selects a versioned, task-only context packet before
 starting new HVE work. It keeps business facts, accepted decisions, constraints,
 open questions and relevant source references; diagnostic journals, old prompts
 and unrelated history stay in the project rather than being copied into each

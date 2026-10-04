@@ -127,16 +127,19 @@ test("SEC-1: original request metadata reaches the configured token verifier", a
   assert.deepEqual(verifier.lastVerificationContext, tokenValidation);
 });
 
-test("SEC-1: same-resource audience aliases are admitted and another resource is rejected", async () => {
-  // One app registration can emit its client id or a registered Application ID
-  // URI. Accepting those aliases must not become "accept anything": the negative
-  // case below is the point.
+test("SEC-1: configured audience aliases and front doors are admitted; others are rejected", async () => {
+  // Accept aliases from one registration and separate configured front doors,
+  // but never turn the allow-list into "accept anything".
   const clientId = "11111111-1111-4111-8111-111111111111";
   const appIdUri = "api://11111111-1111-4111-8111-111111111111";
+  const cowork = "api://cowork-auth-config-id";
   const verifier = new FakeJwtVerifier();
-  const { handler, backend } = buildHarness({ verifier, audiences: [clientId, appIdUri] });
+  const { handler, backend } = buildHarness({
+    verifier,
+    audiences: [clientId, appIdUri, cowork],
+  });
 
-  for (const audience of [clientId, appIdUri]) {
+  for (const audience of [clientId, appIdUri, cowork]) {
     verifier.register({
       token: `token-for-${audience}`,
       tenantId: TENANT,

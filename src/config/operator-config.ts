@@ -81,9 +81,12 @@ export interface MiseConfig {
 export interface OperatorConfig {
   /**
    * Accepted token audiences — this resource server's identifiers (SEC-1,
-   * RFC 8707). Usually one; several are permitted only for registered aliases of
-   * the same protected resource. Every entry is matched exactly — never as a
-   * prefix or wildcard.
+   * RFC 8707). Usually one; several are permitted so a single deployment can
+   * serve front doors that mint tokens for different resource identifiers (for
+   * example a Copilot Studio connector on `api://<client-id>` alongside a Cowork
+   * Entra SSO auth config on the Application ID URI that registration
+   * generates), or aliases of the same resource. Every entry is matched exactly
+   * — never as a prefix or wildcard.
    */
   audiences: string[];
   /** Entra issuer allow-list (e.g. `https://login.microsoftonline.com/<tenant>/v2.0`). */
@@ -497,10 +500,10 @@ function parseMemoryTargets(value: string | undefined): MemoryTargetConfig[] {
  * deployment fails fast at boot rather than at first call.
  */
 export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): OperatorConfig {
-  // SEC-1: comma-separated to support registered aliases of one protected
-  // resource. Entries are trimmed and de-duplicated, and blanks are dropped so a
-  // stray comma can never introduce an empty audience (which a token with no
-  // `aud` would otherwise appear to match).
+  // SEC-1: comma-separated so one deployment can serve several front doors, each
+  // minting tokens for its own resource identifier or registered aliases. Entries
+  // are trimmed and de-duplicated, and blanks are dropped so a stray comma can
+  // never introduce an empty audience (which a token with no `aud` would match).
   const audiences = [
     ...new Set(
       (env.SQUAD_MCP_AUDIENCE ?? "")

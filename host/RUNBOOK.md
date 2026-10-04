@@ -145,14 +145,18 @@ Notes:
 - The **audience** the server checks is `api://$APP_ID` (the `SQUAD_MCP_AUDIENCE`
   value). Keep it consistent across the app registration, `main.bicepparam`, and the
   connector's `apiProperties.json`.
-- `SQUAD_MCP_AUDIENCE` accepts a **comma-separated list** only for valid aliases
-  of the same protected-resource registration. Entries are trimmed,
-  de-duplicated, and matched **exactly** (never as a prefix or wildcard); a blank
-  entry is dropped rather than becoming an audience that matches nothing. Never
-  combine client ids from different app registrations. When MISE is enabled, the
-  template ignores aliases and derives the application's, ingress's, and MISE's
-  single audience from `authClientId`. Use a separate non-MISE deployment for a
-  test registration.
+- `SQUAD_MCP_AUDIENCE` accepts a **comma-separated list**, so one deployment can
+  serve front doors that mint tokens for different resource identifiers — for
+  example a Copilot Studio connector on `api://$APP_ID` alongside a Microsoft
+  Copilot Cowork Entra SSO auth config, whose registration generates its own
+  Application ID URI. Entries are trimmed, de-duplicated, and matched **exactly**
+  (never as a prefix or wildcard); a blank entry is dropped rather than becoming
+  an audience that matches nothing. The same value feeds the ingress
+  `allowedAudiences`, so the two layers cannot disagree when MISE is disabled.
+  With MISE enabled, the template derives the app, ingress, and MISE audience
+  from `authClientId`; use that protected-resource registration for all front
+  doors or deploy a separate non-MISE instance for a different registration.
+  See [`cowork/README.md`](../cowork/README.md) for Cowork setup.
 - The **JWKS / issuer** the server trusts are your tenant's:
   - JWKS: `https://login.microsoftonline.com/$TENANT_ID/discovery/v2.0/keys`
   - Issuer: `https://login.microsoftonline.com/$TENANT_ID/v2.0`

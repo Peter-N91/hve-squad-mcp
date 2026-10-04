@@ -4,6 +4,7 @@
  * held run is never picked up, and that a crashed (stale-lease) run is recovered.
  */
 import assert from "node:assert/strict";
+import { getEventListeners } from "node:events";
 import { test } from "node:test";
 
 import { loadCatalog, type CatalogTool } from "../src/catalog/catalog.js";
@@ -213,4 +214,24 @@ test("a tick sweeps expired runs", async () => {
   const tick = await worker.tickOnce();
   assert.ok(tick.swept >= 1, "the expired run was swept");
   assert.equal(await store.get(expired.runId), undefined);
+});
+
+test("runForever removes the abort listener after each polling interval", async () => {
+  const { engine } = makeStack();
+  let ticks = 0;
+  const sweep = engine.sweepExpiredRuns.bind(engine);
+  engine.sweepExpiredRuns = async (now?: number) => {
+    ticks += 1;
+    return sweep(now);
+  };
+  const controller = new AbortController();
+  const initialListeners = getEventListeners(controller.signal, "abort").length;
+  const abortTimer = setTimeout(() => controller.abort(), 80);
+  try {
+    await new RunWorker({ coordinator: engine }).runForever(1, controller.signal);
+  } finally {
+    clearTimeout(abortTimer);
+  }
+  assert.ok(ticks >= 3, "the worker completed multiple polling intervals");
+  assert.equal(getEventListeners(controller.signal, "abort").length, initialListeners);
 });

@@ -89,9 +89,9 @@ export class AuthError extends Error {
 
 export interface EntraAuthenticatorOptions {
   /**
-   * The accepted audiences for this resource server (SEC-1, RFC 8707). Multiple
-   * entries are permitted only for aliases of the same protected-resource
-   * registration; each is matched exactly.
+   * The accepted audiences (this resource server; SEC-1, RFC 8707). Several are
+   * permitted so one deployment can serve front doors that mint tokens for
+   * different resource identifiers or registered aliases; each is matched exactly.
    */
   audiences: readonly string[];
   /** Permitted issuers; empty = accept any issuer the verifier already validated. */
@@ -107,13 +107,16 @@ export interface EntraAuthenticatorOptions {
 /**
  * Resolve which configured audience a token is bound to, or `undefined`.
  *
- * One registration can have several valid audience forms, such as its client id
- * and a registered Application ID URI. Every configured alias is matched exactly,
- * with no wildcard or prefix matching. IDs belonging to another resource
- * registration must be hosted separately rather than added to this set.
+ * A deployment may serve several front doors that each mint tokens for their own
+ * resource identifier — a Copilot Studio connector bound to `api://<client-id>`
+ * and a Cowork Entra SSO auth config bound to the Application ID URI that
+ * registration generates. A registration may also have aliases such as its
+ * client id and a registered Application ID URI. Every entry is an
+ * operator-configured exact string, with no wildcard or prefix matching, so a
+ * token minted for any unconfigured resource is still rejected.
  *
- * Returns the matched value so the caller can record which resource alias
- * admitted the request rather than the whole configured set.
+ * Returns the matched value so the caller can record WHICH front door admitted
+ * the request rather than the whole configured set.
  */
 function matchAudience(
   aud: string | string[] | undefined,
