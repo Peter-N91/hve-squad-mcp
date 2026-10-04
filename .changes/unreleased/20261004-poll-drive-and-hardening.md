@@ -23,3 +23,7 @@ type: Fixed
   as markup (`src/transports/http.ts`).
 - **The background worker no longer leaks an abort listener per tick**
   (`src/engine/run-worker.ts`).
+- **A declining backlog handoff no longer fails a reviewed run.** When the
+  optional backlog-handoff agent stops because the request has nothing to plan
+  (for example a research question), the run completes and records the stage as
+  skipped. Runtime failures and limits in that stage still halt the run.

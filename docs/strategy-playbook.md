@@ -41,8 +41,10 @@ The remote advisory router has two broad outcomes:
 
 1. A request that matches only research language (`research`, `investigate`,
    `explore`, or `find out`) becomes one Task Researcher stage.
-2. Any broader request becomes research -> plan -> optional council -> review ->
-   backlog handoff.
+2. Any broader request becomes research -> plan -> optional council ->
+   text-only report (or deliverable fan-out) -> review -> backlog handoff. The
+   single developer report stage cannot execute commands, access the network,
+   delegate, or edit code.
 
 Passing any `mode`, or using `profile=full`, forces the broader advisory route.
 
@@ -196,7 +198,7 @@ implementation planner. Its strength is decision quality and tradeoff analysis.
 | --- | --- | --- |
 | Scope | Local trust boundary | `Squad.Run` |
 | Authority | Full Squad Coordinator charter | Server-side advisory router and resolved stage personas |
-| Workflow | Coordinator can run intake -> research -> plan -> council -> implement -> review -> final validation, subject to host tools and gates | research -> plan -> optional council -> review -> backlog handoff; no implementation |
+| Workflow | Coordinator can run intake -> research -> plan -> council -> implement -> review -> final validation, subject to host tools and gates | research -> plan -> optional council -> text-only report (or deliverable fan-out) -> review -> backlog handoff; no code execution or edits |
 | Gate | Coordinator's local gate protocol | Always starts held; operator releases via `POST /admin/approve` with `Squad.Operate` |
 | Result | Host-executed artifacts and potentially code changes | Compiled advisory artifact |
 

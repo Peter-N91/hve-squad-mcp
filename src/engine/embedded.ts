@@ -1190,7 +1190,8 @@ export class EmbeddedCoordinator {
    * claim already succeeded — it does not re-check approval (the claim path did).
    *
    * The catch-all `squad_run` runs the FULL advisory pipeline (Phase 5): routing
-   * -> research -> plan -> [council] -> review -> backlog-handoff, persisting each
+   * -> research -> plan -> [council] -> [text-only report or deliverable fan-out]
+   * -> review -> backlog-handoff, persisting each
    * stage + the council verdict durably (so a status poll recompiles the finished
    * artifact multi-replica / after a cold start). Any other tool id keeps the
    * spike two-stage pipeline. Both persist the compiled artifact + `complete`.
@@ -1226,7 +1227,8 @@ export class EmbeddedCoordinator {
   /**
    * Drive an approved/claimed `squad_run` through the FULL advisory pipeline
    * (Phase 5). The advisory orchestrator routes the persisted request across the
-   * full cast (research -> plan -> [council] -> review -> backlog-handoff) as
+   * full cast (research -> plan -> [council] -> [text-only report or deliverable
+   * fan-out] -> review -> backlog-handoff) as
    * sequential model completions, threading each stage's artifact forward as DATA
    * (SEC-5 preserved by the orchestrator). It runs in autopilot so the async drive
    * yields ONE compiled artifact. Any required human gate was applied at

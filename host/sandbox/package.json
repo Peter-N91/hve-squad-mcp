@@ -1,0 +1,9 @@
+{
+  "name": "hve-squad-copilot-sandbox",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Pinned browser runtime for the HVE Squad Copilot sandbox",
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}

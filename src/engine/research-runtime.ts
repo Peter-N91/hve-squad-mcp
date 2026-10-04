@@ -43,7 +43,14 @@ export class StageBlockedError extends Error {
 }
 
 export interface AdvisoryStageExecutor {
-  execute(persona: PersonaRecord, request: CoordinatorRequest, priorArtifact?: string, roleKey?: string, costLedger?: RunCostLedger): Promise<BackendResult>;
+  execute(
+    persona: PersonaRecord,
+    request: CoordinatorRequest,
+    priorArtifact?: string,
+    roleKey?: string,
+    costLedger?: RunCostLedger,
+    executionMode?: AdvisoryStageExecutionMode,
+  ): Promise<BackendResult>;
 }
 
 export function requiresStageRuntime(persona: PersonaRecord): boolean {
@@ -110,6 +117,7 @@ class ArtifactNotFoundError extends StageBlockedError {
 interface Actor {
   persona: PersonaRecord;
   primaryPath: string;
+  reportOnly?: boolean;
   writeRoot?: string;
   stateRoot?: string;
   lanePath?: string;
@@ -173,6 +181,24 @@ export class StageInputRequired extends Error {
     this.name = "StageInputRequired";
   }
 }
+
+export type AdvisoryStageExecutionMode = "text-only-report";
+
+export const TEXT_ONLY_REPORT_CHARTER = [
+  "You are the Squad Implementor operating in a strictly text-only report mode.",
+  "Produce the requested user-facing report from the supplied request, prior-stage findings, and project artifacts you actually read.",
+  "Do not edit code, create implementation plans that imply work was performed, execute commands, search the web, delegate, or claim stakeholder approval.",
+  "Preserve unresolved decisions and evidence gaps explicitly; never guess or resolve them on the user's behalf.",
+  "Write one concise Markdown report to the assigned primary artifact, cite only evidence receipts issued in this stage, then finish.",
+].join("\n");
+
+// On an agentic runtime each tool round trip is a model call, and the minimum
+// path (read research, read plan, write the report, finish) needs 4-6.
+export const TEXT_ONLY_REPORT_LIMITS = {
+  deadlineMs: 90_000,
+  modelCalls: 10,
+  toolCalls: 12,
+} as const;
 
 const MAX_FILE_CHARS = Math.min(64_000, ARTIFACT_MAX_CHARS);
 export const ADVISORY_EXECUTION_LIMITS = {
@@ -246,6 +272,7 @@ const TOOLS = [
   }, ["status", "readiness", "summary", "artifactPaths", "evidenceIds"]),
 ];
 const validators = new Map(TOOLS.map((entry) => [entry.name, ajv.compile<Record<string, unknown>>(entry.parameters)]));
+const TEXT_ONLY_REPORT_TOOLS = new Set(["list_artifacts", "read_artifact", "write_artifact", "finish_stage"]);
 
 function hash(content: string): string {
   return createHash("sha256").update(content).digest("hex");
@@ -275,6 +302,8 @@ function safeRelativePath(path: string): void {
 function writeScope(actor: Actor): { exactPaths: string[]; prefixes: string[] } {
   return actor.lanePath
     ? { exactPaths: [actor.lanePath], prefixes: [] }
+    : actor.reportOnly
+      ? { exactPaths: [actor.primaryPath], prefixes: [] }
     : {
       exactPaths: [actor.primaryPath, ...(actor.detailsPath ? [actor.detailsPath] : [])],
       prefixes: [actor.writeRoot, actor.stateRoot].filter((path): path is string => path !== undefined),
@@ -355,6 +384,7 @@ export class ResearchRuntime implements AdvisoryStageExecutor {
   private questions = 0;
   private continuationUsed = false;
   private currentStageUsage: (BackendUsage | undefined)[] = [];
+  private currentStageDeadlineMs = 180_000;
 
   constructor(private readonly options: ResearchRuntimeOptions) {
     this.githubRoot = options.githubRoot ?? resolveSquadGithubRoot();
@@ -365,17 +395,27 @@ export class ResearchRuntime implements AdvisoryStageExecutor {
     }
   }
 
-  async execute(persona: PersonaRecord, request: CoordinatorRequest, priorArtifact?: string, roleKey?: string, costLedger?: RunCostLedger): Promise<BackendResult> {
+  async execute(
+    persona: PersonaRecord,
+    request: CoordinatorRequest,
+    priorArtifact?: string,
+    roleKey?: string,
+    costLedger?: RunCostLedger,
+    executionMode?: AdvisoryStageExecutionMode,
+  ): Promise<BackendResult> {
     const saved = !this.continuationUsed ? this.options.continuation?.checkpoint : undefined;
     this.stageOffsetMs = saved ? saved.stageElapsedMs ?? saved.elapsedMs : 0;
     this.startedAt = this.now();
+    this.currentStageDeadlineMs = executionMode === "text-only-report"
+      ? Math.min(this.options.deadlineMs ?? 180_000, TEXT_ONLY_REPORT_LIMITS.deadlineMs)
+      : this.options.deadlineMs ?? 180_000;
     // The hard abort is wall-clock; with an injected clock only the logical deadline checks apply.
     this.signal = this.options.now
       ? new AbortController().signal
-      : AbortSignal.timeout(Math.max(1, Math.ceil((this.options.deadlineMs ?? 180_000) - this.stageOffsetMs)));
+      : AbortSignal.timeout(Math.max(1, Math.ceil(this.currentStageDeadlineMs - this.stageOffsetMs)));
     this.timing("stage_started", persona.role, persona.role);
     try {
-      return await this.executeStage(persona, request, priorArtifact, roleKey, costLedger);
+      return await this.executeStage(persona, request, priorArtifact, roleKey, costLedger, executionMode);
     } finally {
       this.timing("stage_stopped", persona.role, persona.role);
       this.runElapsedMs += this.activeIntervalMs();
@@ -388,10 +428,17 @@ export class ResearchRuntime implements AdvisoryStageExecutor {
   private timing(event: string, stage: string, actor: string): void {
     this.options.onTiming?.({ event, runId: this.options.runId, stage, actor, call: this.calls,
       stageElapsedMs: Math.round(this.stageElapsedMs()),
-      remainingMs: Math.max(0, Math.round((this.options.deadlineMs ?? 180_000) - this.stageElapsedMs())) });
+      remainingMs: Math.max(0, Math.round(this.currentStageDeadlineMs - this.stageElapsedMs())) });
   }
 
-  private async executeStage(persona: PersonaRecord, request: CoordinatorRequest, priorArtifact?: string, roleKey?: string, costLedger?: RunCostLedger): Promise<BackendResult> {
+  private async executeStage(
+    persona: PersonaRecord,
+    request: CoordinatorRequest,
+    priorArtifact?: string,
+    roleKey?: string,
+    costLedger?: RunCostLedger,
+    executionMode?: AdvisoryStageExecutionMode,
+  ): Promise<BackendResult> {
     if (!this.options.backend.supportsTools) {
       throw new StageBlockedError("stage_tools_unavailable", "The configured model backend does not support server-side tools.");
     }
@@ -411,14 +458,22 @@ export class ResearchRuntime implements AdvisoryStageExecutor {
       `.copilot-tracking/reviews/${slugForPath(role ?? persona.role)}`;
     const writeRoot = `${root}/${this.options.runId}/${persona.role === "BRD Builder" ? "brd/" : ""}`;
     const primaryPath = research ? `${root}/${this.options.runId}-research.md` : `${writeRoot}artifact.md`;
+    const reportOnly = executionMode === "text-only-report";
     const planner = !council && (role === "lead" || persona.role === "Squad Lead");
     const detailsPath = planner ? `.copilot-tracking/details/${this.date}/${this.options.runId}/phase-details.md` : undefined;
     const critiquePath = planner ? `.copilot-tracking/reviews/${this.date}/${this.options.runId}/plan-critique.md` : undefined;
     assertSafeArtifactPath(primaryPath);
     const actor: Actor = {
-      persona, primaryPath, costLedger, ancestors: [persona.role], detailsPath, critiquePath, council,
-      writeRoot: research ? undefined : writeRoot,
-      stateRoot: !council && persona.role === "BRD Builder" ? `.copilot-tracking/brd-sessions/${this.options.runId}/` : undefined,
+      persona: reportOnly ? { ...persona, charter: TEXT_ONLY_REPORT_CHARTER } : persona,
+      primaryPath,
+      reportOnly,
+      costLedger,
+      ancestors: [persona.role],
+      detailsPath: reportOnly ? undefined : detailsPath,
+      critiquePath: reportOnly ? undefined : critiquePath,
+      council,
+      writeRoot: research || reportOnly ? undefined : writeRoot,
+      stateRoot: !reportOnly && !council && persona.role === "BRD Builder" ? `.copilot-tracking/brd-sessions/${this.options.runId}/` : undefined,
       loadedSkills: new Set(), skillTexts: new Map(), written: new Set(), evidence: new Map(), lanes: new Map(), research,
     };
     if (request.review !== undefined) {
@@ -566,16 +621,18 @@ export class ResearchRuntime implements AdvisoryStageExecutor {
     }] : [])];
     const tools = TOOLS.filter((entry) =>
       (entry.name !== "finish_brd_review" || Boolean(actor.reviewOnly)) &&
-      (!actor.reviewOnly || !["write_artifact", "finish_stage", "fetch_documentation", "delegate_research", "delegate_plan_critique", "delegate_agent", "list_agents"].includes(entry.name)) &&
-      (entry.name !== "write_artifact" || actor.persona.role !== "RPI Researcher") &&
-      (entry.name !== "request_human_input" || (this.options.allowHumanInput && actor.ancestors.length === 1 && !actor.council)) &&
-      (entry.name !== "delegate_research" || (actor.research && !actor.lanePath)) &&
-      (entry.name !== "delegate_plan_critique" || Boolean(actor.detailsPath && !actor.readOnlyDelegate)) &&
-      (!["delegate_agent", "list_agents"].includes(entry.name) || this.allowedAgents(actor).length > 0))
+      (actor.reportOnly
+        ? TEXT_ONLY_REPORT_TOOLS.has(entry.name)
+        : (!actor.reviewOnly || !["write_artifact", "finish_stage", "fetch_documentation", "delegate_research", "delegate_plan_critique", "delegate_agent", "list_agents"].includes(entry.name)) &&
+          (entry.name !== "write_artifact" || actor.persona.role !== "RPI Researcher") &&
+          (entry.name !== "request_human_input" || (this.options.allowHumanInput && actor.ancestors.length === 1 && !actor.council)) &&
+          (entry.name !== "delegate_research" || (actor.research && !actor.lanePath)) &&
+          (entry.name !== "delegate_plan_critique" || Boolean(actor.detailsPath && !actor.readOnlyDelegate)) &&
+          (!["delegate_agent", "list_agents"].includes(entry.name) || this.allowedAgents(actor).length > 0)))
       .map((entry) => entry.name === "write_artifact" ? scopedWriteTool(actor) : entry);
     for (;;) {
       if (this.signal.aborted ||
-          this.stageElapsedMs() >= (this.options.deadlineMs ?? 180_000)) {
+          this.stageElapsedMs() >= this.currentStageDeadlineMs) {
         throw new StageBlockedError("stage_deadline", "The bounded stage runtime deadline was reached.");
       }
       if (JSON.stringify(messages).length > MAX_CONVERSATION_CHARS) {
@@ -589,7 +646,7 @@ export class ResearchRuntime implements AdvisoryStageExecutor {
       };
       assertBackendPreflight(outbound);
       this.consumeCall("model", actor);
-      outbound.system += `\n\n# Server-owned execution budget\n${JSON.stringify(this.executionBudget())}\nDelegated work shares this stage's budget. Finish within these bounds; do not omit required evidence or review gates.`;
+      outbound.system += `\n\n# Server-owned execution budget\n${JSON.stringify(this.executionBudget(actor))}\nDelegated work shares this stage's budget. Finish within these bounds; do not omit required evidence or review gates.`;
       this.options.beforeCall?.();
       if (actor.costLedger && !actor.costLedger.check().ok) {
         throw new StageBlockedError("run_cost_ceiling", "The run cost ceiling was reached; no further model calls were made.");
@@ -618,7 +675,7 @@ export class ResearchRuntime implements AdvisoryStageExecutor {
         clearInterval(heartbeat);
         this.timing("model_stopped", actor.ancestors[0], actor.persona.role);
       }
-      if (this.signal.aborted || this.stageElapsedMs() >= (this.options.deadlineMs ?? 180_000)) {
+      if (this.signal.aborted || this.stageElapsedMs() >= this.currentStageDeadlineMs) {
         throw new StageBlockedError("stage_deadline", "The bounded stage runtime deadline was reached.");
       }
       if (completion.finishReason === "length" || completion.finishReason === "max_output_tokens") {
@@ -728,17 +785,25 @@ export class ResearchRuntime implements AdvisoryStageExecutor {
     }
   }
 
-  private executionBudget() {
+  private executionBudget(actor?: Actor) {
+    const stageModelLimit = this.options.maxStageModelCalls ?? ADVISORY_EXECUTION_LIMITS.modelCallsPerStage;
+    const stageToolLimit = this.options.maxStageToolCalls ?? ADVISORY_EXECUTION_LIMITS.toolCallsPerStage;
     return {
-      stageModelCalls: { used: this.stageCalls, limit: this.options.maxStageModelCalls ?? ADVISORY_EXECUTION_LIMITS.modelCallsPerStage },
-      stageToolCalls: { used: this.stageTools, limit: this.options.maxStageToolCalls ?? ADVISORY_EXECUTION_LIMITS.toolCallsPerStage },
+      stageModelCalls: {
+        used: this.stageCalls,
+        limit: actor?.reportOnly ? Math.min(stageModelLimit, TEXT_ONLY_REPORT_LIMITS.modelCalls) : stageModelLimit,
+      },
+      stageToolCalls: {
+        used: this.stageTools,
+        limit: actor?.reportOnly ? Math.min(stageToolLimit, TEXT_ONLY_REPORT_LIMITS.toolCalls) : stageToolLimit,
+      },
       runModelCalls: { used: this.calls, limit: this.options.maxModelCalls ?? ADVISORY_EXECUTION_LIMITS.modelCallsPerRun },
       runToolCalls: { used: this.tools, limit: this.options.maxToolCalls ?? ADVISORY_EXECUTION_LIMITS.toolCallsPerRun },
     };
   }
 
   private consumeCall(kind: "model" | "tool", actor: Actor): void {
-    const budget = this.executionBudget();
+    const budget = this.executionBudget(actor);
     const run = kind === "model" ? budget.runModelCalls : budget.runToolCalls;
     const stage = kind === "model" ? budget.stageModelCalls : budget.stageToolCalls;
     if (run.used >= run.limit) {

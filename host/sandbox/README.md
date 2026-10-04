@@ -29,6 +29,7 @@ and its own session state through a server-provided session filesystem, so:
 | `view`, `create`, `edit` on `/workspace/<path>` | The project artifact store, directly. Reads are served by the server; writes are saved immediately, limited to the stage's write scope |
 | `list_project_files`, `search_project_files` | Server-side tools over the same store |
 | `bash`, `glob`, `grep` | The sandbox's scratch disk, which starts empty and is discarded |
+| `squad-browser` via `bash` | A fresh headless Chromium page; bounded interactions return rendered text and visited source URLs |
 | Text files `bash` writes under the write scope | Copied into the project by the server when the stage completes, unless a file tool already wrote the same path |
 | Conversation log, checkpoints | The server's session-state store (`SQUAD_MCP_COPILOT_SESSION_STATE_DIR`) |
 
@@ -57,6 +58,45 @@ Two runtime behaviours shape the deployment, both measured against CLI 1.0.90:
 `sandbox_tool_output` evidence records what a sandbox tool returned; the
 server does not re-fetch it, so it is weaker than the built-in runtime's
 server-side retrieval.
+
+## Browser-based research
+
+The image includes a pinned Playwright package and Chromium. Researchers can use
+`squad-browser` through `bash` when a public page needs JavaScript, scrolling,
+or ordinary link/button/search-form navigation. Each invocation opens a fresh
+headless browser context with no saved cookies, credentials, downloads, or
+profile. Workflows accept at most 12 actions. After the actions, the runner
+scrolls through the page so lazily loaded sections render, then extracts the
+visible text, including open shadow roots, where web components such as MDN's
+compatibility tables render. It prints one `HVE_BROWSER_RESULT` metadata line
+(title, final and visited URLs, actions, blocked requests), then up to 30,000
+characters of page text and the visible links as plain text:
+
+```bash
+printf '%s' '{"url":"https://example.org/page","steps":[{"action":"click","role":"link","name":"Full text"}]}' | squad-browser
+```
+
+The agent runtime starts the shell from an allowlisted environment, so the
+launcher sets `PLAYWRIGHT_BROWSERS_PATH` itself.
+
+Supported actions are `navigate`, `click` (by accessible role/name, label, or
+exact text), `fill` (non-password fields only), `press` (Enter, Tab, arrows,
+Escape, or Space), `scroll`, and bounded `wait`. Each navigation and browser
+request is checked for HTTPS, public DNS addresses, and the optional operator
+host allow-list. This is a best-effort per-request guard, not an egress
+boundary; the sandbox still needs a network-layer egress proxy and metadata
+blocking for production use.
+
+This is normal public-page navigation, not a way around sign-in, a paywall,
+CAPTCHA, or other access controls. It cannot reuse a user's browser profile or
+cookies. If content still requires human authentication or interaction, the
+researcher must report that gap rather than claim to have read it. Browser
+results are recorded as sandbox-tool evidence: `browser-reported:` with the
+visited page URLs when the output came straight back, or
+`browser-output-redirected:` with the requested URLs when the agent redirected
+or filtered it (that receipt does not hold the page text). The server does not
+independently fetch or verify their contents, and the URL metadata is reported
+by the sandbox rather than cryptographically attested.
 
 ## Run it locally
 
@@ -95,6 +135,7 @@ Then point the server at it:
 | `SQUAD_MCP_COPILOT_ALLOW_SHELL` | `false` to remove `bash` |
 | `SQUAD_MCP_COPILOT_SUBAGENTS` | `false` to stop stages fanning out pinned agents as sub-agents |
 | `SQUAD_MCP_COPILOT_ALLOWED_HOSTS` | optional public host allow-list |
+| `COPILOT_BROWSER_ALLOWED_HOSTS` | set on the **sandbox** container (`compose.yaml` passes it through): the same host allow-list, applied to requests Chromium makes |
 | `SQUAD_MCP_COPILOT_SESSION_STATE_DIR` | durable directory for runtime session state (default under the OS temp dir) |
 
 The executor also requires `SQUAD_MCP_ENABLE_ARTIFACTS`,

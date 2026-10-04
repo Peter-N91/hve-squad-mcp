@@ -21,20 +21,23 @@
  * so the routing engine and the drift generator read these same files the same
  * way — no new parser is invented.
  *
- * Advisory stage order (VF-08) — the explicit, documented order this router
- * plans and Phase 3 will execute:
+ * Advisory stage order (VF-08) — the pipeline resolves the routed roles into
+ * this sequence:
  *
  *     research (`researcher`)
  *       -> plan (`lead`)
  *       -> council (`architect`, `security`, `cost-manager`, `product-owner`,
  *                   +`rai` when the request touches the RAI domain)
+ *       -> [text-only developer report OR deliverable fan-out]
  *       -> review (`tester`)
  *       -> backlog-handoff
  *
- * The linear pipeline stages returned in {@link RoutePlan.stages} are
- * research -> plan -> review; the council is surfaced separately in
+ * The linear route returned in {@link RoutePlan.stages} remains
+ * research -> plan -> review; the report/fan-out stage is resolved by the
+ * advisory pipeline, and the council is surfaced separately in
  * {@link RoutePlan.council} (engaged only when the request crosses two or more
- * council domains) so Phase 3 can interleave it between plan and review without
+ * council domains) so the pipeline can interleave it after plan and before
+ * report/fan-out and review without
  * this Phase re-planning. A single research-type request routes to the single
  * `researcher` stage only.
  *

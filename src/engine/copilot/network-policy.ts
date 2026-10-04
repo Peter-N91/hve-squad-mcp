@@ -37,6 +37,12 @@ function ipv6Blocked(address: string): boolean {
   if (value === "::" || value === "::1") return true;
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(value);
   if (mapped) return ipv4Blocked(mapped[1]);
+  const mappedHex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(value);
+  if (mappedHex) {
+    const high = Number.parseInt(mappedHex[1], 16);
+    const low = Number.parseInt(mappedHex[2], 16);
+    return ipv4Blocked(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
+  }
   return /^(fc|fd|fe[89ab]|ff)/.test(value);
 }
 

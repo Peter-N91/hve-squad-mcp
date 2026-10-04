@@ -15,3 +15,7 @@ test/fixtures/rpi-templates/** text eol=lf
 
 # Shell scripts run inside Linux images; a CRLF checkout would break their shebang.
 *.sh text eol=lf
+
+# The sandbox image runs these files on Linux; a CRLF shebang (`#!/bin/sh\r`)
+# makes the launcher fail with "not found".
+host/sandbox/** text eol=lf

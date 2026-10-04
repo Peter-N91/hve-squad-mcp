@@ -20,6 +20,7 @@ services:
     image: hve-squad-copilot-sandbox:phase0
     environment:
       COPILOT_CONNECTION_TOKEN: ${COPILOT_CONNECTION_TOKEN:?set a random connection token of at least 32 characters}
+      COPILOT_BROWSER_ALLOWED_HOSTS: ${COPILOT_BROWSER_ALLOWED_HOSTS:-}
     ports:
       - "127.0.0.1:4321:4321"
     read_only: true

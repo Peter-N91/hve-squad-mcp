@@ -8,7 +8,8 @@
  *     research (`researcher`)
  *       -> plan (`lead`)
  *       -> council (`architect`, `security`, `cost-manager`, `product-owner`,
- *                   +`rai`) — interleaved between plan and review when engaged
+ *                   +`rai`) — interleaved after plan when engaged
+ *       -> text-only developer report OR deliverable fan-out
  *       -> review (`tester`)
  *       -> backlog-handoff (`product-owner`)
  *
@@ -55,7 +56,14 @@ import {
   type ModelBackend,
 } from "./model-backend.js";
 import type { CoordinatorRequest } from "./coordinator-engine.js";
-import { requiresStageRuntime, StageBlockedError, StageInputRequired, type ResearchCheckpoint, type AdvisoryStageExecutor } from "./research-runtime.js";
+import {
+  requiresStageRuntime,
+  StageBlockedError,
+  StageInputRequired,
+  type AdvisoryStageExecutionMode,
+  type ResearchCheckpoint,
+  type AdvisoryStageExecutor,
+} from "./research-runtime.js";
 
 /** The normalized advisory execution mode. */
 export type AdvisoryMode = "interactive" | "autopilot" | "autonomous";
@@ -87,6 +95,8 @@ export interface AdvisoryStagePlan {
   members?: PersonaRecord[];
   /** True when this persona stage is the appended backlog-handoff. */
   backlog?: boolean;
+  /** Restrict the single developer stage to producing a bounded text report. */
+  executionMode?: AdvisoryStageExecutionMode;
   /** True when this is the pre-work intake readiness gate. */
   intake?: boolean;
   /** The roster role KEY, for a stage that owns a deliverable root. */
@@ -287,15 +297,17 @@ function resolveBacklogPersona(
 
 /**
  * Resolve a routed {@link RoutePlan} into the ordered advisory execution plan:
- * [intake] -> research -> plan -> [council] -> [deliverable fan-out] -> review
- * -> backlog-handoff.
+ * [intake] -> research -> plan -> [council] -> [deliverable fan-out OR
+ * text-only report] -> review -> backlog-handoff.
  *
  * The intake gate is prepended only for a profile that seeds `intake-validator`
  * (`product`, `full`); the council is interleaved between plan and review only
- * when engaged; the fan-out replaces the single Implement stage for a profile
- * carrying two or more deliverable-producing roles. A research-only route stays
- * a single research stage. Stages whose persona cannot be resolved are dropped
- * (never a silent wrong persona).
+ * when engaged; deliverable fan-out replaces the single Implement stage for a
+ * profile carrying two or more deliverable-producing roles. Without fan-out,
+ * the developer role produces a bounded, text-only report (no code execution or
+ * edits) before Review. A research-only route stays a single research stage.
+ * Stages whose persona cannot be resolved are dropped (never a silent wrong
+ * persona), except that the mandatory report stage fails planning explicitly.
  */
 export function planAdvisoryStages(
   plan: RoutePlan,
@@ -326,7 +338,7 @@ export function planAdvisoryStages(
     return ordered;
   }
 
-  // Full advisory route: research -> plan -> [council] -> [fan-out] -> review -> backlog.
+  // Full route: research -> plan -> [council] -> [fan-out or report] -> review -> backlog.
   const [research, planStage, review] = plan.stages;
 
   const researchPersona = resolvePersonaForRole(research.agentName, roots);
@@ -354,6 +366,18 @@ export function planAdvisoryStages(
       ordered.push({ ...personaStage(persona), roleKey: stage.role });
       fannedOutRoles.add(stage.role);
     }
+  }
+
+  if (plan.fanOut.length === 0) {
+    const developerPersona = resolvePersonaForRosterRole("developer", rosterMap ?? loadRosterMap(), roots);
+    if (!developerPersona) {
+      throw new Error("The text-only report stage requires a resolvable developer persona.");
+    }
+    ordered.push({
+      ...personaStage(developerPersona),
+      roleKey: "developer",
+      executionMode: "text-only-report",
+    });
   }
 
   const reviewPersona = resolvePersonaForRole(review.agentName, roots);
@@ -579,6 +603,7 @@ export async function runAdvisoryPipeline(
             priorArtifact,
             stage.roleKey,
             deps.costLedger,
+            stage.executionMode,
           );
           if (!completion.usageEventsEmitted) {
             await observeDirectCompletion(
@@ -606,6 +631,19 @@ export async function runAdvisoryPipeline(
           };
         }
         if (!(error instanceof StageBlockedError)) throw new AdvisoryStageFailure(stage.role, stages, error);
+        // The backlog handoff is an optional final step: when its agent declines
+        // because the request has nothing to plan (for example a research
+        // question), the reviewed work stands. Runtime failures still halt.
+        if (stage.backlog && error.reason === "stage_blocked") {
+          const section = `## ${stage.role} - skipped\n\n${error.detail}`;
+          stages.push({ kind: "persona", role: stage.role, section, text: section });
+          try {
+            await deps.persistence?.recordStage({ role: stage.role, artifact: section });
+          } catch (persistError) {
+            throw new AdvisoryStageFailure(stage.role, stages, persistError, "persistence");
+          }
+          continue;
+        }
         return {
           outcome: "halted",
           artifact: [compileArtifact(stages), `## ${stage.role} - blocked\n\n${error.detail}`].filter(Boolean).join("\n\n"),

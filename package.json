@@ -37,7 +37,7 @@
     "version:set": "tsx scripts/set-version.ts",
     "change": "tsx scripts/new-change-fragment.ts",
     "release:prep": "tsx scripts/release-prep.ts",
-    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "test": "node --import tsx --test \"test/**/*.test.ts\" \"host/sandbox/*.test.mjs\"",
     "test:conformance": "node --import tsx --test \"test/conformance/**/*.test.ts\"",
     "docs:build": "eleventy && pagefind --site _site && node scripts/check-docs.mjs",
     "docs:dev": "npm run docs:build && eleventy --serve --port=4173",

@@ -10,20 +10,27 @@
 FROM node:22-bookworm-slim
 
 ARG COPILOT_CLI_VERSION=1.0.90
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl git jq python3 ripgrep \
- && rm -rf /var/lib/apt/lists/* \
  && npm install -g --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
- && npm cache clean --force \
+ && mkdir -p /opt/hve-browser \
  && useradd --create-home --uid 10001 agent \
  && mkdir -p /workspace \
  && chown agent:agent /workspace
+COPY package.json package-lock.json /opt/hve-browser/
+RUN PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --prefix /opt/hve-browser --omit=dev --no-audit --no-fund \
+ && PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright /opt/hve-browser/node_modules/.bin/playwright install --with-deps chromium \
+ && chmod -R a-w /opt/hve-browser /opt/ms-playwright \
+ && rm -rf /var/lib/apt/lists/* \
+ && npm cache clean --force
 
 USER agent
 WORKDIR /workspace
 ENV HOME=/home/agent \
-    XDG_CACHE_HOME=/opt/copilot-cache
+    XDG_CACHE_HOME=/opt/copilot-cache \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 
 # The CLI unpacks its native runtime into the cache on first start and then
 # loads it as a shared object. Unpack it at build time into an image-owned,
@@ -36,6 +43,10 @@ RUN mkdir -p /opt/copilot-cache && chown agent:agent /opt/copilot-cache \
  && chown -R root:root /opt/copilot-cache && chmod -R a-w /opt/copilot-cache
 COPY entrypoint.sh /usr/local/bin/sandbox-entrypoint
 RUN chown root:root /usr/local/bin/sandbox-entrypoint && chmod 0555 /usr/local/bin/sandbox-entrypoint
+COPY browser-policy.mjs browser-runner.mjs /opt/hve-browser-cli/
+COPY squad-browser /usr/local/bin/squad-browser
+RUN chown -R root:root /opt/hve-browser-cli /usr/local/bin/squad-browser \
+ && chmod 0555 /opt/hve-browser-cli/browser-policy.mjs /opt/hve-browser-cli/browser-runner.mjs /usr/local/bin/squad-browser
 USER agent
 
 EXPOSE 4321

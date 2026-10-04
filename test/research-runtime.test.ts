@@ -8,7 +8,14 @@ import { test } from "node:test";
 
 import { MemoryBackedArtifactStore, type SquadArtifactStore } from "../src/engine/artifact-store.js";
 import { FileSquadMemoryStore } from "../src/engine/backends/file-squad-memory.js";
-import { ResearchRuntime, StageBlockedError, MAX_BUNDLE_RESOURCE_CHARS, MAX_LOADED_AUTHORITY_CHARS } from "../src/engine/research-runtime.js";
+import {
+  ResearchRuntime,
+  StageBlockedError,
+  MAX_BUNDLE_RESOURCE_CHARS,
+  MAX_LOADED_AUTHORITY_CHARS,
+  TEXT_ONLY_REPORT_CHARTER,
+  TEXT_ONLY_REPORT_LIMITS,
+} from "../src/engine/research-runtime.js";
 import { resolveSquadGithubRoot } from "../src/paths.js";
 import { AdvisoryBundle } from "../src/engine/advisory-bundle.js";
 import { EphemeralWorkspaceManager } from "../src/engine/workspace.js";
@@ -172,9 +179,38 @@ test("large stored sources page within read bounds with exact ranged evidence an
         offset: page.offset, endOffset: page.endOffset, totalCharacters: content.length,
         sourceSha256: createHash("sha256").update(content).digest("hex"),
       });
+
     }
     const saved = JSON.parse((await f.store.get("tenant-a", "project-a", `${output}.sources.json`))!.content);
     assert.deepEqual(saved.evidence, pages.map(page => page.evidence));
+  } finally { await f.cleanup(); }
+});
+
+test("text-only report mode restricts tools, writes one report, and applies a small execution budget", async () => {
+  const source = ".copilot-tracking/research/2026-09-18/run-prior-research.md";
+  const output = ".copilot-tracking/changes/run-1/artifact.md";
+  const f = await fixture([
+    call("read_artifact", { path: source }),
+    call("write_artifact", { path: output, content: "# Research report\n\nThe cited evidence supports the finding (E1). Keep the open decision unresolved." }),
+    finish(output, ["E1"]),
+  ]);
+  try {
+    await f.store.put("tenant-a", "project-a", source, "# Research findings\n\nHTTP 429 source evidence and an unresolved count choice.");
+    const implementor: PersonaRecord = {
+      role: "Squad Implementor",
+      charter: "The ordinary implementor may edit source code and run commands.",
+      applyTo: [],
+    };
+    await f.runtime.execute(implementor, request, "Prior research was completed.", "developer", undefined, "text-only-report");
+
+    const expectedTools = ["finish_stage", "list_artifacts", "read_artifact", "write_artifact"];
+    assert.deepEqual(f.backend.seen[0].tools?.map((entry) => entry.name).sort(), expectedTools);
+    assert.ok(f.backend.seen.every((entry) => JSON.stringify(entry.tools?.map((tool) => tool.name).sort()) === JSON.stringify(expectedTools)));
+    assert.deepEqual(actorAssignment(f.backend.seen[0]).writeScope, { exactPaths: [output], prefixes: [] });
+    assert.ok(f.backend.seen[0].system.includes(TEXT_ONLY_REPORT_CHARTER));
+    assert.match(f.backend.seen[0].system, new RegExp(`"limit":${TEXT_ONLY_REPORT_LIMITS.modelCalls}`));
+    assert.match(JSON.stringify(f.backend.seen[0].tools), new RegExp(output.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match((await f.store.get("tenant-a", "project-a", output))!.content, /open decision unresolved/);
   } finally { await f.cleanup(); }
 });
 
