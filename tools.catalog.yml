@@ -26,8 +26,9 @@
 # Per-tool `input` mirrors the `/squad` prompt arguments
 # (squad-src/.github/prompts/squad/squad.prompt.md):
 #   request (required), profile, tier, owner, mode, context, the optional
-#   discovery-gate depth on the two catch-all tools, and the optional federation
-#   `squad` sub-squad target (plus `init` on squad_federate).
+#   project + projectContext bridge checkpoint, the discovery-gate depth on the
+#   two catch-all tools, and the optional federation `squad` sub-squad target
+#   (plus `init` on squad_federate).
 #
 # Execution model (Phase 0): DELEGATED. The tool returns the Coordinator
 # persona + matched routing + framed request; the calling host (VS Code GitHub
@@ -40,7 +41,7 @@ schemaVersion: "0.1.0"
 # for documentation; each tool restates them inline so every tool input is a
 # complete, self-contained JSON Schema.
 conventions:
-  profiles: [default, full, security, design, architecture, azure, product]
+  profiles: [default, full, security, design, architecture, azure, product, brd]
   tiers: [fast, default]
   modes: [autonomous, autopilot]
   # Discovery-gate depths, offered only on the attended (delegated) path — the
@@ -53,6 +54,59 @@ conventions:
   # input targets one; `squad_federate` owns the meta layer (registry +
   # meta-routing). See squad-src/.github/instructions/squad/squad-federation.instructions.md.
   subSquadRoot: ".copilot-tracking/squad/members/<name>/"
+  projectInput: &projectInput
+    type: string
+    pattern: "^[a-z0-9][a-z0-9-]*$"
+    description: "Project label or server-acknowledged partition. With projectContext schema 2, immutable projectId determines storage identity. Never overload squad with a project id."
+  projectContextInput: &projectContextInput
+    type: object
+    additionalProperties: false
+    required: [schemaVersion, projectId, revision, sequence]
+    allOf:
+      - if:
+          properties:
+            schemaVersion:
+              const: 2
+        then:
+          required: [storage]
+          properties:
+            storage:
+              required: [provider, driveId, folderItemId]
+    properties:
+      schemaVersion:
+        type: integer
+        enum: [1, 2]
+      projectId:
+        type: string
+        pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+      revision:
+        type: integer
+        minimum: 0
+      sequence:
+        type: integer
+        minimum: 0
+      digest:
+        type: string
+        pattern: "^[0-9a-fA-F]{64}$"
+      trackingRoot:
+        type: string
+        const: ".copilot-tracking"
+      storage:
+        type: object
+        additionalProperties: false
+        required: [provider]
+        properties:
+          provider:
+            type: string
+            enum: [onedrive, sharepoint]
+          driveId:
+            type: string
+            minLength: 1
+          folderItemId:
+            type: string
+            minLength: 1
+          displayPath:
+            type: string
 
 tools:
   - id: squad_research
@@ -84,7 +138,7 @@ tools:
           description: "The research question or topic for the squad this turn."
         profile:
           type: string
-          enum: [default, full, security, design, architecture, azure, product]
+          enum: [default, full, security, design, architecture, azure, product, brd]
           description: "Optional squad profile to seed when the project has no squad yet."
         tier:
           type: string
@@ -100,6 +154,8 @@ tools:
         context:
           type: string
           description: "Optional free-form context (files, constraints, prior findings) to frame the request."
+        project: *projectInput
+        projectContext: *projectContextInput
         squad:
           type: string
           pattern: "^[a-z0-9][a-z0-9-]*$"
@@ -134,7 +190,7 @@ tools:
           description: "The work to plan this turn."
         profile:
           type: string
-          enum: [default, full, security, design, architecture, azure, product]
+          enum: [default, full, security, design, architecture, azure, product, brd]
           description: "Optional squad profile to seed when the project has no squad yet."
         tier:
           type: string
@@ -150,6 +206,8 @@ tools:
         context:
           type: string
           description: "Optional free-form context (research artifacts, constraints) to frame the plan."
+        project: *projectInput
+        projectContext: *projectContextInput
         squad:
           type: string
           pattern: "^[a-z0-9][a-z0-9-]*$"
@@ -197,7 +255,7 @@ tools:
           description: "What to review, validate, or take to council this turn."
         profile:
           type: string
-          enum: [default, full, security, design, architecture, azure, product]
+          enum: [default, full, security, design, architecture, azure, product, brd]
           description: "Optional squad profile to seed when the project has no squad yet."
         tier:
           type: string
@@ -213,6 +271,8 @@ tools:
         context:
           type: string
           description: "Optional free-form context (the change, plan, or design under review)."
+        project: *projectInput
+        projectContext: *projectContextInput
         squad:
           type: string
           pattern: "^[a-z0-9][a-z0-9-]*$"
@@ -247,7 +307,7 @@ tools:
           description: "The architecture or system-design question this turn."
         profile:
           type: string
-          enum: [default, full, security, design, architecture, azure, product]
+          enum: [default, full, security, design, architecture, azure, product, brd]
           description: "Optional squad profile to seed when the project has no squad yet."
         tier:
           type: string
@@ -263,6 +323,8 @@ tools:
         context:
           type: string
           description: "Optional free-form context (existing design, constraints, IaC) to frame the review."
+        project: *projectInput
+        projectContext: *projectContextInput
         squad:
           type: string
           pattern: "^[a-z0-9][a-z0-9-]*$"
@@ -301,7 +363,7 @@ tools:
           description: "The work for the squad this turn (any intent; the Coordinator classifies it)."
         profile:
           type: string
-          enum: [default, full, security, design, architecture, azure, product]
+          enum: [default, full, security, design, architecture, azure, product, brd]
           description: "Optional squad profile to seed when the project has no squad yet."
         tier:
           type: string
@@ -321,6 +383,42 @@ tools:
         context:
           type: string
           description: "Optional free-form context to frame the pipeline."
+        review:
+          type: object
+          additionalProperties: false
+          required: [kind, targetPath, targetSha256, document, sources]
+          description: "Explicit independent BRD review-only route. Uses the registered BRD Quality Reviewer without authoring/research/planning or roster mutation. All source hashes are verified before inference; source content is optional exact inline evidence. Document identity is caller-declared and checked against present frontmatter. Refresh tools/list after deployment."
+          properties:
+            kind:
+              const: brd
+            targetPath:
+              type: string
+              minLength: 1
+              maxLength: 4000
+            targetSha256:
+              type: string
+              pattern: "^[a-fA-F0-9]{64}$"
+            document:
+              type: object
+              additionalProperties: false
+              required: [id, version, phase]
+              properties:
+                id: { type: string, minLength: 1, maxLength: 4000 }
+                version: { type: string, minLength: 1, maxLength: 4000 }
+                phase: { enum: [Define, Govern] }
+            sources:
+              type: array
+              maxItems: 16
+              items:
+                type: object
+                additionalProperties: false
+                required: [path, sha256]
+                properties:
+                  path: { type: string, minLength: 1, maxLength: 4000 }
+                  sha256: { type: string, pattern: "^[a-fA-F0-9]{64}$" }
+                  content: { type: string, minLength: 1, maxLength: 64000 }
+        project: *projectInput
+        projectContext: *projectContextInput
         squad:
           type: string
           pattern: "^[a-z0-9][a-z0-9-]*$"
@@ -375,7 +473,7 @@ tools:
           description: "When true on an existing single-squad project (a top-level team.md, no federation.md), run Federation Promotion Mode: adopt the existing squad into a federation as its first sub-squad, relocating its state intact, before routing."
         profile:
           type: string
-          enum: [default, full, security, design, architecture, azure, product]
+          enum: [default, full, security, design, architecture, azure, product, brd]
           description: "Optional profile hint forwarded to a sub-squad's Init when it has no squad yet."
         tier:
           type: string
@@ -395,3 +493,5 @@ tools:
         context:
           type: string
           description: "Optional free-form context to frame the federation turn."
+        project: *projectInput
+        projectContext: *projectContextInput

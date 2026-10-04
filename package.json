@@ -37,7 +37,7 @@
     "version:set": "tsx scripts/set-version.ts",
     "change": "tsx scripts/new-change-fragment.ts",
     "release:prep": "tsx scripts/release-prep.ts",
-    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "test": "node --import tsx --test \"test/**/*.test.ts\" \"host/sandbox/*.test.mjs\"",
     "test:conformance": "node --import tsx --test \"test/conformance/**/*.test.ts\"",
     "docs:build": "eleventy && pagefind --site _site && node scripts/check-docs.mjs",
     "docs:dev": "npm run docs:build && eleventy --serve --port=4173",
@@ -51,11 +51,14 @@
     "@azure/identity": "^4.13.3",
     "@modelcontextprotocol/sdk": "^1.31.0",
     "ajv": "^8.17.1",
+    "html-to-text": "^10.0.1",
     "jose": "^6.2.12",
+    "undici": "^6.29.0",
     "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@11ty/eleventy": "3.1.6",
+    "@types/html-to-text": "^9.0.4",
     "@types/node": "^26.6.3",
     "cheerio": "1.2.0",
     "pagefind": "1.5.2",
@@ -64,5 +67,8 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "optionalDependencies": {
+    "@github/copilot-sdk": "1.0.16"
   }
 }

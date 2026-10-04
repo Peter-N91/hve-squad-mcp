@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+# The Copilot runtime starts the agent shell from an allowlisted environment,
+# so the image's PLAYWRIGHT_BROWSERS_PATH does not reach it; set it here.
+export PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+exec node /opt/hve-browser-cli/browser-runner.mjs "$@"

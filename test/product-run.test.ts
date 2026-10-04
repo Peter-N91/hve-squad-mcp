@@ -1,5 +1,6 @@
 /**
- * End-to-end proof that a `product` run's deliverables actually land in storage.
+ * Ledger persistence integration with scripted stage execution. Real research
+ * tool execution and evidence gates are covered by research-runtime.test.ts.
  *
  * The engine could route the right roles, resolve the right personas, and still
  * write nothing — which is exactly what happened before the ledger sink was
@@ -24,11 +25,22 @@ import { route } from "../src/engine/routing.js";
 import { SquadHistory } from "../src/engine/squad-history.js";
 import { SquadLedger } from "../src/engine/squad-ledger.js";
 import { SquadRunRecorder } from "../src/engine/squad-run-recorder.js";
+import { scriptedStageExecutor } from "./helpers/scripted-stage-executor.js";
 
 const TENANT = "11111111-1111-1111-1111-111111111111";
 const PROJECT = "acme-onboarding";
 const RUN_ID = "run-1";
 const TABLES = loadProfileTables();
+
+test("BRD initialization seeds the focused roster but never silently changes an existing roster", async () => {
+  const f = makeFixture();
+  const request = { toolId: "squad_run", request: "Produce a BRD." };
+  try {
+    assert.equal((await f.recorder.open(TENANT, "new-brd", request)).profile.name, "brd");
+    await f.ledger.seed(TENANT, "existing-default", resolveProfile("default", TABLES), TABLES);
+    assert.equal((await f.recorder.open(TENANT, "existing-default", request)).profile.name, "default");
+  } finally { f.cleanup(); }
+});
 
 /** Echoes back which persona was in authority, so a stage is attributable. */
 class EchoBackend implements ModelBackend {
@@ -75,6 +87,7 @@ async function runProduct(fixture: ReturnType<typeof makeFixture>) {
     REQUEST,
     {
       backend: fixture.backend,
+      stageExecutor: scriptedStageExecutor(fixture.backend),
       ledger: fixture.recorder.sinkFor(TENANT, PROJECT, REQUEST, RUN_ID),
     },
     { mode: "autopilot", plan },

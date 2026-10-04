@@ -8,6 +8,8 @@
  * not change.
  */
 import type { CatalogTool } from "../catalog/catalog.js";
+import type { ProjectContextEnvelope } from "./project-context-bridge.js";
+import type { BrdReviewRequest } from "./brd-review.js";
 
 /** A normalized tool invocation, derived from validated MCP tool-call args. */
 export interface CoordinatorRequest {
@@ -33,6 +35,12 @@ export interface CoordinatorRequest {
   discovery?: string;
   /** Optional free-form context. */
   context?: string;
+  /** Explicit independent review; never changes the project's seeded roster. */
+  review?: BrdReviewRequest;
+  /** Stable lower-kebab project partition for remote memory and tracking. */
+  project?: string;
+  /** Versioned M365 project checkpoint negotiated with the server. */
+  projectContext?: ProjectContextEnvelope;
   /** Optional federation sub-squad name to target (scopes state to members/<name>/). */
   squad?: string;
   /** Optional flag to run Federation Init Mode (squad_federate only). */

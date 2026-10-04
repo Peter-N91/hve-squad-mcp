@@ -231,7 +231,9 @@ export class GraphSquadMemoryStore implements SquadMemoryStore {
       "Content-Type": "text/markdown",
       ...(expectedEtag ? { "If-Match": expectedEtag } : {}),
     });
-    const response = await this.fetchImpl(this.itemUrl(segments, "content"), {
+    const url = this.itemUrl(segments, "content") +
+      (expectedEtag === "" ? "?@microsoft.graph.conflictBehavior=fail" : "");
+    const response = await this.fetchImpl(url, {
       method: "PUT",
       headers,
       body: this.cipher.encrypt(content),
@@ -240,7 +242,7 @@ export class GraphSquadMemoryStore implements SquadMemoryStore {
     if (response.status === 412 || response.status === 409) {
       // Lost the compare-and-swap: hand back the entry the caller lost to so it
       // can re-read and retry (never a silent clobber).
-      const current = await this.read(tenantId, project, path).catch(() => undefined);
+      const current = await this.read(tenantId, project, path);
       return { ok: false, conflict: true, current };
     }
     if (!response.ok) {

@@ -9,9 +9,51 @@
     "microsoft/hve-core": "14e46010407edaa194bd2bba3d4e100d8707739c",
     "Peter-N91/hve-squad": "71861e901021cb501edd819bd43e78a6aa38833f"
   },
-  "generatedAt": "2026-09-21",
+  "generatedAt": "2026-10-03",
   "agentFileCount": 90,
-  "instructionFileCount": 16,
+  "instructionFileCount": 17,
+  "skillFileCount": 0,
+  "dataFileCount": 0,
+  "skillCount": 0,
+  "skills": [],
+  "excludedFiles": [],
+  "referenceIssues": [
+    {
+      "from": "instructions/squad/squad-autonomous.instructions.md",
+      "target": "references/gates-and-modes.md",
+      "reason": "missing-markdown"
+    },
+    {
+      "from": "instructions/squad/squad-autopilot.instructions.md",
+      "target": "references/gates-and-modes.md",
+      "reason": "missing-markdown"
+    },
+    {
+      "from": "instructions/squad/squad-floor.instructions.md",
+      "target": "references/00-index.md",
+      "reason": "missing-markdown"
+    },
+    {
+      "from": "instructions/squad/squad-floor.instructions.md",
+      "target": "references/consumption.md",
+      "reason": "missing-markdown"
+    },
+    {
+      "from": "instructions/squad/squad-floor.instructions.md",
+      "target": "references/gates-and-modes.md",
+      "reason": "missing-markdown"
+    },
+    {
+      "from": "instructions/squad/squad-roster.instructions.md",
+      "target": "scripts/Get-HveCoreCastDelta.ps1",
+      "reason": "non-markdown-resource"
+    },
+    {
+      "from": "instructions/squad/squad-roster.instructions.md",
+      "target": "scripts/Update-ApmDependencies.ps1",
+      "reason": "non-markdown-resource"
+    }
+  ],
   "agentNames": [
     "Accessibility Framework Assessor",
     "Accessibility Planner",
@@ -556,6 +598,11 @@
       "source": "microsoft/hve-core/.github/agents/hve-core/subagents/vally-test-author.agent.md#14e46010407edaa194bd2bba3d4e100d8707739c"
     },
     {
+      "path": "instructions/shared/untrusted-content-boundary.instructions.md",
+      "sha256": "776e5dbcdbe8f82dd4ed8f8fda9a85706e371f43591fd31218dd680ea5a8b8bf",
+      "source": "microsoft/hve-core/.github/instructions/shared/untrusted-content-boundary.instructions.md#14e46010407edaa194bd2bba3d4e100d8707739c"
+    },
+    {
       "path": "instructions/squad/pptx-brand-template.instructions.md",
       "sha256": "4b0604de8add81f4035c9e987a8f6166558fd1c359b95566295cfac1fd6c901b",
       "source": "Peter-N91/hve-squad/squad-src/.github/instructions/squad/pptx-brand-template.instructions.md#71861e901021cb501edd819bd43e78a6aa38833f"
@@ -636,5 +683,5 @@
       "source": "microsoft/hve-core/.github/instructions/shared/untrusted-content-boundary.instructions.md#14e46010407edaa194bd2bba3d4e100d8707739c"
     }
   ],
-  "note": "Skill file trees are DEFERRED to the execution expansion; personas + squad/boundary instructions only."
+  "note": "Only pinned agent charters and instruction files are bundled. Agent Skill resources are not bundled or executable in this runtime; native server procedures and artifact validators replace those dependencies. Provenance is preserved for every bundled file. Code execution and deployment remain unavailable."
 }

@@ -20,7 +20,12 @@ import { composeEmbeddedPrompt } from "./embedded-prompt.js";
 import { resolvePersonaForRole } from "./embedded-roles.js";
 import type { PersonaRecord } from "./persona-loader.js";
 import type { RoutePlan } from "./routing.js";
-import type { BackendUsage, ModelBackend } from "./model-backend.js";
+import {
+  completeWithObserver,
+  type AttributedCompletionObserver,
+  type BackendUsage,
+  type ModelBackend,
+} from "./model-backend.js";
 import type { CoordinatorRequest } from "./coordinator-engine.js";
 
 /** The result of one pipeline stage. */
@@ -43,6 +48,7 @@ export interface PipelineResult {
 
 export interface DispatchLoopDeps {
   backend: ModelBackend;
+  onCompletion?: AttributedCompletionObserver;
 }
 
 /**
@@ -66,10 +72,14 @@ export async function runPipeline(
       context: request.context,
       priorArtifact,
     });
-    const completion = await deps.backend.complete({
-      system: prompt.system,
-      messages: prompt.messages,
-    });
+    const completion = await completeWithObserver(
+      deps.backend,
+      {
+        system: prompt.system,
+        messages: prompt.messages,
+      },
+      (event) => deps.onCompletion?.(event, { stage: stage.role, actor: stage.role }),
+    );
     results.push({
       role: stage.role,
       text: completion.text,

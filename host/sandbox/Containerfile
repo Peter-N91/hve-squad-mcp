@@ -1,0 +1,60 @@
+# Copilot stage sandbox: a disposable Linux "desktop" for one HVE Squad run.
+#
+# Runs the GitHub Copilot runtime in headless server mode. The MCP server's
+# Copilot stage executor connects to it over TCP, owns every permission
+# decision and tool hook, and persists artifacts itself. Nothing in this image
+# holds server credentials, and nothing written here is collected as output.
+#
+# The CLI version is pinned to the one the server's @github/copilot-sdk release
+# was built against (dist/cliVersion.js). Move both together.
+FROM node:22-bookworm-slim
+
+ARG COPILOT_CLI_VERSION=1.0.90
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl git jq python3 ripgrep \
+ && npm install -g --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
+ && mkdir -p /opt/hve-browser \
+ && useradd --create-home --uid 10001 agent \
+ && mkdir -p /workspace \
+ && chown agent:agent /workspace
+COPY package.json package-lock.json /opt/hve-browser/
+RUN PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --prefix /opt/hve-browser --omit=dev --no-audit --no-fund \
+ && PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright /opt/hve-browser/node_modules/.bin/playwright install --with-deps chromium \
+ && chmod -R a-w /opt/hve-browser /opt/ms-playwright \
+ && rm -rf /var/lib/apt/lists/* \
+ && npm cache clean --force
+
+USER agent
+WORKDIR /workspace
+ENV HOME=/home/agent \
+    XDG_CACHE_HOME=/opt/copilot-cache \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+
+# The CLI unpacks its native runtime into the cache on first start and then
+# loads it as a shared object. Unpack it at build time into an image-owned,
+# read-only location: the writable tmpfs mounts stay noexec, and code running
+# in the sandbox cannot modify the runtime that hosts the session.
+USER root
+RUN mkdir -p /opt/copilot-cache && chown agent:agent /opt/copilot-cache \
+ && su agent -s /bin/sh -c "XDG_CACHE_HOME=/opt/copilot-cache HOME=/tmp/build-home copilot --version" \
+ && rm -rf /tmp/build-home \
+ && chown -R root:root /opt/copilot-cache && chmod -R a-w /opt/copilot-cache
+COPY entrypoint.sh /usr/local/bin/sandbox-entrypoint
+RUN chown root:root /usr/local/bin/sandbox-entrypoint && chmod 0555 /usr/local/bin/sandbox-entrypoint
+COPY browser-policy.mjs browser-runner.mjs /opt/hve-browser-cli/
+COPY squad-browser /usr/local/bin/squad-browser
+RUN chown -R root:root /opt/hve-browser-cli /usr/local/bin/squad-browser \
+ && chmod 0555 /opt/hve-browser-cli/browser-policy.mjs /opt/hve-browser-cli/browser-runner.mjs /usr/local/bin/squad-browser
+USER agent
+
+EXPOSE 4321
+
+# COPILOT_CONNECTION_TOKEN must be supplied at run time; the runtime rejects
+# clients that do not present it. The server supplies the GitHub identity per
+# session; never bake one in or set COPILOT_GITHUB_TOKEN on the container.
+# The entrypoint starts the runtime from an allowlisted environment, so
+# platform-injected variables (such as a managed-identity endpoint) never reach
+# the agent's shell.
+ENTRYPOINT ["/usr/local/bin/sandbox-entrypoint"]

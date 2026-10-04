@@ -21,20 +21,23 @@
  * so the routing engine and the drift generator read these same files the same
  * way — no new parser is invented.
  *
- * Advisory stage order (VF-08) — the explicit, documented order this router
- * plans and Phase 3 will execute:
+ * Advisory stage order (VF-08) — the pipeline resolves the routed roles into
+ * this sequence:
  *
  *     research (`researcher`)
  *       -> plan (`lead`)
  *       -> council (`architect`, `security`, `cost-manager`, `product-owner`,
  *                   +`rai` when the request touches the RAI domain)
+ *       -> [text-only developer report OR deliverable fan-out]
  *       -> review (`tester`)
  *       -> backlog-handoff
  *
- * The linear pipeline stages returned in {@link RoutePlan.stages} are
- * research -> plan -> review; the council is surfaced separately in
+ * The linear route returned in {@link RoutePlan.stages} remains
+ * research -> plan -> review; the report/fan-out stage is resolved by the
+ * advisory pipeline, and the council is surfaced separately in
  * {@link RoutePlan.council} (engaged only when the request crosses two or more
- * council domains) so Phase 3 can interleave it between plan and review without
+ * council domains) so the pipeline can interleave it after plan and before
+ * report/fan-out and review without
  * this Phase re-planning. A single research-type request routes to the single
  * `researcher` stage only.
  *
@@ -49,6 +52,8 @@ import { resolveSquadGithubRoot } from "../paths.js";
 import {
   defaultProfileTables,
   INTAKE_VALIDATOR_ROLE,
+  isBrdAuthoringRequest,
+  profileForRequest,
   resolveProfile,
   type ProfileTables,
 } from "./profiles.js";
@@ -230,6 +235,9 @@ export interface RoutePlan {
    * other profile keeps the unchanged single build.
    */
   fanOut: RouteStage[];
+  requiredAgent?: string;
+  missingRoles?: string[];
+  focusedDeliverable?: boolean;
 }
 
 /** Options mirroring the `/squad` prompt arguments that influence routing. */
@@ -242,6 +250,7 @@ export interface RouteOptions {
   tier?: string;
   /** Optional Member Name hint — accepted for forward-compat; does not change the stage plan. */
   owner?: string;
+  review?: import("./brd-review.js").BrdReviewRequest;
 }
 
 /** The advisory role KEYS, in the fixed advisory stage order (VF-08). */
@@ -336,8 +345,17 @@ export function computeRoutePlan(
   tables: RoutingTables,
   profileTables?: ProfileTables,
 ): RoutePlan {
+  if (opts.review) {
+    return {
+      stages: [{ role: "brd-reviewer", agentName: "BRD Quality Reviewer", tier: "confirm", parallelEligible: false }],
+      council: { engaged: false, members: [], missingQuorum: [] },
+      profile: opts.profile ?? "brd", fanOut: [], focusedDeliverable: true, requiredAgent: "BRD Quality Reviewer",
+    };
+  }
   const lower = request.toLowerCase();
-  const profile = resolveProfile(opts.profile, profileTables ?? defaultProfileTables());
+  const effectiveTables = profileTables ?? defaultProfileTables();
+  const profile = resolveProfile(profileForRequest(opts.profile, request), effectiveTables);
+  const brd = profile.name === "brd" || isBrdAuthoringRequest(request);
 
   const researchMatched = RESEARCH_KEYWORDS.some((keyword) => keywordPresent(lower, keyword));
   const councilDomains = crossedCouncilDomains(lower);
@@ -351,7 +369,7 @@ export function computeRoutePlan(
 
   // A profile whose Implement stage fans out is never a single-stage run: the
   // deliverables it seeds are the point of choosing it.
-  const advisoryOverride = Boolean(opts.mode) || profile.fansOut;
+  const advisoryOverride = Boolean(opts.mode) || profile.fansOut || brd;
   const otherMatched = nonResearchRowMatched || councilDomains.length > 0 || advisoryOverride;
 
   // A role the profile did not seed cannot be dispatched this run.
@@ -359,7 +377,12 @@ export function computeRoutePlan(
   const intake = profile.hasIntakeGate
     ? buildStage(tables, INTAKE_VALIDATOR_ROLE, "intake", "confirm", false)
     : undefined;
-  const fanOut = profile.fansOut
+  const analyst = effectiveTables.cast.get("analyst");
+  const brdAvailable = profile.seeded.has("analyst") &&
+    [analyst?.primary, ...(analyst?.alternates ?? [])].includes("BRD Builder");
+  const fanOut = brd
+    ? (brdAvailable ? [{ ...buildStage(tables, "analyst", "requirements", "confirm", false), agentName: "BRD Builder" }] : [])
+    : profile.fansOut
     ? profile.deliverableRoles.map((role) => buildStage(tables, role, role, "confirm", true))
     : [];
 
@@ -402,6 +425,7 @@ export function computeRoutePlan(
     profile: profile.name,
     intake,
     fanOut,
+    ...(brd ? { requiredAgent: "BRD Builder", missingRoles: brdAvailable ? [] : ["analyst"], focusedDeliverable: true } : {}),
   };
 }
 

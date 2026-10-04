@@ -9,3 +9,13 @@ host/cast/** text eol=lf
 # the same reason: a CRLF checkout would otherwise make the no-drift check depend
 # on which platform last ran the generator.
 generated/** text eol=lf
+
+# Vendored RPI templates whose README records the upstream SHA-256 of each file.
+test/fixtures/rpi-templates/** text eol=lf
+
+# Shell scripts run inside Linux images; a CRLF checkout would break their shebang.
+*.sh text eol=lf
+
+# The sandbox image runs these files on Linux; a CRLF shebang (`#!/bin/sh\r`)
+# makes the launcher fail with "not found".
+host/sandbox/** text eol=lf

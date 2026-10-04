@@ -36,12 +36,16 @@ import { isAdvisoryOnly } from "./gates.js";
 import { defaultProfileTables, resolveProfile } from "./profiles.js";
 import type { BusinessToolSpec } from "./business-tools.js";
 import { FEDERATION_ROLE, federationPersona } from "./federation.js";
-import { coordinatorRequestFromRun, encodeRunParams } from "./run-params.js";
+import {
+  coordinatorRequestFromRun,
+  decodeRunParams,
+  encodeRunParams,
+} from "./run-params.js";
 import { runPipeline } from "./dispatch-loop.js";
-import { runAdvisoryPipeline, type AdvisoryLedgerSink, type AdvisoryStagePlan } from "./advisory-pipeline.js";
+import { AdvisoryStageFailure, runAdvisoryPipeline, type AdvisoryLedgerSink, type AdvisoryStagePlan } from "./advisory-pipeline.js";
 import { StoreAdvisoryPersistence } from "./advisory-run-store.js";
 import type { PersonaRecord } from "./persona-loader.js";
-import { EphemeralRunStateStore, type RunState, type RunStateStore, type RunStatus } from "./run-state.js";
+import { EphemeralRunStateStore, type HumanInputRequest, type RunState, type RunStateStore, type RunStatus } from "./run-state.js";
 import {
   GateKeeper,
   InMemoryApprovalChannel,
@@ -49,12 +53,31 @@ import {
   type ApprovalRecord,
   type HumanApprovalChannel,
 } from "./gates.js";
-import type { BackendUsage, ModelBackend } from "./model-backend.js";
+import {
+  aggregateBackendUsage,
+  attributeCompletion,
+  completeWithObserver,
+  assertBackendPreflight,
+  prepareTaskContext,
+  ModelBackendError,
+  usageFromCompletionRecords,
+  type AttributedCompletionObserver,
+  type BackendUsage,
+  type CompletionUsageRecord,
+  type ModelBackend,
+} from "./model-backend.js";
+import { responsibleAiBlocker, type ResponsibleAiBlocker } from "./responsible-ai.js";
+import { modelFailureDiagnostics, readModelFailure, type ModelFailureDiagnostics } from "./model-backend.js";
 import type { CatalogTool } from "../catalog/catalog.js";
 import type { CoordinatorRequest, MatchedRouting } from "./coordinator-engine.js";
 import type { AuthContext } from "../auth/entra.js";
 import type { WorkspaceManager } from "./workspace.js";
 import type { RedactingLogger } from "../observability/logger.js";
+import { parseBrdReview } from "./brd-review.js";
+import type { SquadArtifactStore } from "./artifact-store.js";
+import { ResearchRuntime, type ResearchRuntimeOptions, type AdvisoryStageExecutor } from "./research-runtime.js";
+import { AdvisoryCheckpointPersistenceError, encodeAdvisoryCheckpoint, readAdvisoryCheckpoint } from "./advisory-checkpoint.js";
+import type { Workspace } from "./workspace.js";
 
 /** The request-scoped context the embedded engine runs under. */
 export interface EmbeddedContext {
@@ -75,6 +98,8 @@ export interface EmbeddedResult {
   approvalRequest?: string;
   /** Why the run is held or denied. */
   reason?: string;
+  responsibleAi?: ResponsibleAiBlocker;
+  modelFailure?: ModelFailureDiagnostics;
   /** Server-allocated workspace root used for the run (already torn down on return). */
   workspaceRoot?: string;
   /** Server-allocated run id. */
@@ -82,6 +107,8 @@ export interface EmbeddedResult {
   /** The backend that produced the artifact. */
   backendId?: string;
   usage?: BackendUsage;
+  humanInput?: HumanInputRequest;
+  expiresAt?: number;
 }
 
 export interface EmbeddedCoordinatorDeps {
@@ -100,10 +127,19 @@ export interface EmbeddedCoordinatorDeps {
    * exceed the 240s HTTP ingress ceiling).
    */
   driveOnPoll?: boolean;
+  /**
+   * With `driveOnPoll`, how long (ms) a poll that claims a run waits for it before
+   * answering `run_already_in_flight` while execution continues in this process.
+   * Keeps polls under the 240s ingress ceiling. Absent, the poll drives the whole
+   * run synchronously.
+   */
+  pollDriveWaitMs?: number;
   /** WI-06 — TTL (ms) stamped on a newly created async run (default: none). */
   runTtlMs?: number;
   /** WI-06 — worker/poll claim lease (ms); a running run past its lease is reclaimable. */
   leaseMs?: number;
+  /** Trusted host budget; long budgets require off-request worker execution. */
+  stageDeadlineMs?: number;
   /**
    * Deterministic server-side squad-memory continuity. When supplied, every
    * embedded dispatch is preceded by a read of the resolved project's `state` +
@@ -118,6 +154,15 @@ export interface EmbeddedCoordinatorDeps {
    * deliverables plus the append-only logs. Absent, behaviour is unchanged.
    */
   runRecorder?: SquadRunRecorder;
+  /** Durable tenant/project artifacts for tool-enabled research and advisory stages. */
+  researchArtifacts?: SquadArtifactStore;
+  /** Trusted host adapter override; never populated from MCP caller arguments. */
+  stageExecutorFactory?: (
+    workspace: Workspace,
+    project: string | undefined,
+    runId: string,
+    options?: Pick<ResearchRuntimeOptions, "allowHumanInput" | "continuation" | "deadlineMs" | "onCompletion">,
+  ) => AdvisoryStageExecutor;
   logger?: RedactingLogger;
 }
 
@@ -183,10 +228,16 @@ export class EmbeddedCoordinator {
   private readonly approvals: HumanApprovalChannel;
   private readonly maxHeldRunsPerTenant: number;
   private readonly driveOnPoll: boolean;
+  private readonly pollDriveWaitMs?: number;
+  /** Runs this process is driving in the background, so a lapsed lease cannot start a second drive. */
+  private readonly backgroundRuns = new Map<string, Promise<EmbeddedResult>>();
   private readonly runTtlMs?: number;
   private readonly leaseMs?: number;
+  private readonly stageDeadlineMs?: number;
   private readonly autoMemory?: AutoMemory;
   private readonly runRecorder?: SquadRunRecorder;
+  private readonly researchArtifacts?: SquadArtifactStore;
+  private readonly stageExecutorFactory?: EmbeddedCoordinatorDeps["stageExecutorFactory"];
   private readonly logger?: RedactingLogger;
   /** Outstanding held runs per tenant, started via startHttpRun (MEDIUM-2). */
   private readonly heldCounts = new Map<string, number>();
@@ -200,33 +251,43 @@ export class EmbeddedCoordinator {
     this.approvals = deps.approvals ?? new InMemoryApprovalChannel();
     this.maxHeldRunsPerTenant = deps.maxHeldRunsPerTenant ?? DEFAULT_MAX_HELD_RUNS_PER_TENANT;
     this.driveOnPoll = deps.driveOnPoll ?? true;
+    this.pollDriveWaitMs = deps.pollDriveWaitMs;
     this.runTtlMs = deps.runTtlMs;
     this.leaseMs = deps.leaseMs;
+    this.stageDeadlineMs = deps.stageDeadlineMs;
     this.autoMemory = deps.autoMemory;
     this.runRecorder = deps.runRecorder;
+    this.researchArtifacts = deps.researchArtifacts;
+    this.stageExecutorFactory = deps.stageExecutorFactory;
     this.logger = deps.logger;
   }
 
   /**
    * Auto-memory pre-read: resolve the project partition and merge prior `state` +
-   * `decisions` into the request's `context` as DATA. A no-op when auto-memory is
-   * not wired, so the default posture is byte-identical to before.
+   * `decisions` into legacy request context as DATA. Explicit task packets are
+   * validated before framing and retain their selected context without history.
    */
   private async withMemory(
     tenantId: string,
     request: CoordinatorRequest,
   ): Promise<{ request: CoordinatorRequest; project?: string }> {
+    parseBrdReview(request.review);
+    if (request.review) assertBackendPreflight({ system: "", messages: [
+      { role: "user", content: JSON.stringify(request.review.document) },
+      ...request.review.sources.filter((source) => source.content !== undefined).map((source) => ({ role: "user" as const, content: source.content! })),
+    ] });
+    const packet = request.context !== undefined && prepareTaskContext(request.context).packet;
+    const taskOnly = Boolean(request.review) || packet;
     if (!this.autoMemory) {
       return { request };
     }
     const project = this.autoMemory.resolveProject(request);
-    const memory = await this.autoMemory.loadContext(tenantId, project);
-    let carried = withMemoryContext(request, memory);
+    let carried = taskOnly ? request : withMemoryContext(request, await this.autoMemory.loadContext(tenantId, project));
     if (this.runRecorder) {
       // Seeding the roster and reading the run index back are the artifact-shaped
       // twin of the digest read above, so they share this one moment.
       const opened = await this.runRecorder.open(tenantId, project, carried);
-      carried = withMemoryContext(carried, opened.historyBlock);
+      if (!taskOnly) carried = withMemoryContext(carried, opened.historyBlock);
       // The seeded roster wins over the caller's hint for the rest of the run.
       carried = { ...carried, profile: opened.profile.name };
     }
@@ -266,7 +327,127 @@ export class EmbeddedCoordinator {
     if (!this.runRecorder || !project) {
       return undefined;
     }
+
     return this.runRecorder.sinkFor(tenantId, project, request, runId);
+  }
+
+  private completionRecorder(
+    tenantId: string,
+    runId: string,
+  ): (record: CompletionUsageRecord) => Promise<void> {
+    const persistence = new StoreAdvisoryPersistence(this.runStateStore, runId);
+    return async (record) => {
+      const cost = record.usage?.estimatedCostUsd;
+      let recorded: boolean;
+      try {
+        recorded = await persistence.recordAttributedCompletion(record);
+      } catch (error) {
+        if (typeof cost === "number" && cost > 0) {
+          this.quota.recordCostUsd(tenantId, cost);
+        }
+
+        throw error;
+      }
+      if (!recorded) {
+        return;
+      }
+      if (typeof cost === "number" && cost > 0) {
+        this.quota.recordCostUsd(tenantId, cost);
+      }
+      this.logger?.info("model completion accounted", {
+        eventId: record.eventId,
+        runId: record.runId,
+        stage: record.stage,
+        actor: record.actor,
+        attempt: record.attempt,
+        outcome: record.outcome,
+        backendId: record.backendId,
+        model: record.model,
+        deployment: record.deployment,
+        providerResponseId: record.providerResponseId,
+        toolCallCount: record.toolCallCount,
+        inputTokens: record.usage?.inputTokens,
+        outputTokens: record.usage?.outputTokens,
+        reasoningTokens: record.usage?.reasoningTokens,
+        cacheReadTokens: record.usage?.cacheReadTokens,
+        cacheWriteTokens: record.usage?.cacheWriteTokens,
+        estimatedCostUsd: record.usage?.estimatedCostUsd,
+        costCurrency: record.usage?.costCurrency,
+        costBasis: record.usage?.costBasis,
+        costStatus: record.usage?.costStatus ?? "unavailable",
+        "gen_ai.operation.name": "chat",
+        "gen_ai.response.model": record.model,
+        "gen_ai.request.model": record.deployment,
+        "gen_ai.agent.name": record.actor,
+        "microsoft.gen_ai.main_agent.name": record.stage,
+        "gen_ai.conversation.id": record.runId,
+        "gen_ai.usage.input_tokens": record.usage?.inputTokens,
+        "gen_ai.usage.output_tokens": record.usage?.outputTokens,
+        "gen_ai.usage.cache_read.input_tokens": record.usage?.cacheReadTokens,
+        "gen_ai.usage.cache_write.input_tokens": record.usage?.cacheWriteTokens,
+        "gen_ai.usage.reasoning_tokens": record.usage?.reasoningTokens,
+        "gen_ai.tool.call_count": record.toolCallCount,
+        "error.type": record.outcome === "completed" ? undefined : record.finishReason ?? record.outcome,
+        resultCode: record.outcome,
+        success: record.outcome === "completed",
+      });
+    };
+  }
+
+  private async localPreflightResult(
+    error: unknown, runId: string, matchedRouting: MatchedRouting,
+  ): Promise<EmbeddedResult | undefined> {
+    const cause = error instanceof AdvisoryStageFailure ? error.cause : error;
+    if (!(cause instanceof ModelBackendError) || !cause.preflight || cause.providerAttempted !== false) return undefined;
+    const stage = error instanceof AdvisoryStageFailure ? error.failedStage : matchedRouting.role;
+    const modelFailure = modelFailureDiagnostics(cause, stage, runId);
+    const reason = `model_backend_${cause.kind}`;
+    await this.runStateStore.update(runId, { status: "failed", failureReason: reason, modelFailure });
+    this.logger?.info("local model preflight rejected", { runId, modelFailure });
+    return { kind: "embedded", outcome: "denied", matchedRouting, runId, reason, modelFailure };
+  }
+
+  private completionObserver(
+    tenantId: string,
+    runId: string,
+  ): AttributedCompletionObserver {
+    const record = this.completionRecorder(tenantId, runId);
+    return (event, context) => record(attributeCompletion(event, { runId, ...context }));
+  }
+
+  private stageExecutor(workspace: Workspace, project: string | undefined, runId: string, options?: Pick<ResearchRuntimeOptions, "allowHumanInput" | "continuation">): AdvisoryStageExecutor | undefined {
+    const runtimeOptions = {
+      ...options,
+      deadlineMs: this.stageDeadlineMs,
+      onCompletion: this.completionRecorder(workspace.tenantId, runId),
+      onTiming: (event: Parameters<NonNullable<ResearchRuntimeOptions["onTiming"]>>[0]) => this.logger?.info("stage runtime timing", event),
+    };
+    if (this.stageExecutorFactory) return this.stageExecutorFactory(workspace, project, runId, runtimeOptions);
+    if (!this.researchArtifacts || !project) return undefined;
+    return new ResearchRuntime({
+      backend: this.backend, workspace, store: this.researchArtifacts, project, runId,
+      ...runtimeOptions,
+      beforeCall: () => this.quota.checkCost(workspace.tenantId),
+    });
+  }
+
+  /** Resolve the project binding persisted on an async run, tenant-scoped. */
+  async projectContextForRun(
+    runId: string,
+    ctx: EmbeddedContext,
+  ): Promise<
+    (Pick<CoordinatorRequest, "project" | "projectContext"> & { createdAt: number }) | undefined
+  > {
+    const run = await this.runStateStore.get(runId);
+    if (!run || run.tenantId !== ctx.auth.tenantId) {
+      return undefined;
+    }
+    const params = decodeRunParams(run.params);
+    return {
+      project: params.project,
+      projectContext: params.projectContext,
+      createdAt: run.createdAt,
+    };
   }
 
   /**
@@ -311,6 +492,9 @@ export class EmbeddedCoordinator {
     request: CoordinatorRequest,
     ctx: EmbeddedContext,
   ): Promise<EmbeddedResult> {
+    if (this.researchArtifacts && !tool.gates && ["squad_research", "squad_review"].includes(tool.id)) {
+      return this.handleAdvisory(tool, request, ctx);
+    }
     const matchedRouting = toMatchedRouting(tool);
     const tenantId = ctx.auth.tenantId;
     if (request.discovery) {
@@ -374,21 +558,26 @@ export class EmbeddedCoordinator {
           request: framed.request,
           context: framed.context,
         });
+        const observeCompletion = this.completionObserver(tenantId, run.runId);
 
         // Single server-side dispatch (SEC-7: inference + contained file I/O only).
-        const completion = await this.backend.complete({
-          system: prompt.system,
-          messages: prompt.messages,
-        });
+        const completion = await completeWithObserver(
+          this.backend,
+          {
+            system: prompt.system,
+            messages: prompt.messages,
+          },
+          (event) => observeCompletion(
+            event,
+            { stage: tool.role, actor: tool.role },
+          ),
+        );
 
         // Write the artifact INSIDE the isolated workspace, then read it back.
         const artifactPath = workspace.resolve("artifact.md");
         await writeFile(artifactPath, completion.text, "utf8");
         const artifact = await readFile(artifactPath, "utf8");
 
-        if (completion.usage?.estimatedCostUsd) {
-          this.quota.recordCostUsd(tenantId, completion.usage.estimatedCostUsd);
-        }
         await this.runStateStore.update(run.runId, { status: "complete" });
         await this.recordMemory(tenantId, project, { toolId: tool.id, runId: run.runId, artifact });
 
@@ -404,6 +593,8 @@ export class EmbeddedCoordinator {
         };
         return result;
       } catch (error) {
+        const localFailure = await this.localPreflightResult(error, run.runId, matchedRouting);
+        if (localFailure) return localFailure;
         await this.runStateStore.update(run.runId, { status: "failed" });
         throw error;
       } finally {
@@ -469,6 +660,8 @@ export class EmbeddedCoordinator {
           {
             backend: this.backend,
             ledger: this.ledgerSink(tenantId, project, framed, run.runId),
+            stageExecutor: this.stageExecutor(workspace, project, run.runId),
+            onCompletion: this.completionObserver(tenantId, run.runId),
           },
           { plan },
         );
@@ -478,10 +671,9 @@ export class EmbeddedCoordinator {
         await writeFile(artifactPath, result.artifact, "utf8");
         const artifact = await readFile(artifactPath, "utf8");
 
-        for (const usage of result.usage) {
-          if (usage.estimatedCostUsd) {
-            this.quota.recordCostUsd(tenantId, usage.estimatedCostUsd);
-          }
+        if (result.outcome === "halted" && result.reason !== "council_stop") {
+          await this.runStateStore.update(run.runId, { status: "failed", artifact, failureReason: result.reason });
+          return { kind: "embedded", outcome: "denied", matchedRouting, artifact, reason: result.reason, runId: run.runId };
         }
         await this.runStateStore.update(run.runId, { status: "complete", artifact });
         await this.recordMemory(tenantId, project, { toolId: tool.id, runId: run.runId, artifact });
@@ -494,9 +686,11 @@ export class EmbeddedCoordinator {
           workspaceRoot: workspace.root,
           runId: run.runId,
           backendId: result.stages.at(-1)?.backendId,
-          usage: result.usage.at(-1),
+          usage: aggregateBackendUsage(result.usage),
         };
       } catch (error) {
+        const localFailure = await this.localPreflightResult(error, run.runId, matchedRouting);
+        if (localFailure) return localFailure;
         await this.runStateStore.update(run.runId, { status: "failed" });
         throw error;
       } finally {
@@ -553,6 +747,8 @@ export class EmbeddedCoordinator {
       const persona: PersonaRecord = {
         role: spec.role,
         applyTo: deployed?.applyTo ?? [],
+        agents: deployed?.agents,
+        tools: deployed?.tools,
         charter: deployed?.charter ? `${deployed.charter}\n\n${spec.charter}` : spec.charter,
       };
 
@@ -565,6 +761,8 @@ export class EmbeddedCoordinator {
           {
             backend: this.backend,
             ledger: this.ledgerSink(tenantId, project, framed, run.runId),
+            stageExecutor: this.stageExecutor(workspace, project, run.runId),
+            onCompletion: this.completionObserver(tenantId, run.runId),
           },
           { plan: [{ kind: "persona", role: persona.role, persona }] },
         );
@@ -573,10 +771,9 @@ export class EmbeddedCoordinator {
         await writeFile(artifactPath, result.artifact, "utf8");
         const artifact = await readFile(artifactPath, "utf8");
 
-        for (const usage of result.usage) {
-          if (usage.estimatedCostUsd) {
-            this.quota.recordCostUsd(tenantId, usage.estimatedCostUsd);
-          }
+        if (result.outcome === "halted" && result.reason !== "council_stop") {
+          await this.runStateStore.update(run.runId, { status: "failed", artifact, failureReason: result.reason });
+          return { kind: "embedded", outcome: "denied", matchedRouting, artifact, reason: result.reason, runId: run.runId };
         }
         await this.runStateStore.update(run.runId, { status: "complete", artifact });
         await this.recordMemory(tenantId, project, {
@@ -593,9 +790,11 @@ export class EmbeddedCoordinator {
           workspaceRoot: workspace.root,
           runId: run.runId,
           backendId: result.stages.at(-1)?.backendId,
-          usage: result.usage.at(-1),
+          usage: aggregateBackendUsage(result.usage),
         };
       } catch (error) {
+        const localFailure = await this.localPreflightResult(error, run.runId, matchedRouting);
+        if (localFailure) return localFailure;
         await this.runStateStore.update(run.runId, { status: "failed" });
         throw error;
       } finally {
@@ -626,7 +825,7 @@ export class EmbeddedCoordinator {
     const matchedRouting = toMatchedRouting(tool);
     const tenantId = ctx.auth.tenantId;
     const run = await this.runStateStore.create({ tenantId, toolId: tool.id });
-    const core = await this.runPipelineCore(tenantId, request, personaRoots);
+    const core = await this.runPipelineCore(tenantId, run.runId, request, personaRoots);
     if (core.outcome === "denied") {
       await this.runStateStore.update(run.runId, { status: "failed" });
       return { kind: "embedded", outcome: "denied", matchedRouting, reason: core.reason };
@@ -678,7 +877,8 @@ export class EmbeddedCoordinator {
         runId,
       };
     }
-    const core = await this.runPipelineCore(run.tenantId, request, personaRoots);
+    if (run.humanInput || run.advisoryCheckpoint) return this.pollRun(runId, ctx);
+    const core = await this.runPipelineCore(run.tenantId, runId, request, personaRoots);
     if (core.outcome === "denied") {
       await this.runStateStore.update(runId, { status: "failed" });
       return { kind: "embedded", outcome: "denied", matchedRouting: EMPTY_ROUTING, reason: core.reason, runId };
@@ -739,6 +939,7 @@ export class EmbeddedCoordinator {
       };
     }
 
+    if (run.humanInput || run.advisoryCheckpoint) return this.pollRun(runId, ctx);
     // The ONLY release path: an explicit, out-of-band operator approval keyed on
     // the run id. Never derived from caller input or model output (SEC-6).
     if (!(await this.approvals.isApproved(runId))) {
@@ -749,14 +950,17 @@ export class EmbeddedCoordinator {
         reason: run.holdReason ?? "awaiting human approval",
         approvalRequest:
           "This run is paused for human approval and will not proceed until an " +
-          "operator approves it out-of-band. The squad never auto-releases a gate.",
+          "operator submits explicit human approval through squad_approve (Squad.Operate) " +
+          "or /admin/approve. Then poll the same run. The squad never auto-releases a gate.",
         runId,
+        backendId: run.completionUsage?.at(-1)?.backendId,
+        usage: usageFromCompletionRecords(run.completionUsage),
       };
     }
 
     // Approved: transition held -> running and execute the pipeline to completion.
     await this.runStateStore.update(runId, { status: "running" });
-    const core = await this.runPipelineCore(run.tenantId, request, personaRoots);
+    const core = await this.runPipelineCore(run.tenantId, runId, request, personaRoots);
     if (core.outcome === "denied") {
       await this.runStateStore.update(runId, { status: "failed" });
       return { kind: "embedded", outcome: "denied", matchedRouting: EMPTY_ROUTING, reason: core.reason, runId };
@@ -777,10 +981,10 @@ export class EmbeddedCoordinator {
   /**
    * Start an async run over the remote (HTTP) boundary. Admits under quota,
    * classifies the gate, and persists a DURABLE run carrying the caller request so
-   * a later status poll can drive it to completion after approval. `squad_run` is
-   * gated, so this returns a HELD result with a run id: no pipeline runs and no
-   * model is called until an operator approves out-of-band (SEC-6 / PROD-5 carried
-   * across the remote boundary). A held run does not hold a concurrency slot.
+   * a later status poll can drive it to completion. A gated run waits for explicit
+   * operator approval. A run admitted by server policy (including opted-in
+   * advisory autopilot) is queued without requiring an approval. Neither branch
+   * calls the model here or holds a concurrency slot.
    */
   async startHttpRun(
     tool: CatalogTool,
@@ -851,7 +1055,7 @@ export class EmbeddedCoordinator {
    * its stored artifact; failed is denied; an unknown or cross-tenant run id is
    * denied (no leakage). A held-but-unapproved run stays held (never auto-release).
    *
-   * When the run is approved, behavior depends on `driveOnPoll`:
+   * For an approved hold or a running queue entry, behavior depends on `driveOnPoll`:
    *   * `driveOnPoll` true (single-replica default) — the poll DRIVES execution:
    *     it CAS-claims held/running(lease-expired) -> running (so exactly one poll
    *     or replica drives; MEDIUM-1 across replicas via WI-06 CAS), runs the
@@ -872,13 +1076,34 @@ export class EmbeddedCoordinator {
       };
     }
     if (run.status === "complete") {
-      return { kind: "embedded", outcome: "completed", matchedRouting: EMPTY_ROUTING, artifact: run.artifact, runId };
+      return {
+        kind: "embedded",
+        outcome: "completed",
+        matchedRouting: EMPTY_ROUTING,
+        artifact: run.artifact,
+        runId,
+        backendId: run.completionUsage?.at(-1)?.backendId,
+        usage: usageFromCompletionRecords(run.completionUsage),
+      };
     }
     if (run.status === "failed") {
-      return { kind: "embedded", outcome: "denied", matchedRouting: EMPTY_ROUTING, reason: "run_failed", runId };
+      return {
+        kind: "embedded",
+        outcome: "denied",
+        matchedRouting: EMPTY_ROUTING,
+        reason: run.failureReason ?? "run_failed",
+        artifact: run.artifact,
+        runId,
+        backendId: run.completionUsage?.at(-1)?.backendId,
+        usage: usageFromCompletionRecords(run.completionUsage),
+        ...(run.responsibleAi ? { responsibleAi: run.responsibleAi } : {}),
+        ...(run.modelFailure ? { modelFailure: readModelFailure(run.modelFailure) } : {}),
+      };
     }
-    // held / running: never auto-release; only an explicit approval proceeds.
-    if (!(await this.approvals.isApproved(runId))) {
+    if (run.humanInput && !run.humanInput.response) return this.awaitingInput(run);
+    // A queued running record has already passed server gate classification.
+    // Only an actual held record requires an operator's approval.
+    if (run.status === "held" && !(await this.approvals.isApproved(runId))) {
       return {
         kind: "embedded",
         outcome: "held",
@@ -886,7 +1111,8 @@ export class EmbeddedCoordinator {
         reason: run.holdReason ?? "awaiting human approval",
         approvalRequest:
           "This run is paused for human approval and will not proceed until an " +
-          "operator approves it out-of-band. The squad never auto-releases a gate.",
+          "operator submits explicit human approval through squad_approve (Squad.Operate) " +
+          "or /admin/approve. Then poll the same run. The squad never auto-releases a gate.",
         runId,
       };
     }
@@ -897,10 +1123,15 @@ export class EmbeddedCoordinator {
         kind: "embedded",
         outcome: "held",
         matchedRouting: EMPTY_ROUTING,
-        reason: "queued_for_worker",
+        reason: run.leaseExpiresAt !== undefined && run.leaseExpiresAt > Date.now()
+          ? "run_already_in_flight" : "queued_for_worker",
         runId,
+        backendId: run.completionUsage?.at(-1)?.backendId,
+        usage: usageFromCompletionRecords(run.completionUsage),
       };
     }
+
+    if (this.backgroundRuns.has(runId)) return this.inFlight(run);
 
     // Acquire a concurrency slot, then CAS-claim the run. The claim replaces the
     // in-process in-flight guard with a cross-replica compare-and-swap: exactly one
@@ -913,19 +1144,42 @@ export class EmbeddedCoordinator {
     const claimed = await this.runStateStore.claim(runId, ["held", "running"], "running", { leaseMs: this.leaseMs });
     if (!claimed) {
       admit.release();
-      return {
-        kind: "embedded",
-        outcome: "held",
-        matchedRouting: EMPTY_ROUTING,
-        reason: "run_already_in_flight",
-        runId,
-      };
+      return this.inFlight(run);
     }
-    try {
-      return await this.executeRunningRun(claimed);
-    } finally {
+    if (this.pollDriveWaitMs === undefined) {
+      try {
+        return await this.executeRunningRun(claimed);
+      } finally {
+        admit.release();
+      }
+    }
+
+    const drive = this.executeRunningRun(claimed).finally(() => {
       admit.release();
-    }
+      this.backgroundRuns.delete(runId);
+    });
+    this.backgroundRuns.set(runId, drive);
+    // Execution already persisted the failure; this only keeps a late rejection observed.
+    drive.catch((error: unknown) => this.logger?.error("background run failed", { runId, error: String(error) }));
+    let timer: NodeJS.Timeout | undefined;
+    const waited = await Promise.race([
+      drive.then((result) => ({ done: true as const, result })),
+      new Promise<{ done: false }>((resolve) => { timer = setTimeout(() => resolve({ done: false }), this.pollDriveWaitMs); }),
+    ]).finally(() => clearTimeout(timer));
+    if (waited.done) return waited.result;
+    return this.inFlight((await this.runStateStore.get(runId)) ?? claimed);
+  }
+
+  private inFlight(run: RunState): EmbeddedResult {
+    return {
+      kind: "embedded",
+      outcome: "held",
+      matchedRouting: EMPTY_ROUTING,
+      reason: "run_already_in_flight",
+      runId: run.runId,
+      backendId: run.completionUsage?.at(-1)?.backendId,
+      usage: usageFromCompletionRecords(run.completionUsage),
+    };
   }
 
   /**
@@ -936,7 +1190,8 @@ export class EmbeddedCoordinator {
    * claim already succeeded — it does not re-check approval (the claim path did).
    *
    * The catch-all `squad_run` runs the FULL advisory pipeline (Phase 5): routing
-   * -> research -> plan -> [council] -> review -> backlog-handoff, persisting each
+   * -> research -> plan -> [council] -> [text-only report or deliverable fan-out]
+   * -> review -> backlog-handoff, persisting each
    * stage + the council verdict durably (so a status poll recompiles the finished
    * artifact multi-replica / after a cold start). Any other tool id keeps the
    * spike two-stage pipeline. Both persist the compiled artifact + `complete`.
@@ -949,7 +1204,7 @@ export class EmbeddedCoordinator {
       return this.executeFederationRun(run);
     }
     const req: CoordinatorRequest = coordinatorRequestFromRun(run);
-    const core = await this.runPipelineCore(run.tenantId, req);
+    const core = await this.runPipelineCore(run.tenantId, run.runId, req);
     if (core.outcome === "denied") {
       await this.runStateStore.update(run.runId, { status: "failed" });
       this.decrementHeld(run.tenantId);
@@ -972,12 +1227,13 @@ export class EmbeddedCoordinator {
   /**
    * Drive an approved/claimed `squad_run` through the FULL advisory pipeline
    * (Phase 5). The advisory orchestrator routes the persisted request across the
-   * full cast (research -> plan -> [council] -> review -> backlog-handoff) as
+   * full cast (research -> plan -> [council] -> [text-only report or deliverable
+   * fan-out] -> review -> backlog-handoff) as
    * sequential model completions, threading each stage's artifact forward as DATA
    * (SEC-5 preserved by the orchestrator). It runs in autopilot so the async drive
-   * yields ONE compiled artifact; the human gate is the EXISTING non-bypassable
-   * hold already applied at {@link startHttpRun} (released out-of-band via
-   * `/admin/approve`), so no additional final hold is injected here.
+   * yields ONE compiled artifact. Any required human gate was applied at
+   * {@link startHttpRun} and must be approved before the claim; server-admitted
+   * advisory runs have no such hold. No additional final hold is injected here.
    *
    * Per-stage artifacts + the council verdict + a history list persist durably
    * through {@link StoreAdvisoryPersistence} so a status poll recompiles the
@@ -987,33 +1243,74 @@ export class EmbeddedCoordinator {
    * (there is no implement stage to gate in advisory scope). All work happens
    * inside a server-allocated per-tenant workspace with guaranteed teardown (SEC-4).
    */
-  private async executeAdvisoryRun(run: RunState): Promise<EmbeddedResult> {
+  private async executeAdvisoryRun(run: RunState, plan?: AdvisoryStagePlan[]): Promise<EmbeddedResult> {
     const req: CoordinatorRequest = coordinatorRequestFromRun(run);
+    const matchedRouting = run.toolId === FEDERATION_TOOL_ID ? FEDERATION_ROUTING : EMPTY_ROUTING;
     const workspace = await this.workspaceManager.allocate(run.tenantId);
     try {
       const persistence = new StoreAdvisoryPersistence(this.runStateStore, run.runId);
-      const { request: framed, project } = await this.withMemory(run.tenantId, req);
-      // Autopilot: advance stage-to-stage to a single compiled artifact. The human
-      // gate already fired at startHttpRun; no additional finalHold is injected.
+      const recalled = await this.withMemory(run.tenantId, req);
+      const checkpoint = run.advisoryCheckpoint ? readAdvisoryCheckpoint(run.advisoryCheckpoint) : undefined;
+      const framed = checkpoint?.request ?? recalled.request;
+      const project = recalled.project;
+      if (checkpoint && (!run.humanInput?.response || checkpoint.stage.questionId !== run.humanInput.questionId)) {
+        throw new Error("Cannot resume advisory stage without its matching persisted human response.");
+      }
+      // Gate classification and any required approval precede this execution.
       const result = await runAdvisoryPipeline(
         framed,
         {
           backend: this.backend,
           persistence,
           ledger: this.ledgerSink(run.tenantId, project, framed, run.runId),
+          stageExecutor: this.stageExecutor(workspace, project, run.runId, {
+            allowHumanInput: true,
+            continuation: checkpoint && run.humanInput?.response
+              ? { checkpoint: checkpoint.stage, response: run.humanInput.response } : undefined,
+          }),
+          onCompletion: this.completionObserver(run.tenantId, run.runId),
         },
-        { mode: "autopilot" },
+        { mode: "autopilot", plan, resume: checkpoint?.resume },
       );
 
-      for (const usage of result.usage) {
-        if (usage.estimatedCostUsd) {
-          this.quota.recordCostUsd(run.tenantId, usage.estimatedCostUsd);
+      if (result.humanInput && result.checkpoint && result.resume) {
+        try {
+          const saved = await this.runStateStore.update(run.runId, {
+            status: "held", holdReason: "awaiting human input", humanInput: result.humanInput,
+            advisoryCheckpoint: encodeAdvisoryCheckpoint({ version: 1, request: framed, resume: result.resume, stage: result.checkpoint }),
+            artifact: result.artifact, leaseExpiresAt: undefined,
+          });
+          if (!saved) throw new Error("Human handoff checkpoint was not persisted.");
+          const verified = await this.runStateStore.get(run.runId);
+          if (!verified || verified.humanInput?.questionId !== result.humanInput.questionId ||
+              verified.advisoryCheckpoint !== saved.advisoryCheckpoint || verified.status !== "held") {
+            throw new Error("Human handoff read-back failed.");
+          }
+          return this.awaitingInput(verified);
+        } catch (error) {
+          throw new AdvisoryCheckpointPersistenceError(error);
         }
       }
-
+      if (result.outcome === "halted" && result.reason !== "council_stop") {
+        if (!await this.runStateStore.update(run.runId, { status: "failed", artifact: result.artifact, failureReason: result.reason })) {
+          throw new Error("Failed-stage result was not persisted.");
+        }
+        this.decrementHeld(run.tenantId);
+        return {
+          kind: "embedded", outcome: "denied", matchedRouting,
+          reason: result.reason, artifact: result.artifact, runId: run.runId,
+        };
+      }
       // `completed` and a council `Stop` `halted` are both terminal-with-artifact;
       // persist the compiled artifact so the status poll returns it directly.
-      await this.runStateStore.update(run.runId, { status: "complete", artifact: result.artifact });
+      const completedRun = await this.runStateStore.update(run.runId, {
+        status: "complete",
+        artifact: result.artifact,
+        advisoryCheckpoint: undefined,
+      });
+      if (!completedRun) {
+        throw new Error("Completed advisory result was not persisted.");
+      }
       await this.recordMemory(run.tenantId, project, {
         toolId: run.toolId,
         runId: run.runId,
@@ -1023,21 +1320,80 @@ export class EmbeddedCoordinator {
       return {
         kind: "embedded",
         outcome: "completed",
-        matchedRouting: EMPTY_ROUTING,
+        matchedRouting,
         artifact: result.artifact,
         workspaceRoot: workspace.root,
         runId: run.runId,
-        backendId: result.stages.at(-1)?.backendId,
-        usage: result.usage.at(-1),
+        backendId: completedRun.completionUsage?.at(-1)?.backendId ??
+          result.stages.at(-1)?.backendId,
+        usage: usageFromCompletionRecords(completedRun.completionUsage) ??
+          aggregateBackendUsage(result.usage),
       };
     } catch (error) {
-      await this.runStateStore.update(run.runId, { status: "failed" });
+      const cause = error instanceof AdvisoryStageFailure ? error.cause : error;
+      const responsibleAi = cause instanceof ModelBackendError && cause.kind === "content_policy"
+        ? responsibleAiBlocker(cause, error instanceof AdvisoryStageFailure ? error.failedStage : "unknown", run.runId)
+        : undefined;
+      const modelFailure = cause instanceof ModelBackendError
+        ? modelFailureDiagnostics(cause, error instanceof AdvisoryStageFailure ? error.failedStage : "unknown", run.runId)
+        : undefined;
+      if (error instanceof AdvisoryStageFailure) error.runId = run.runId;
+      if (modelFailure) this.logger?.error("Advisory model failure", { runId: run.runId, modelFailure });
+      await this.runStateStore.update(run.runId, {
+        status: "failed",
+        ...(responsibleAi ? { responsibleAi } : {}),
+        ...(modelFailure ? { modelFailure } : {}),
+        ...(error instanceof AdvisoryStageFailure
+          ? { failureReason: error.reason, artifact: error.artifact }
+          : error instanceof AdvisoryCheckpointPersistenceError
+            ? { failureReason: "checkpoint_persistence_failed" }
+            : { failureReason: responsibleAi ? "model_backend_content_policy" : modelFailure ? `model_backend_${modelFailure.kind}` : "advisory_run_failed" }),
+      });
       this.decrementHeld(run.tenantId);
       throw error;
     } finally {
       // SEC-4 — teardown runs even on error/timeout.
       await workspace.dispose();
     }
+
+  }
+
+  private awaitingInput(run: RunState): EmbeddedResult {
+    if (!run.humanInput) throw new Error("Missing human input request.");
+    const { response: _response, ...humanInput } = run.humanInput;
+    return {
+      kind: "embedded", outcome: "held", matchedRouting: EMPTY_ROUTING,
+      reason: "awaiting human input", humanInput, runId: run.runId, artifact: run.artifact,
+      backendId: run.completionUsage?.at(-1)?.backendId,
+      usage: usageFromCompletionRecords(run.completionUsage),
+      expiresAt: run.expiresAt,
+    };
+  }
+
+  async respondToHumanInput(
+    runId: string, questionId: string, answer: string, ctx: EmbeddedContext, binding?: { projectId?: string },
+  ): Promise<{ accepted: boolean; runId: string; questionId: string; reason?: string; respondedBy?: string; respondedAt?: number }> {
+    const denied = (reason: string) => ({ accepted: false, runId, questionId, reason });
+    if (!answer.trim() || answer.length > 16_000 || !ctx.auth.subject) return denied("invalid_human_response");
+    const run = await this.runStateStore.get(runId);
+    if (!run || run.tenantId !== ctx.auth.tenantId) return denied("run_not_found_or_cross_tenant");
+    const projectId = decodeRunParams(run.params).projectContext?.projectId;
+    if (binding && projectId?.toLowerCase() !== binding.projectId?.toLowerCase()) return denied("project_identity_conflict");
+    if (!run.humanInput || run.humanInput.questionId !== questionId) return denied("human_question_not_current");
+    const updated = await this.runStateStore.answerInput(runId, questionId, {
+      answer, respondedBy: ctx.auth.subject, respondedAt: Date.now(),
+    });
+    if (!updated) return denied("human_response_conflict");
+    const receipt = updated.humanInput?.response;
+    if (updated.humanInput?.questionId !== questionId || receipt?.answer !== answer || receipt.respondedBy !== ctx.auth.subject) {
+      throw new Error("The atomic response write returned an invalid receipt.");
+    }
+    const verified = await this.runStateStore.get(runId);
+    if (!verified || (verified.humanInput?.questionId === questionId &&
+        (verified.humanInput.response?.answer !== answer || verified.humanInput.response.respondedBy !== ctx.auth.subject))) {
+      throw new Error("Human response receipt read-back failed.");
+    }
+    return { accepted: true, runId, questionId, respondedBy: receipt.respondedBy, respondedAt: receipt.respondedAt };
   }
 
   /**
@@ -1059,54 +1415,8 @@ export class EmbeddedCoordinator {
    */
   private async executeFederationRun(run: RunState): Promise<EmbeddedResult> {
     const req: CoordinatorRequest = coordinatorRequestFromRun(run);
-    const workspace = await this.workspaceManager.allocate(run.tenantId);
-    try {
-      // Real on-disk `*.agent.md` bytes when the cast is present; the embedded
-      // paraphrase otherwise (so a minimal image never fails role resolution).
-      const persona = federationPersona(req, resolvePersonaForRole(FEDERATION_ROLE));
-      const persistence = new StoreAdvisoryPersistence(this.runStateStore, run.runId);
-      const { request: framed, project } = await this.withMemory(run.tenantId, req);
-      const result = await runAdvisoryPipeline(
-        framed,
-        {
-          backend: this.backend,
-          persistence,
-          ledger: this.ledgerSink(run.tenantId, project, framed, run.runId),
-        },
-        { mode: "autopilot", plan: [{ kind: "persona", role: persona.role, persona }] },
-      );
-
-      for (const usage of result.usage) {
-        if (usage.estimatedCostUsd) {
-          this.quota.recordCostUsd(run.tenantId, usage.estimatedCostUsd);
-        }
-      }
-
-      await this.runStateStore.update(run.runId, { status: "complete", artifact: result.artifact });
-      await this.recordMemory(run.tenantId, project, {
-        toolId: run.toolId,
-        runId: run.runId,
-        artifact: result.artifact,
-      });
-      this.decrementHeld(run.tenantId);
-      return {
-        kind: "embedded",
-        outcome: "completed",
-        matchedRouting: FEDERATION_ROUTING,
-        artifact: result.artifact,
-        workspaceRoot: workspace.root,
-        runId: run.runId,
-        backendId: result.stages.at(-1)?.backendId,
-        usage: result.usage.at(-1),
-      };
-    } catch (error) {
-      await this.runStateStore.update(run.runId, { status: "failed" });
-      this.decrementHeld(run.tenantId);
-      throw error;
-    } finally {
-      // SEC-4 — teardown runs even on error/timeout.
-      await workspace.dispose();
-    }
+    const persona = federationPersona(req, resolvePersonaForRole(FEDERATION_ROLE));
+    return this.executeAdvisoryRun(run, [{ kind: "persona", role: persona.role, persona }]);
   }
 
   /**
@@ -1145,11 +1455,9 @@ export class EmbeddedCoordinator {
   }
 
   /**
-   * Release a HELD run by recording an out-of-band OPERATOR approval (SEC-6). This
-   * is the ONLY production caller of the approval channel and the keystone that
-   * lets a deployed held `squad_run` proceed: the operator calls it through the
-   * `/admin/approve` route, never a `tools/call`, so caller `request`/`context` and
-   * model output have no path to a release. Tenant-scoped: an operator may release
+   * Release a HELD run through an explicitly authorized operator action:
+   * `squad_approve` or `/admin/approve`. Ordinary request/context and model
+   * output never grant approval authority. Tenant-scoped: an operator may release
    * only runs owned by their own tenant/authority; an unknown or cross-tenant run
    * id is denied with no leakage (mirrors {@link pollRun}). Records approver +
    * timestamp via the auditable channel; `approver` is the operator's token subject.
@@ -1158,14 +1466,31 @@ export class EmbeddedCoordinator {
   approveRun(
     runId: string,
     ctx: EmbeddedContext,
+    binding?: { projectId?: string },
   ): Promise<{ ok: true; record: ApprovalRecord } | { ok: false; reason: string }> {
     return this.runStateStore.get(runId).then(async (run) => {
       if (!run || run.tenantId !== ctx.auth.tenantId) {
         return { ok: false as const, reason: "run_not_found_or_cross_tenant" };
       }
+      const projectId = decodeRunParams(run.params).projectContext?.projectId;
+      if (binding && projectId?.toLowerCase() !== binding.projectId?.toLowerCase()) {
+        return { ok: false as const, reason: "project_identity_conflict" };
+      }
+      if (run.humanInput && !run.humanInput.response) {
+        return { ok: false as const, reason: "human_input_required_not_operator_approval" };
+      }
+      const prior = await this.approvals.approvalRecord(runId);
+      if (prior) {
+        return { ok: true as const, record: prior };
+      }
+      if (run.status !== "held") {
+        return { ok: false as const, reason: "run_not_held" };
+      }
       await this.approvals.approve(runId, ctx.auth.subject);
-      // approvalRecord is present immediately after approve for this run id.
-      const record = (await this.approvals.approvalRecord(runId)) as ApprovalRecord;
+      const record = await this.approvals.approvalRecord(runId);
+      if (!record) {
+        throw new Error("Approval receipt was not persisted.");
+      }
       return { ok: true as const, record };
     });
   }
@@ -1179,6 +1504,7 @@ export class EmbeddedCoordinator {
    */
   private async runPipelineCore(
     tenantId: string,
+    runId: string,
     request: CoordinatorRequest,
     personaRoots?: string[],
   ): Promise<
@@ -1197,25 +1523,22 @@ export class EmbeddedCoordinator {
     // SEC-4 — server-allocated, per-tenant, isolated workspace with guaranteed teardown.
     const workspace = await this.workspaceManager.allocate(tenantId);
     try {
-      const pipeline = await runPipeline(stages, request, { backend: this.backend });
+      const pipeline = await runPipeline(stages, request, {
+        backend: this.backend,
+        onCompletion: this.completionObserver(tenantId, runId),
+      });
 
       // Persist the combined artifact INSIDE the isolated workspace, then read it back.
       const artifactPath = workspace.resolve("artifact.md");
       await writeFile(artifactPath, pipeline.artifact, "utf8");
       const artifact = await readFile(artifactPath, "utf8");
 
-      for (const usage of pipeline.usage) {
-        if (usage.estimatedCostUsd) {
-          this.quota.recordCostUsd(tenantId, usage.estimatedCostUsd);
-        }
-      }
-
       return {
         outcome: "completed",
         artifact,
         workspaceRoot: workspace.root,
         backendId: pipeline.stages.at(-1)?.backendId,
-        usage: pipeline.usage.at(-1),
+        usage: aggregateBackendUsage(pipeline.usage),
       };
     } finally {
       // SEC-4 — teardown runs even on error/timeout.

@@ -9,6 +9,7 @@ import {
   planAdvisoryStages,
   runAdvisoryPipeline,
   compilePersistedStages,
+  AdvisoryStageFailure,
   type AdvisoryStagePlan,
   type AdvisoryResumeState,
 } from "../src/engine/advisory-pipeline.js";
@@ -18,7 +19,8 @@ import type { PersonaRecord } from "../src/engine/persona-loader.js";
 import type { RoutePlan } from "../src/engine/routing.js";
 import { RunCostLedger } from "../src/engine/gates.js";
 import { UNTRUSTED_OPEN, UNTRUSTED_CLOSE } from "../src/engine/embedded-prompt.js";
-import type { BackendRequest, BackendResult, ModelBackend } from "../src/engine/model-backend.js";
+import { ModelBackendError, type BackendRequest, type BackendResult, type ModelBackend } from "../src/engine/model-backend.js";
+import { StageBlockedError } from "../src/engine/research-runtime.js";
 
 /** A backend that returns a canned artifact chosen by a marker in the stage charter. */
 class ScriptedBackend implements ModelBackend {
@@ -54,7 +56,7 @@ const personaStage = (role: string, marker: string, backlog = false): AdvisorySt
   backlog,
 });
 
-/** The five-stage full advisory plan: research -> plan -> council -> review -> backlog. */
+/** A representative advisory plan: research -> plan -> council -> review -> backlog. */
 function fullAdvisoryPlan(): AdvisoryStagePlan[] {
   return [
     personaStage("Squad Researcher", "RESEARCH"),
@@ -81,6 +83,82 @@ test("normalizeAdvisoryMode maps autopilot/autonomous and defaults to interactiv
   assert.equal(normalizeAdvisoryMode("AUTONOMOUS"), "autonomous");
   assert.equal(normalizeAdvisoryMode(undefined), "interactive");
   assert.equal(normalizeAdvisoryMode("something-else"), "interactive");
+});
+
+for (const kind of ["input_too_large", "output_limit", "content_policy", "invalid_request", "upstream", "unknown"] as const) {
+  test(`unexpected ${kind} stage failure preserves safe diagnostics and completed work`, async () => {
+    const cause = kind === "unknown" ? new Error("sensitive-provider-payload")
+      : new ModelBackendError(kind, { status: 400, providerCode: "sensitive-provider-payload" });
+    const backend = new ScriptedBackend([]);
+    const seen: string[] = [];
+    const plan = [
+      personaStage("Research", "RESEARCH"),
+      personaStage("BRD Builder", "AUTHOR"),
+      personaStage("Review", "REVIEW"),
+    ];
+    await assert.rejects(runAdvisoryPipeline(
+      { toolId: "squad_run", request: "Prepare a draft" },
+      { backend, stageExecutor: { async execute(persona) {
+        seen.push(persona.role);
+        if (persona.role === "BRD Builder") throw cause;
+        return { text: "Verified research", backendId: backend.id, finishReason: "stop" };
+      } } },
+      { plan, mode: "autopilot" },
+    ), (error: unknown) => {
+      assert.ok(error instanceof AdvisoryStageFailure);
+      assert.equal(error.reason, kind === "unknown" ? "stage_execution_failed" : `model_backend_${kind}`);
+      assert.equal(error.failedStage, "BRD Builder");
+      assert.equal(error.cause, cause);
+      assert.match(error.artifact, /## Research\n\nVerified research/);
+      assert.match(error.artifact, /## BRD Builder - failed/);
+      assert.doesNotMatch(error.artifact, /sensitive-provider-payload|## Review/);
+      return true;
+    });
+    assert.deepEqual(seen, ["Research", "BRD Builder"]);
+  });
+}
+
+for (const council of [false, true]) {
+  test(`${council ? "council" : "persona"} bookkeeping failure preserves produced output without dispatching downstream`, async () => {
+    const backend = new ScriptedBackend([{ match: "AUTHOR", text: "Draft output" }, ...APPROVE_ALL]);
+    const stage = council ? fullAdvisoryPlan()[2] : personaStage("BRD Builder", "AUTHOR");
+    const cause = new Error("sensitive-storage-payload");
+    await assert.rejects(runAdvisoryPipeline(
+      { toolId: "squad_run", request: "Prepare a draft" },
+      { backend, persistence: {
+        async recordStage() { if (!council) throw cause; },
+        async recordVerdict() { throw cause; },
+      } },
+      { plan: [stage, personaStage("Review", "REVIEW")], mode: "autopilot" },
+    ), (error: unknown) => {
+      assert.ok(error instanceof AdvisoryStageFailure);
+      assert.equal(error.reason, "stage_persistence_failed");
+      assert.equal(error.failedStage, stage.role);
+      assert.equal(error.cause, cause);
+      assert.match(error.artifact, council ? /Verdict/ : /Draft output/);
+      assert.match(error.artifact, /- failed/);
+      assert.doesNotMatch(error.artifact, /sensitive-storage-payload|## Review/);
+      return true;
+    });
+    assert.equal(backend.calls, council ? 4 : 1);
+  });
+}
+
+test("unexpected council execution failure retains its stage without dispatching downstream", async () => {
+  const cause = new ModelBackendError("upstream");
+  let calls = 0;
+  await assert.rejects(runAdvisoryPipeline(
+    { toolId: "squad_run", request: "Review the proposal" },
+    { backend: { id: "failing", async complete() { calls++; throw cause; } } },
+    { plan: [fullAdvisoryPlan()[2], personaStage("Review", "REVIEW")], mode: "autopilot" },
+  ), (error: unknown) => {
+    assert.ok(error instanceof AdvisoryStageFailure);
+    assert.equal(error.reason, "model_backend_upstream");
+    assert.equal(error.failedStage, "Council Verdict");
+    assert.equal(error.cause, cause);
+    return true;
+  });
+  assert.equal(calls, 4);
 });
 
 test("mode=autopilot runs the full routed advisory sequence to one compiled artifact", async () => {
@@ -226,6 +304,7 @@ function makeAdvisoryCastFixture(): { root: string; cleanup: () => void } {
     writeFileSync(join(root, file), ["---", `name: ${name}`, "---", "", `${name} body.`, ""].join("\n"), "utf8");
   write("squad-researcher.agent.md", "Squad Researcher");
   write("squad-lead.agent.md", "Squad Lead");
+  write("squad-implementor.agent.md", "Squad Implementor");
   write("squad-reviewer.agent.md", "Squad Reviewer");
   write("council-a.agent.md", "Council Member A");
   write("council-b.agent.md", "Council Member B");
@@ -246,7 +325,10 @@ test("planAdvisoryStages interleaves the council and appends backlog-handoff for
       profile: "default",
       fanOut: [],
     };
-    const rosterMap = new Map([["product-owner", "Functional Planner"]]);
+    const rosterMap = new Map([
+      ["developer", "Squad Implementor"],
+      ["product-owner", "Functional Planner"],
+    ]);
     const ordered = planAdvisoryStages(routePlan, [root], rosterMap);
 
     assert.deepEqual(
@@ -255,15 +337,110 @@ test("planAdvisoryStages interleaves the council and appends backlog-handoff for
         "persona:Squad Researcher",
         "persona:Squad Lead",
         "council:Council Verdict",
+        "persona:Squad Implementor",
         "persona:Squad Reviewer",
         "persona:Functional Planner",
       ],
     );
+    assert.equal(ordered[3].roleKey, "developer");
+    assert.equal(ordered[3].executionMode, "text-only-report");
     assert.equal(ordered[2].members?.length, 2);
     assert.equal(ordered.at(-1)?.backlog, true);
   } finally {
     cleanup();
   }
+});
+
+test("deliverable fan-out replaces the single text-only developer report", () => {
+  const { root, cleanup } = makeAdvisoryCastFixture();
+  try {
+    const routePlan: RoutePlan = {
+      stages: [
+        { role: "researcher", agentName: "Squad Researcher", tier: "auto", parallelEligible: true },
+        { role: "lead", agentName: "Squad Lead", tier: "confirm", parallelEligible: false },
+        { role: "tester", agentName: "Squad Reviewer", tier: "auto", parallelEligible: true },
+      ],
+      council: { engaged: false, members: [], missingQuorum: [] },
+      profile: "product",
+      fanOut: [{ role: "developer", agentName: "Squad Implementor", tier: "auto", parallelEligible: false }],
+    };
+    const ordered = planAdvisoryStages(routePlan, [root], new Map());
+    const developer = ordered.find((stage) => stage.role === "Squad Implementor");
+    assert.ok(developer);
+    assert.equal(developer.executionMode, undefined);
+    assert.equal(ordered.filter((stage) => stage.executionMode === "text-only-report").length, 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("the advisory runner forwards a report-only stage's execution mode to its executor", async () => {
+  const reportStage = {
+    ...personaStage("Squad Implementor", "REPORT"),
+    roleKey: "developer",
+    executionMode: "text-only-report" as const,
+  };
+  let receivedMode: string | undefined;
+  const result = await runAdvisoryPipeline(
+    { toolId: "squad_run", request: "Summarize the completed research." },
+    {
+      backend: new ScriptedBackend([]),
+      stageExecutor: {
+        async execute(_persona, _request, _priorArtifact, _roleKey, _costLedger, executionMode) {
+          receivedMode = executionMode;
+          return { text: "Bounded report", backendId: "report-only", finishReason: "stop" };
+        },
+      },
+    },
+    { plan: [reportStage], mode: "autopilot" },
+  );
+  assert.equal(result.outcome, "completed");
+  assert.equal(receivedMode, "text-only-report");
+});
+
+test("a backlog handoff that declines leaves the reviewed run completed; other blocks still halt", async () => {
+  const plan = [
+    personaStage("Squad Researcher", "RESEARCH"),
+    personaStage("Squad Reviewer", "REVIEW"),
+    personaStage("Functional Planner", "BACKLOG", true),
+  ];
+  const executor = (reason: string) => ({
+    async execute(persona: PersonaRecord) {
+      if (persona.role === "Functional Planner") throw new StageBlockedError(reason, "No PRD or tracker to plan for a research question.");
+      return { text: `${persona.role} output`, backendId: "test", finishReason: "stop" };
+    },
+  });
+  const recorded: string[] = [];
+  const declined = await runAdvisoryPipeline(
+    { toolId: "squad_run", request: "Research HTTP 429 support." },
+    { backend: new ScriptedBackend([]), stageExecutor: executor("stage_blocked"), persistence: {
+      async recordStage(stage) { recorded.push(stage.role); },
+      async recordVerdict() {},
+    } },
+    { plan, mode: "autopilot" },
+  );
+  assert.equal(declined.outcome, "completed");
+  assert.match(declined.artifact, /## Squad Reviewer\n\nSquad Reviewer output/);
+  assert.match(declined.artifact, /## Functional Planner - skipped\n\nNo PRD or tracker/);
+  assert.deepEqual(recorded, ["Squad Researcher", "Squad Reviewer", "Functional Planner"]);
+
+  const limited = await runAdvisoryPipeline(
+    { toolId: "squad_run", request: "Research HTTP 429 support." },
+    { backend: new ScriptedBackend([]), stageExecutor: executor("stage_execution_limit") },
+    { plan, mode: "autopilot" },
+  );
+  assert.equal(limited.outcome, "halted");
+  assert.equal(limited.reason, "stage_execution_limit");
+
+  const reviewBlocked = await runAdvisoryPipeline(
+    { toolId: "squad_run", request: "Research HTTP 429 support." },
+    { backend: new ScriptedBackend([]), stageExecutor: { async execute(persona: PersonaRecord) {
+      if (persona.role === "Squad Reviewer") throw new StageBlockedError("stage_blocked", "Cannot review.");
+      return { text: "ok", backendId: "test", finishReason: "stop" };
+    } } },
+    { plan, mode: "autopilot" },
+  );
+  assert.equal(reviewBlocked.outcome, "halted", "Only the optional backlog handoff may decline without halting.");
 });
 
 test("planAdvisoryStages keeps a research-only route to a single research stage", () => {
@@ -331,10 +508,60 @@ test("an async advisory run persists each stage as it completes; a status read r
     assert.equal(final?.history?.length, 5, "one history entry per completed stage");
     assert.equal(final?.councilVerdict?.class, "Go");
     assert.match(final?.councilVerdict?.rendered ?? "", /## Council Verdict/);
+    assert.equal(final?.completionUsage?.length, backend.calls,
+      "Every direct provider completion is durably attributed.");
+    assert.ok(final?.completionUsage?.every((record) =>
+      record.runId === run.runId && record.stage && record.actor));
     const compiled = compilePersistedStages(final!.stages!);
     for (const heading of ["## Squad Researcher", "## Squad Lead", "## Council Verdict", "## Squad Reviewer", "## Functional Planner"]) {
       assert.ok(compiled.includes(heading), `compiled artifact includes ${heading}`);
     }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("durable completion accounting is append-only and idempotent by event id", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "squad-advisory-usage-"));
+  try {
+    const store = new DurableRunStateStore({ baseDir: dir });
+    const run = await store.create({ tenantId: "t", toolId: "squad_run" });
+    const persistence = new StoreAdvisoryPersistence(store, run.runId);
+    const event = {
+      eventId: "event-1",
+      attempt: 1,
+      outcome: "completed" as const,
+      finishReason: "stop",
+      backendId: "azure-openai",
+      model: "gpt-5.6-sol",
+      deployment: "deployment-a",
+      providerResponseId: "resp_1",
+      usage: {
+        completionCount: 1,
+        attemptCount: 1,
+        inputTokens: 100,
+        outputTokens: 20,
+        pricedCompletionCount: 1,
+        incompletelyPricedCompletionCount: 0,
+        unpricedCompletionCount: 0,
+        costStatus: "complete" as const,
+        costCurrency: "USD" as const,
+        costBasis: "configured_estimate" as const,
+        estimatedCostUsd: 0.01,
+      },
+    };
+    assert.equal(await persistence.recordCompletion(
+      event,
+      { stage: "researcher", actor: "Squad Researcher" },
+    ), true);
+    assert.equal(await persistence.recordCompletion(
+      event,
+      { stage: "researcher", actor: "Squad Researcher" },
+    ), false);
+    const saved = await store.get(run.runId);
+    assert.equal(saved?.completionUsage?.length, 1);
+    assert.equal(saved?.completionUsage?.[0].runId, run.runId);
+    assert.equal(saved?.completionUsage?.[0].usage?.inputTokens, 100);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -369,4 +596,3 @@ test("a Stop council verdict is persisted before the run halts", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
-

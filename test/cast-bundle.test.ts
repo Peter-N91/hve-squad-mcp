@@ -5,10 +5,18 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { parse as parseYaml } from "yaml";
 
-import { sha256 } from "../host/snapshot-cast.js";
+import {
+  bundleDestination,
+  RESEARCH_DEST,
+  skillReferences,
+  sha256,
+  validateSkillReferences,
+  validateBundlePath,
+} from "../host/snapshot-cast.js";
 import { loadCatalog } from "../src/catalog/catalog.js";
 import { resolvePersonaForRole } from "../src/engine/embedded-roles.js";
 import { loadPersonaForRole } from "../src/engine/persona-loader.js";
+import { MAX_BUNDLE_RESOURCE_CHARS } from "../src/engine/research-runtime.js";
 
 /**
  * Cast-bundle drift check.
@@ -48,10 +56,18 @@ const BUNDLE_BOUNDARY = join(
 interface CastManifest {
   linkedPackageVersion: string;
   sourcePackage: string;
+  sourceManifestSha256: string;
   agentFileCount: number;
   instructionFileCount: number;
+  skillFileCount: number;
+  dataFileCount: number;
+  skillCount: number;
+  skills: { name: string; path: string; source: string }[];
+  excludedFiles: { source: string; reason: string }[];
+  referenceIssues: unknown[];
+  upstreamCommits: Record<string, string>;
   duplicateAgentNames: string[];
-  files: { path: string; sha256: string; source: string }[];
+  files: { path: string; sha256: string; source: string; kind?: "data" }[];
 }
 
 function readManifest(): CastManifest {
@@ -74,6 +90,17 @@ function bundledPaths(dir = BUNDLE_ROOT, acc: string[] = []): string[] {
   }
   return acc;
 }
+
+test("every shipped agent and instruction fits the runtime resource budget", () => {
+  const paths = bundledPaths().filter((path) =>
+    /^(?:agents|instructions)\//.test(path) && /\.md$/.test(path));
+  assert.ok(paths.length > 100, "Check the complete pinned bundle, not a miniature fixture.");
+  for (const path of paths) {
+    const text = readFileSync(join(BUNDLE_ROOT, path), "utf8");
+    assert.ok(text.length <= MAX_BUNDLE_RESOURCE_CHARS,
+      `${path}: ${text.length} characters exceeds runtime resource budget ${MAX_BUNDLE_RESOURCE_CHARS}`);
+  }
+});
 
 /**
  * The roster the bundle SHIPS. Deliberately not a sibling package checkout: the
@@ -267,6 +294,9 @@ test("every bundled file hashes to what the manifest records", () => {
   assert.ok(manifest.files.length > 0, "the manifest records at least one file");
   const mismatched: string[] = [];
   for (const entry of manifest.files) {
+    assert.ok(!entry.path.includes("\\") && !entry.path.startsWith("/") &&
+      !entry.path.includes(":") && !entry.path.split("/").includes(".."),
+    `unsafe manifest path: ${entry.path}`);
     const target = join(BUNDLE_ROOT, entry.path);
     if (!existsSync(target)) {
       mismatched.push(`${entry.path} (missing)`);
@@ -299,7 +329,93 @@ test("the manifest counts agree with the recorded files", () => {
   const manifest = readManifest();
   const agents = manifest.files.filter((entry) => entry.path.startsWith("agents/"));
   assert.equal(manifest.agentFileCount, agents.length);
-  assert.equal(manifest.instructionFileCount, manifest.files.length - agents.length);
+  assert.equal(manifest.instructionFileCount, manifest.files.filter((entry) => entry.path.startsWith("instructions/")).length);
+  assert.equal(manifest.skillFileCount, manifest.files.filter((entry) => entry.path.startsWith("skills/")).length);
+  assert.equal(manifest.dataFileCount, manifest.files.filter((entry) => entry.kind === "data").length);
+  assert.equal(manifest.files.length, manifest.agentFileCount + manifest.instructionFileCount + manifest.skillFileCount);
+});
+
+test("active cast contains pinned agents and squad instructions only", () => {
+  const manifest = readManifest();
+  assert.equal(manifest.linkedPackageVersion, "0.17.0");
+  assert.equal(manifest.skillCount, 0);
+  assert.equal(manifest.skillFileCount, 0);
+  assert.equal(manifest.dataFileCount, 0);
+  assert.ok(manifest.skills.length === 0);
+  assert.ok(manifest.files.every((file) =>
+    file.path.startsWith("agents/") || file.path.startsWith("instructions/")));
+  for (const entry of manifest.files) {
+    const [source, commit] = entry.source.split("#");
+    const [owner, repo] = source.split("/");
+    assert.match(commit, /^[a-f0-9]{40}$/);
+    assert.equal(commit, manifest.upstreamCommits[`${owner}/${repo}`]);
+  }
+  const researcher = readFileSync(join(BUNDLE_AGENTS, "rpi-researcher.agent.md"), "utf8");
+  assert.match(researcher, /Read only/i);
+  assert.match(researcher, /No file is created or edited/);
+});
+
+test("only deployed agents, squad instructions and boundary instruction are mapped", () => {
+  const slug = "microsoft/hve-core";
+  assert.equal(bundleDestination({ slug: "Peter-N91/hve-squad", path: "squad-src/.github/agents/squad-researcher.agent.md" }, "Peter-N91/hve-squad"),
+    "agents/squad/squad-researcher.agent.md");
+  assert.equal(bundleDestination({ slug, path: ".github/agents/rpi-researcher.agent.md" }, "Peter-N91/hve-squad"),
+    "agents/rpi-researcher.agent.md");
+  assert.equal(bundleDestination({ slug, path: ".github/instructions/squad/squad-routing.instructions.md" }, "Peter-N91/hve-squad"),
+    "instructions/squad/squad-routing.instructions.md");
+  assert.equal(bundleDestination({ slug, path: ".github/instructions/untrusted-content-boundary.instructions.md" }, "Peter-N91/hve-squad"),
+    "instructions/untrusted-content-boundary.instructions.md");
+  assert.equal(bundleDestination({ slug, path: ".github/skills/rpi/rpi-research" }, "Peter-N91/hve-squad"), undefined);
+  assert.equal(bundleDestination({ slug, path: ".github/instructions/coding-standards/python-tests.instructions.md" }, "Peter-N91/hve-squad"), undefined);
+});
+
+test("skill reference resolution is deterministic and rejects missing or escaping local dependencies", () => {
+  const from = `${RESEARCH_DEST}/references/research.md`;
+  const content = "`../templates/research.md` [template](../templates/research.md#heading) " +
+    "[web](https://example.com/external.md)\n[template]: ../templates/research.md\n" +
+    "`.copilot-tracking/research/{{YYYY-MM-DD}}/{{task_slug}}-research.md`\n" +
+    "Future example: `brd-standard-findings-v2.md`; threshold `80%`.";
+  assert.deepEqual(skillReferences(content, from), [`${RESEARCH_DEST}/templates/research.md`]);
+  assert.deepEqual(
+    skillReferences(content.split("\n").reverse().join("\n"), from),
+    skillReferences(content, from),
+  );
+  assert.equal(sha256(content.replace(/\n/g, "\r\n")), sha256(content));
+  for (const target of ["../../../../../escape.md", "%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/escape.md", "/outside.md", "C:\\outside.md", "..\\outside.md"]) {
+    assert.throws(() => skillReferences(`[bad](${target})`, from), /Unsafe|escapes/);
+  }
+  for (const dest of ["../outside.md", "/outside.md", "skills/../../outside.md", "C:\\outside.md", "skills\\escape.md"]) {
+    assert.throws(() => validateBundlePath(dest), /Unsafe bundle destination/);
+  }
+  validateBundlePath(`${RESEARCH_DEST}/SKILL.md`);
+  assert.throws(() => validateSkillReferences([
+    { dest: `${RESEARCH_DEST}/SKILL.md`, content: "`references/missing.md`" },
+  ]), /Missing skill dependency/);
+});
+
+test("Agent Skill dependencies are not copied into the active cast", () => {
+  const manifest = readManifest();
+  assert.equal(manifest.skills.length, 0);
+  assert.equal(manifest.skillCount, 0);
+  assert.equal(manifest.skillFileCount, 0);
+  assert.equal(manifest.dataFileCount, 0);
+  assert.ok(manifest.files.every((entry) => !entry.path.startsWith("skills/")));
+});
+
+test("runtime supplies native procedures instead of skill-loading tools", () => {
+  const runtime = readFileSync(join(PACKAGE_ROOT, "src", "engine", "research-runtime.ts"), "utf8");
+  assert.doesNotMatch(runtime, /tool\("load_skill"/);
+  assert.match(runtime, /server-owned research and planning artifact contracts/);
+  assert.match(runtime, /RPI Researcher is a read-only source finder/);
+});
+
+test("bundle source provenance is immutable and contains only agent and instruction Markdown", () => {
+  const manifest = readManifest();
+  assert.match(manifest.sourceManifestSha256, /^[a-f0-9]{64}$/);
+  assert.ok(manifest.files.every((entry) =>
+    /\.(?:agent|instructions)\.md$/.test(entry.path) &&
+    (entry.path.startsWith("agents/") || entry.path.startsWith("instructions/"))));
+  assert.ok(manifest.upstreamCommits["Peter-N91/hve-squad"]);
 });
 
 test("the bundled manifest is linked to the pinned package version", () => {
