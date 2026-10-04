@@ -2,6 +2,7 @@ import { Ajv } from "ajv";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { convert } from "html-to-text";
 
 import { resolveSquadGithubRoot } from "../paths.js";
 import { AdvisoryBundle, BundleLookupError, BundleResourceError } from "./advisory-bundle.js";
@@ -1037,11 +1038,15 @@ export class ResearchRuntime implements AdvisoryStageExecutor {
     } finally { reader.releaseLock(); }
     const html = Buffer.concat(chunks).toString("utf8");
     const main = html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1] ?? html;
-    const content = main.replace(/<(script|style|nav)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
-      .replace(/<[^>]+>/g, " ")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replace(/[ \t]+/g, " ").trim();
+    const content = convert(main, {
+      wordwrap: false,
+      decodeEntities: false,
+      selectors: [
+        { selector: "script", format: "skip" },
+        { selector: "style", format: "skip" },
+        { selector: "nav", format: "skip" },
+      ],
+    }).replace(/[ \t]+/g, " ").trim();
     if (!content) return { status: "unavailable", reason: "Document contained no readable text." };
     const truncated = content.length > MAX_FILE_CHARS;
     const returned = content.slice(0, MAX_FILE_CHARS);

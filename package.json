@@ -51,11 +51,13 @@
     "@azure/identity": "^4.5.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "ajv": "^8.17.1",
+    "html-to-text": "^10.0.1",
     "jose": "^6.2.9",
     "undici": "^6.28.1",
     "yaml": "^2.5.1"
   },
   "devDependencies": {
+    "@types/html-to-text": "^9.0.4",
     "@types/node": "^26.2.0",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2"
