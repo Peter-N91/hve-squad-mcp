@@ -36,14 +36,17 @@ test("enabled simple OAuth adds its local issuer/audience and validates its key"
 
   assert.equal(config.simpleOAuth.enabled, true);
   assert.deepEqual(config.simpleOAuth.allowedScopes, ["Squad.Run", "Squad.Memory"]);
-  assert.ok(config.audiences.includes("https://squad.example/mcp"));
-  assert.ok(config.allowedIssuers.includes("https://squad.example"));
+  assert.deepEqual(config.audiences, ["api://squad", "https://squad.example/mcp"]);
+  assert.deepEqual(config.allowedIssuers, [
+    "https://login.microsoftonline.com/tenant/v2.0",
+    "https://squad.example",
+  ]);
 });
 
 test("simple OAuth preserves an empty Entra issuer allow-list instead of making it local-only", () => {
   const config = enabled();
   assert.deepEqual(config.allowedIssuers, []);
-  assert.ok(config.audiences.includes("https://squad.example/mcp"));
+  assert.deepEqual(config.audiences, ["api://squad", "https://squad.example/mcp"]);
 });
 
 test("enabled simple OAuth fails fast without storage, origin, or a 32-byte key", () => {

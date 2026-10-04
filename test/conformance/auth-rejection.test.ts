@@ -54,7 +54,12 @@ test("SEC-1: a request with NO bearer token is rejected 401 (no anonymous /mcp)"
     body: { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
   });
 
-  test("OAuth discovery: a 401 advertises RFC 9728 protected-resource metadata when enabled", async () => {
+  assert.equal(res.status, 401, "anonymous initialize must be 401");
+  assert.equal(reasonOf(res), "missing_token");
+  assert.equal(backend.callCount, 0, "no model call on an anonymous request");
+});
+
+test("OAuth discovery: a 401 advertises RFC 9728 protected-resource metadata when enabled", async () => {
     const metadataUrl = "https://squad.example/.well-known/oauth-protected-resource/mcp";
     const { handler, backend } = buildHarness({ oauthResourceMetadataUrl: metadataUrl });
     const res = await handler.handle({
@@ -67,10 +72,6 @@ test("SEC-1: a request with NO bearer token is rejected 401 (no anonymous /mcp)"
     assert.equal(res.headers["WWW-Authenticate"], `Bearer resource_metadata="${metadataUrl}"`);
     assert.equal(backend.callCount, 0);
   });
-  assert.equal(res.status, 401, "anonymous initialize must be 401");
-  assert.equal(reasonOf(res), "missing_token");
-  assert.equal(backend.callCount, 0, "no model call on an anonymous request");
-});
 
 test("SEC-1: a token whose AUDIENCE does not match this resource server is rejected 401", async () => {
   const verifier = new FakeJwtVerifier();

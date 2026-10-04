@@ -3,12 +3,38 @@ import { join } from "node:path";
 
 const ROOT = join(process.cwd(), "host", "cast", ".github", "skills", "rpi");
 
+function stripUnapprovedComments(source: string): string {
+  const output: string[] = [];
+  let offset = 0;
+  while (offset < source.length) {
+    const start = source.indexOf("<!--", offset);
+    if (start < 0) {
+      output.push(source.slice(offset));
+      break;
+    }
+    output.push(source.slice(offset, start));
+    const end = source.indexOf("-->", start + 4);
+    if (end < 0) {
+      break;
+    }
+    const comment = source.slice(start, end + 3);
+    const marker = comment.slice(5, -4).split(" ");
+    const allowedRpiMarker =
+      (marker[0] === "rpi:phase" || marker[0] === "rpi:task") &&
+      marker.length === 2 &&
+      /^id=[A-Z0-9-]+$/.test(marker[1] ?? "");
+    if (comment === "<!-- markdownlint-disable-file -->" || allowedRpiMarker) {
+      output.push(comment);
+    }
+    offset = end + 3;
+  }
+  return output.join("");
+}
+
 export function template(skill: string, file: string): string {
   const source = readFileSync(join(ROOT, skill, "templates", file), "utf8");
-  return source.slice(source.indexOf("<!-- markdownlint-disable-file -->"))
-    .replace(/<!--[\s\S]*?-->/g, (comment) =>
-      /^(?:<!-- markdownlint-disable-file -->|<!-- rpi:(?:phase|task) id=[A-Z0-9-]+ -->)$/.test(comment)
-        ? comment : "")
+  const markerIndex = source.indexOf("<!-- markdownlint-disable-file -->");
+  return stripUnapprovedComments(source.slice(markerIndex < 0 ? 0 : markerIndex))
     .replace(/^Fill every .*$/m, "");
 }
 

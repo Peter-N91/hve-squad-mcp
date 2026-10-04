@@ -1038,7 +1038,10 @@ export class ResearchRuntime implements AdvisoryStageExecutor {
     const html = Buffer.concat(chunks).toString("utf8");
     const main = html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1] ?? html;
     const content = main.replace(/<(script|style|nav)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
-      .replace(/<[^>]+>/g, " ").replace(/[ \t]+/g, " ").trim();
+      .replace(/<[^>]+>/g, " ")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replace(/[ \t]+/g, " ").trim();
     if (!content) return { status: "unavailable", reason: "Document contained no readable text." };
     const truncated = content.length > MAX_FILE_CHARS;
     const returned = content.slice(0, MAX_FILE_CHARS);

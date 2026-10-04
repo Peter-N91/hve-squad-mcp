@@ -146,12 +146,22 @@ async function handleRequest(
   };
 
   const response = await handler.handle(request);
-  res.writeHead(response.status, response.headers);
   if (response.body === undefined) {
+    res.writeHead(response.status, response.headers);
     res.end();
   } else if (typeof response.body === "string") {
+    const contentType = response.headers["content-type"]?.split(";")[0].trim().toLowerCase();
+    const headers =
+      contentType === "text/html"
+        ? response.headers
+        : { ...response.headers, "content-type": "text/plain; charset=utf-8" };
+    res.writeHead(response.status, headers);
     res.end(response.body);
   } else {
+    res.writeHead(response.status, {
+      ...response.headers,
+      "content-type": "application/json",
+    });
     res.end(JSON.stringify(response.body));
   }
 }

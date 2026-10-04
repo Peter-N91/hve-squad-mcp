@@ -418,7 +418,10 @@ test("a read-only research worker can fetch a permitted external source without 
     await runtime.execute(research, request);
     assert.equal(fetched, true);
     const workerTools = f.backend.seen[4].messages.filter((entry) => entry.role === "tool");
-    assert.ok(workerTools.some((entry) => entry.content.includes(url)));
+    const outputs = workerTools.map((entry) => JSON.parse(entry.content) as {
+      evidence?: { source?: unknown };
+    });
+    assert.ok(outputs.some((output) => output.evidence?.source === url));
     assert.equal(await f.store.get("tenant-a", "project-a", lane), undefined);
     assert.ok(await f.store.get("tenant-a", "project-a", primary));
   } finally { await f.cleanup(); }
@@ -1106,7 +1109,7 @@ test("a successful documentation fetch supplies source and retrieval-time eviden
     const output = f.backend.seen.at(-1)?.messages.at(-1)?.content ?? "";
     assert.match(output, /Verified page text/);
     assert.match(output, /retrievedAt/);
-    assert.match(output, /learn.microsoft.com/);
+    assert.match(output, /learn\.microsoft\.com/);
     assert.doesNotMatch(output, /execute_this/);
   } finally { await f.cleanup(); }
 });

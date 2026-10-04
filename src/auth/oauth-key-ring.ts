@@ -8,7 +8,6 @@
 import {
   createCipheriv,
   createDecipheriv,
-  createHash,
   createHmac,
   hkdfSync,
   randomBytes,
@@ -78,7 +77,10 @@ export class OAuthKeyRing implements JwtVerifier {
       if (master.length !== 32) {
         throw new Error("Each simple OAuth signing key must decode to exactly 32 bytes.");
       }
-      const kid = createHash("sha256").update(master).digest("hex").slice(0, 16);
+      const kid = createHmac("sha256", master)
+        .update("hve-squad-simple-oauth-key-id", "utf8")
+        .digest("hex")
+        .slice(0, 16);
       return {
         kid,
         jwt: derive(master, "jwt-signing"),

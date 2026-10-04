@@ -15,7 +15,7 @@
  * JWTs accepted only by this MCP server; login/auth/refresh codes are one-time and
  * stored by hash through {@link OAuthGrantStore}.
  */
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 
 import type { JwtVerifier } from "./entra.js";
 import { OAuthKeyRing } from "./oauth-key-ring.js";
@@ -202,9 +202,8 @@ function randomSecret(bytes = 32): string {
 
 function randomLoginCode(): string {
   let value = "";
-  const bytes = randomBytes(20);
-  for (const byte of bytes) {
-    value += LOGIN_CODE_ALPHABET[byte % LOGIN_CODE_ALPHABET.length];
+  for (let index = 0; index < 20; index += 1) {
+    value += LOGIN_CODE_ALPHABET[randomInt(LOGIN_CODE_ALPHABET.length)];
   }
   return value.match(/.{1,5}/g)?.join("-") ?? value;
 }
