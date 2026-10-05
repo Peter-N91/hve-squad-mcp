@@ -50,19 +50,34 @@
     <li><strong>An Entra app registration</strong> — the resource server whose Application ID URI becomes the token audience.</li>
     <li><strong>Optionally</strong> Azure Table Storage for durable run state, and Blob Storage for renders and memory overflow.</li>
   </ul>
-  <p>Everything is expressed as Bicep in <code>host/infra/</code>. There is no click-through path.</p>
+  <p>Everything is expressed as Bicep in <code>host/infra/</code>: <code>main.bicep</code> calls one module per resource
+     from <code>host/infra/modules/</code>, and every value lives in <code>main.bicepparam</code>. There is no click-through path.</p>
+
+  <h2>Automated delivery</h2>
+  <p>
+    After a one-time bootstrap (<code>host/infra/bootstrap/Initialize-AzureCicd.ps1</code>), the
+    <code>Azure infrastructure</code> workflow does the rest. Every pull request lints and compiles the Bicep and shows a
+    <strong>what-if</strong>; a push to <code>main</code> then waits for a required reviewer to <strong>approve</strong> the
+    <code>azure-production</code> environment before it deploys the foundation, builds the image in ACR, deploys the app,
+    and smoke-tests the endpoint. CI signs in as <strong>user-assigned managed identities</strong> through GitHub OIDC —
+    no secret is stored. What-if uses a read-only identity; the one identity that can deploy is reachable only from the
+    approval-gated environment, and only within the workload resource group.
+  </p>
 
   <h2>The shape of it</h2>
   <ol class="steps">
-    <li><strong>Deploy identity.</strong> OIDC federation for CI, or a local <code>az login</code> for a manual run.</li>
-    <li><strong>Register the Entra app and expose the API.</strong> The Application ID URI is the audience the server
-        enforces on every token. Expose one scope per tool, plus the <code>Squad.Operate</code> app role for the
-        operator who releases held runs.</li>
-    <li><strong>Provision Azure OpenAI.</strong> Real spend starts here. The endpoint must appear in the server's
-        model-endpoint allow-list, or the server refuses to start.</li>
-    <li><strong>Fill in the deployment parameters</strong> in <code>host/infra/main.bicepparam</code>.</li>
-    <li><strong>Build the image in ACR</strong> and deploy the Container App, Key Vault, and managed identity.</li>
-    <li><strong>Grant the app identity access to Azure OpenAI</strong> — least privilege, no keys in configuration.</li>
+    <li><strong>Bootstrap once.</strong> The bootstrap script creates the deploy managed identity, its OIDC federation and
+        resource-group-scoped roles, and the GitHub environments CI uses.</li>
+    <li><strong>Register the Entra app and expose the API</strong> — also done by the bootstrap. The Application ID URI is
+        the audience the server enforces on every token. One scope per tool, plus the <code>Squad.Operate</code> app role
+        for the operator who releases held runs.</li>
+    <li><strong>Provision Azure OpenAI</strong> — a Bicep module, key auth disabled. Real spend starts here. The endpoint and
+        the server's model-endpoint allow-list are both derived from that one account.</li>
+    <li><strong>Fill in the deployment parameters</strong> in <code>host/infra/main.bicepparam</code> and commit.</li>
+    <li><strong>Approve the deployment.</strong> The workflow builds the image in ACR and deploys the Container App, Key
+        Vault, registry, and managed identity.</li>
+    <li><strong>The app identity is granted access to Azure OpenAI</strong> and the registry by the same deployment — least
+        privilege, no keys in configuration.</li>
     <li><strong>Import the connector into Copilot Studio</strong> from
         <code>generated/copilot-studio-connector/</code>, which is generated and committed.</li>
   </ol>
