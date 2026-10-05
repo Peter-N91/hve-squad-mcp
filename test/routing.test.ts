@@ -104,7 +104,7 @@ test("a full advisory request routes research -> plan -> review", () => {
   );
 });
 
-test("council engages when the request crosses two or more council domains", () => {
+test("the council is task-fit: only the lenses the request touches are dispatched", () => {
   const plan = computeRoutePlan(
     "review the security and cost tradeoffs of the proposed architecture",
     { profile: "council" },
@@ -113,16 +113,20 @@ test("council engages when the request crosses two or more council domains", () 
   );
   assert.deepEqual(plan.stages.map((s) => s.role), ["researcher", "lead", "tester"]);
   assert.equal(plan.council.engaged, true);
-  // Base council members resolve to their roster Primary agents.
+  // Each touched lens resolves to its roster Primary; product-fit and RAI are not touched.
   assert.deepEqual(plan.council.members, [
     "System Architecture Reviewer",
     "Security Planner",
     "Squad Cost Manager",
-    "Functional Planner",
   ]);
+  assert.deepEqual(plan.council.extension, []);
+  assert.deepEqual(
+    plan.council.notProposed.map((o) => o.role),
+    ["product-owner", "rai"],
+  );
 });
 
-test("council adds RAI when the request touches the RAI domain (>=2 domains)", () => {
+test("council adds RAI when the request touches the RAI domain", () => {
   const plan = computeRoutePlan(
     "review the fairness and security posture of the model",
     { profile: "council" },
@@ -130,7 +134,33 @@ test("council adds RAI when the request touches the RAI domain (>=2 domains)", (
     FIXTURE_PROFILES,
   );
   assert.equal(plan.council.engaged, true);
-  assert.ok(plan.council.members.includes("RAI Planner"));
+  assert.deepEqual(plan.council.members, ["Security Planner", "RAI Planner"]);
+});
+
+test("a single RAI concern triggers a council of `rai` alone", () => {
+  const plan = computeRoutePlan(
+    "plan the rollout and check the model for bias",
+    { profile: "council" },
+    FIXTURE_TABLES,
+    FIXTURE_PROFILES,
+  );
+  assert.equal(plan.council.engaged, true);
+  assert.deepEqual(plan.council.members, ["RAI Planner"]);
+  assert.deepEqual(
+    plan.council.notProposed.map((o) => o.role),
+    ["architect", "security", "cost-manager", "product-owner"],
+  );
+});
+
+test("`rai` matches as a whole word, so `raise` does not trigger a council", () => {
+  const plan = computeRoutePlan(
+    "plan how to raise the rate limit",
+    { profile: "council" },
+    FIXTURE_TABLES,
+    FIXTURE_PROFILES,
+  );
+  assert.equal(plan.council.engaged, false);
+  assert.deepEqual(plan.council.extension, []);
 });
 
 test("council does NOT engage for a full advisory request with fewer than two domains", () => {
@@ -218,21 +248,17 @@ test("route() over the real instructions classifies a multi-domain request with 
   });
   assert.deepEqual(plan.stages.map((s) => s.role), ["researcher", "lead", "tester"]);
   assert.equal(plan.council.engaged, true);
-  assert.deepEqual(plan.council.missingQuorum, []);
+  assert.deepEqual(plan.council.extension, []);
   assert.ok(plan.council.members.includes("Security Planner"));
   assert.ok(plan.council.members.includes("Squad Cost Manager"));
 });
 
-test("a profile without the full council quorum escalates instead of seating a partial council", () => {
+test("a profile missing a task-fit council role offers it as a council extension", () => {
   // `default` seeds researcher, lead, developer, tester, scribe — no council role.
   const plan = route("review the security and cost of the proposed architecture");
   assert.equal(plan.profile, "default");
   assert.equal(plan.council.engaged, false);
   assert.deepEqual(plan.council.members, []);
-  assert.deepEqual(plan.council.missingQuorum, [
-    "architect",
-    "security",
-    "cost-manager",
-    "product-owner",
-  ]);
+  // Only the lenses the request touches are offered; product-fit and RAI are not.
+  assert.deepEqual(plan.council.extension, ["architect", "security", "cost-manager"]);
 });

@@ -30,6 +30,7 @@ import {
   GATE_INSTRUCTIONS,
   discoveryInstructions,
   modeInstructions,
+  routingInstructions,
   squadStateRoot,
 } from "./persona.js";
 import { LOCAL_MEMORY_TENANT } from "./squad-memory-resources.js";
@@ -63,6 +64,10 @@ function composeSystemPrompt(tool: CatalogTool, request: CoordinatorRequest): st
   const discoveryBlock = discoveryInstructions(request.discovery);
   if (discoveryBlock.length > 0) {
     blocks.push(discoveryBlock);
+  }
+  const routingBlock = routingInstructions(request.routing, federation);
+  if (routingBlock.length > 0) {
+    blocks.push(routingBlock);
   }
   // Surface federation resolution for the federation tool, or for any tool that
   // did not pin a sub-squad (a plain repo ignores it; a federation repo needs it).
@@ -151,9 +156,11 @@ function composeFramedRequest(tool: CatalogTool, request: CoordinatorRequest): s
     if (tool.council.length > 0) {
       lines.push(
         "",
-        "If this is a pre-implementation go/no-go or crosses two or more council",
-        `domains, also run the council (${tool.council.join(", ")}) and record a ` +
-          "Council Verdict before any implementer dispatches.",
+        "If this is a pre-implementation go/no-go, crosses two or more council",
+        `domains, or raises any RAI concern, also run a task-fit council (only the ` +
+          `seats whose lens the work touches, from ${tool.council.join(", ")}) and record a ` +
+          "Council Verdict, listing every lens left out under Council Members Not Proposed, " +
+          "before any implementer dispatches.",
       );
     }
     if (request.squad) {
@@ -243,6 +250,7 @@ async function composeStateContext(
     `- owner: ${request.owner ?? "(role-only dispatch)"}`,
     `- mode: ${request.mode ?? "(interactive)"}`,
     `- discovery: ${request.discovery ?? "(no explicit depth; offer once when the trigger holds)"}`,
+    `- model routing: ${request.routing ?? "(as recorded in team.md; none recorded dispatches with no model parameter)"}`,
   ];
   // Optional bounded prior-context digest (Step 4.1). With NO store injected the
   // block is never appended, so the output is BYTE-IDENTICAL to the advisory-only

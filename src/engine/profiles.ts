@@ -20,7 +20,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { resolveSquadGithubRoot } from "../paths.js";
+import { resolveSquadGithubRoot, rosterCatalogPath } from "../paths.js";
 import { parseTables } from "./markdown-table.js";
 
 /** The profile seeded when the caller names none, or names one that does not exist. */
@@ -198,7 +198,7 @@ export function parseCastCatalog(markdown: string): Map<string, CastCatalogRow> 
     t.headers.some((h) => h.toLowerCase().includes("primary agent")),
   );
   if (!table) {
-    throw new Error("Could not find the Cast Catalog table in squad-roster.instructions.md.");
+    throw new Error("Could not find the Cast Catalog table in roster-catalog.md.");
   }
   const roleIdx = table.headers.findIndex((h) => h.trim().toLowerCase() === "role");
   const primaryIdx = table.headers.findIndex((h) => h.toLowerCase().includes("primary agent"));
@@ -236,10 +236,11 @@ export function loadProfileTables(githubRoot = resolveSquadGithubRoot()): Profil
     join(githubRoot, "instructions", "squad", "squad-roster.instructions.md"),
     "utf8",
   );
+  const catalogMd = readFileSync(rosterCatalogPath(githubRoot), "utf8");
   return {
     profiles: parseProfiles(rosterMd),
     deliverableRoots: parseDeliverableRoots(rosterMd),
-    cast: parseCastCatalog(rosterMd),
+    cast: parseCastCatalog(catalogMd),
   };
 }
 

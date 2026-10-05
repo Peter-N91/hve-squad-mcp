@@ -150,8 +150,12 @@ export const GATE_INSTRUCTIONS = [
   "confirm the methodology artifacts exist: a research artifact under",
   "`.copilot-tracking/research/`, a plan under `.copilot-tracking/plans/`, and —",
   "when the request crosses two or more council domains (architecture, security,",
-  "cost, product-fit, RAI) — a non-`Stop` Council Verdict in",
-  "`.copilot-tracking/squad/decisions.md`. When a precondition is unmet, dispatch",
+  "cost, product-fit) or raises any RAI concern — a non-`Stop` Council Verdict,",
+  "or a user's `## Council Waiver`, in `.copilot-tracking/squad/decisions.md`.",
+  "Size the council to the work: dispatch only the role for each lens the work",
+  "touches and record every lens left out under `Council Members Not Proposed`;",
+  "offer a needed council role the roster lacks as a council extension rather",
+  "than covering its lens yourself. When a precondition is unmet, dispatch",
   "the missing stage (or escalate); never produce the missing research, plan, or",
   "verdict yourself. On a `Stop` verdict, escalate rather than dispatch.",
   "",
@@ -256,6 +260,49 @@ export function discoveryInstructions(discovery: string | undefined): string {
     "the depth the caller chose, and never substitute your own reasoning for a role",
     "you could not dispatch. Record the verdict with `Opt-In: explicit-input`.",
   ].join("\n");
+}
+
+/** The per-role model routing modes the `/squad` prompt accepts (hve-squad 0.18.0). */
+export const MODEL_ROUTING_MODES = ["off", "ranked", "manual"] as const;
+export type ModelRoutingMode = (typeof MODEL_ROUTING_MODES)[number];
+
+/**
+ * The per-turn model routing disposition, paraphrased from the `/squad` and
+ * `/squad-federation` prompts and `references/model-routing.md`. Appended only
+ * when the caller supplied an explicit `routing=` input; when it is omitted the
+ * coordinator applies the mode already recorded in `team.md`.
+ */
+export function routingInstructions(routing: string | undefined, federation = false): string {
+  const mode = (routing ?? "").trim().toLowerCase() as ModelRoutingMode;
+  if (!MODEL_ROUTING_MODES.includes(mode)) {
+    return "";
+  }
+  const lines = [
+    `**Model routing = ${mode} (explicit input).** Pass \`routing=${mode}\` to the coordinator`,
+    "verbatim; it persists the mode as the `Model routing:` line in `team.md` until changed.",
+  ];
+  if (mode === "ranked") {
+    lines.push(
+      "`ranked` picks each role's model by fit from the squad model catalog and shows the",
+      "picks in `team.md`'s `Model` column; every non-Scribe dispatch passes that cell verbatim.",
+    );
+  } else if (mode === "manual") {
+    lines.push(
+      "`manual` asks the user, before any dispatch, to accept the suggestions or choose per",
+      "assignment class and then per role, offering only models this host can run; every",
+      "non-Scribe dispatch passes the recorded `Model` cell verbatim.",
+    );
+  } else {
+    lines.push("`off` removes the `Model` column and dispatches with no model parameter.");
+  }
+  lines.push("The Scribe never inherits the session model under any mode.");
+  if (federation) {
+    lines.push(
+      "Forward the mode to every selected sub-squad exactly as profile and tier are",
+      "forwarded; a sub-squad may narrow it, never widen or substitute it.",
+    );
+  }
+  return lines.join("\n");
 }
 
 /**

@@ -129,7 +129,7 @@ const ADVISORY_PLAN: RoutePlan = {
     { role: "lead", agentName: "Squad Lead", tier: "confirm", parallelEligible: false },
     { role: "tester", agentName: "Squad Reviewer", tier: "auto", parallelEligible: true },
   ],
-  council: { engaged: false, members: [], missingQuorum: [] },
+  council: { engaged: false, members: [], extension: [], notProposed: [] },
   profile: "default",
   fanOut: [],
 };

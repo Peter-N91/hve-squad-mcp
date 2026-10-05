@@ -305,6 +305,10 @@ export class EmbeddedCoordinator {
    * made, an explicit depth is ignored rather than honored, and the caller's
    * payload becomes the intake gate's input instead. An unattended run is gated by
    * validation, not by ideation.
+   *
+   * `request.routing` is ignored for the same reason: per-role model routing is
+   * a `team.md` decision the host's coordinator owns (and `manual` interviews the
+   * user), while this path runs on the operator-configured backend.
    */
   async handle(
     tool: CatalogTool,
@@ -317,6 +321,12 @@ export class EmbeddedCoordinator {
       this.logger?.info("discovery_ignored_unattended", {
         toolId: tool.id,
         requested: request.discovery,
+      });
+    }
+    if (request.routing) {
+      this.logger?.info("routing_ignored_unattended", {
+        toolId: tool.id,
+        requested: request.routing,
       });
     }
 

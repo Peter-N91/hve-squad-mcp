@@ -31,6 +31,14 @@ export interface CoordinatorRequest {
    * ignores it (`squad-discovery-gate.instructions.md`, *Unattended Runs*).
    */
   discovery?: string;
+  /**
+   * Optional per-role model routing mode (`off` | `ranked` | `manual`).
+   *
+   * Honored only on the DELEGATED path, where the host's coordinator owns
+   * `team.md` and its `Model` column (`references/model-routing.md`). The
+   * embedded engine runs its own configured backend and ignores it.
+   */
+  routing?: string;
   /** Optional free-form context. */
   context?: string;
   /** Optional federation sub-squad name to target (scopes state to members/<name>/). */

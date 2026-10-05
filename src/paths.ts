@@ -88,6 +88,23 @@ export function resolveSquadGithubRoot(fromPackageRoot = packageRoot()): string 
 }
 
 /**
+ * Resolve the file holding the roster Cast Catalog table (role -> Primary and
+ * Alternate agents) under a squad `.github` root.
+ *
+ * `hve-squad@0.18.0` moved the table out of `squad-roster.instructions.md` into
+ * the squad skill's `references/roster-catalog.md`, which every layout places at
+ * `<root>/skills/squad/references/`. The roster instructions stay the fallback so
+ * a consumer still on an older APM install keeps resolving roles.
+ */
+export function rosterCatalogPath(githubRoot: string): string {
+  const relocated = join(githubRoot, "skills", "squad", "references", "roster-catalog.md");
+  if (existsSync(relocated)) {
+    return relocated;
+  }
+  return join(githubRoot, "instructions", "squad", "squad-roster.instructions.md");
+}
+
+/**
  * Resolve the candidate `agents/` directories that may hold the `*.agent.md`
  * personas, in priority order, filtered to those that exist.
  *

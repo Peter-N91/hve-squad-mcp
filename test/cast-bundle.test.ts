@@ -50,6 +50,7 @@ interface CastManifest {
   sourcePackage: string;
   agentFileCount: number;
   instructionFileCount: number;
+  referenceFileCount: number;
   duplicateAgentNames: string[];
   files: { path: string; sha256: string; source: string }[];
 }
@@ -76,13 +77,16 @@ function bundledPaths(dir = BUNDLE_ROOT, acc: string[] = []): string[] {
 }
 
 /**
- * The roster the bundle SHIPS. Deliberately not a sibling package checkout: the
+ * The roster catalog the bundle SHIPS. Deliberately not a sibling package checkout: the
  * bundle is the artifact the image runs on, so validating it against a roster
  * that is not in it means a developer with a checkout and a runner without one
  * assert different things — and the runner's answer is the one that matters.
  * `npm run snapshot:cast:check` is what confirms this roster is the pinned one.
+ *
+ * Since hve-squad 0.18.0 the Cast Catalog and the Registered External Cast live in
+ * the squad skill's `references/roster-catalog.md`, not the roster instructions.
  */
-const ROSTER_FILE = join(BUNDLE_ROOT, "instructions", "squad", "squad-roster.instructions.md");
+const ROSTER_FILE = join(BUNDLE_ROOT, "skills", "squad", "references", "roster-catalog.md");
 
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
@@ -262,6 +266,14 @@ test("cast bundle carries the untrusted-content-boundary instruction", () => {
   );
 });
 
+test("cast bundle carries the squad roster catalog the router parses", () => {
+  assert.ok(
+    existsSync(ROSTER_FILE),
+    "skills/squad/references/roster-catalog.md must be present in the bundle — routing, " +
+      "profiles, and the generator resolve every role through it (re-run `npm run snapshot:cast`).",
+  );
+});
+
 test("every bundled file hashes to what the manifest records", () => {
   const manifest = readManifest();
   assert.ok(manifest.files.length > 0, "the manifest records at least one file");
@@ -298,8 +310,10 @@ test("the bundle carries no file the manifest does not record", () => {
 test("the manifest counts agree with the recorded files", () => {
   const manifest = readManifest();
   const agents = manifest.files.filter((entry) => entry.path.startsWith("agents/"));
+  const references = manifest.files.filter((entry) => entry.path.startsWith("skills/"));
   assert.equal(manifest.agentFileCount, agents.length);
-  assert.equal(manifest.instructionFileCount, manifest.files.length - agents.length);
+  assert.equal(manifest.referenceFileCount, references.length);
+  assert.equal(manifest.instructionFileCount, manifest.files.length - agents.length - references.length);
 });
 
 test("the bundled manifest is linked to the pinned package version", () => {
