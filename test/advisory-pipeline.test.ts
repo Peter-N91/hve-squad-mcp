@@ -242,7 +242,7 @@ test("planAdvisoryStages interleaves the council and appends backlog-handoff for
         { role: "lead", agentName: "Squad Lead", tier: "confirm", parallelEligible: false },
         { role: "tester", agentName: "Squad Reviewer", tier: "auto", parallelEligible: true },
       ],
-      council: { engaged: true, members: ["Council Member A", "Council Member B"], missingQuorum: [] },
+      council: { engaged: true, members: ["Council Member A", "Council Member B"], extension: [], notProposed: [] },
       profile: "default",
       fanOut: [],
     };
@@ -271,7 +271,7 @@ test("planAdvisoryStages keeps a research-only route to a single research stage"
   try {
     const routePlan: RoutePlan = {
       stages: [{ role: "researcher", agentName: "Squad Researcher", tier: "auto", parallelEligible: true }],
-      council: { engaged: false, members: [], missingQuorum: [] },
+      council: { engaged: false, members: [], extension: [], notProposed: [] },
       profile: "default",
       fanOut: [],
     };
@@ -280,6 +280,93 @@ test("planAdvisoryStages keeps a research-only route to a single research stage"
   } finally {
     cleanup();
   }
+});
+
+test("planAdvisoryStages offers a council extension instead of a partial council", () => {
+  const { root, cleanup } = makeAdvisoryCastFixture();
+  try {
+    const routePlan: RoutePlan = {
+      stages: [
+        { role: "researcher", agentName: "Squad Researcher", tier: "auto", parallelEligible: true },
+        { role: "lead", agentName: "Squad Lead", tier: "confirm", parallelEligible: false },
+        { role: "tester", agentName: "Squad Reviewer", tier: "auto", parallelEligible: true },
+      ],
+      council: {
+        engaged: false,
+        members: [],
+        extension: ["security", "cost-manager"],
+        notProposed: [{ role: "rai", reason: "the request does not touch the rai lens" }],
+      },
+      profile: "default",
+      fanOut: [],
+    };
+    const ordered = planAdvisoryStages(routePlan, [root], new Map());
+    assert.deepEqual(
+      ordered.map((s) => `${s.kind}:${s.role}`),
+      ["persona:Squad Researcher", "persona:Squad Lead", "council:Council Extension", "persona:Squad Reviewer"],
+    );
+    assert.deepEqual(ordered[2].extension, ["security", "cost-manager"]);
+    assert.equal(ordered[2].members, undefined);
+  } finally {
+    cleanup();
+  }
+});
+
+test("a council extension stage dispatches no member and synthesizes no verdict", async () => {
+  const backend = new ScriptedBackend([
+    { match: "PLAN-CHARTER", text: "the plan" },
+    { match: "REVIEW-CHARTER", text: "review notes" },
+  ]);
+  const result = await runAdvisoryPipeline(
+    { toolId: "squad_run", request: "ship the change", mode: "autopilot" },
+    { backend },
+    {
+      mode: "autopilot",
+      plan: [
+        personaStage("Squad Lead", "PLAN"),
+        {
+          kind: "council",
+          role: "Council Extension",
+          extension: ["security"],
+          notProposed: [{ role: "rai", reason: "the request does not touch the rai lens" }],
+        },
+        personaStage("Squad Reviewer", "REVIEW"),
+      ],
+    },
+  );
+  assert.equal(result.outcome, "completed");
+  assert.equal(backend.calls, 2);
+  assert.equal(result.councilVerdict, undefined);
+  assert.match(result.artifact, /## Council Extension/);
+  assert.match(result.artifact, /Roles to Add: security/);
+  assert.match(result.artifact, /Council Members Not Proposed: rai/);
+  // The review still reviews the plan, not the extension notice.
+  const reviewCall = backend.seen.find((r) => r.system.includes("REVIEW-CHARTER"));
+  assert.ok(reviewCall && JSON.stringify(reviewCall.messages).includes("the plan"));
+});
+
+test("the council verdict lists every lens left out under Council Members Not Proposed", async () => {
+  const backend = new ScriptedBackend([{ match: "SEC-CHARTER", text: "Approve. Risk: Low." }]);
+  const result = await runAdvisoryPipeline(
+    { toolId: "squad_run", request: "ship the change", mode: "autopilot" },
+    { backend },
+    {
+      mode: "autopilot",
+      plan: [
+        {
+          kind: "council",
+          role: "Council Verdict",
+          members: [persona("security", "SEC")],
+          notProposed: [{ role: "cost-manager", reason: "the request does not touch the cost lens" }],
+        },
+      ],
+    },
+  );
+  assert.equal(result.councilVerdict?.verdict, "Go");
+  assert.match(
+    result.artifact,
+    /Council Members Not Proposed: cost-manager — the request does not touch the cost lens/,
+  );
 });
 
 // ---------------------------------------------------------------------------

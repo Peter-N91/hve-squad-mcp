@@ -26,8 +26,8 @@
 # Per-tool `input` mirrors the `/squad` prompt arguments
 # (squad-src/.github/prompts/squad/squad.prompt.md):
 #   request (required), profile, tier, owner, mode, context, the optional
-#   discovery-gate depth on the two catch-all tools, and the optional federation
-#   `squad` sub-squad target (plus `init` on squad_federate).
+#   discovery-gate depth and model-routing mode on the two catch-all tools, and
+#   the optional federation `squad` sub-squad target (plus `init` on squad_federate).
 #
 # Execution model (Phase 0): DELEGATED. The tool returns the Coordinator
 # persona + matched routing + framed request; the calling host (VS Code GitHub
@@ -47,6 +47,11 @@ conventions:
   # gate interviews a human, so an unattended run ignores the input entirely.
   # See squad-src/.github/instructions/squad/squad-discovery-gate.instructions.md.
   discoveryDepths: [quick, standard, deep, skip]
+  # Per-role model routing modes (hve-squad 0.18.0), forwarded to the coordinator
+  # on the attended (delegated) path only; the embedded engine runs its own
+  # configured backend and ignores the input.
+  # See squad-src/.github/skills/squad/references/model-routing.md.
+  modelRouting: [off, ranked, manual]
   stateRoot: ".copilot-tracking/squad/"
   # Federation (opt-in): a repo may host several named sub-squads, each an
   # ordinary squad rooted at the sub-squad root below. The optional `squad`
@@ -158,13 +163,16 @@ tools:
   - id: squad_review
     title: Squad Review
     # Seeded from the `tester` role -> Squad Reviewer; council row adds the
-    # multi-domain go/no-go reviewers (architect, security, cost, product, rai).
+    # task-fit go/no-go reviewers (one per lens: architect, security, cost,
+    # product, rai).
     description: >-
       Run the squad's review stage. Routes to the Squad Reviewer (squad `tester`
       role) at the `auto` tier for quality, correctness, and standards review.
-      When the request asks for a pre-implementation go/no-go or crosses two or
-      more council domains, it engages the council row (architect, security,
-      cost-manager, product-owner, and optionally rai) at the `confirm` tier.
+      When the request asks for a pre-implementation go/no-go, crosses two or
+      more council domains, or raises any responsible-AI concern, it engages a
+      task-fit council at the `confirm` tier: only the seats whose lens the work
+      touches (architect, security, cost-manager, product-owner, rai), with every
+      lens left out recorded in the verdict.
       Delegated execution: returns the Coordinator persona, matched routing, and
       a framed dispatch request. Use for "review", "validate", "check quality",
       "council", or "go/no-go" requests.
@@ -318,6 +326,10 @@ tools:
           type: string
           enum: [quick, standard, deep, skip]
           description: "Optional discovery-gate depth for a request that states a goal with no requirement artifact behind it: quick (analyst), standard (designer then analyst), deep (designer, then challenger and experimenter, then analyst), or skip. An explicit depth beats the coordinator's one-time offer. Ignored on an unattended run, which has nobody for the gate to interview."
+        routing:
+          type: string
+          enum: ["off", ranked, manual]
+          description: "Optional per-role model routing mode, persisted in team.md until changed: ranked (pick each role's model by fit from the squad model catalog), manual (ask you to choose each role's model from the models this host can run), or off (no Model column; dispatch with no model parameter). Omit to keep the recorded mode. Ignored on an unattended run."
         context:
           type: string
           description: "Optional free-form context to frame the pipeline."
@@ -392,6 +404,10 @@ tools:
           type: string
           enum: [quick, standard, deep, skip]
           description: "Optional discovery-gate depth, asked once at the federation level and applied per qualifying sub-squad: quick (analyst), standard (designer then analyst), deep (designer, then challenger and experimenter, then analyst), or skip. Each qualifying sub-squad runs its own session and writes its own brief and verdict under its own root. Ignored on an unattended run."
+        routing:
+          type: string
+          enum: ["off", ranked, manual]
+          description: "Optional per-role model routing mode (off, ranked, or manual), forwarded verbatim to every selected sub-squad's coordinator run; each sub-squad persists it in its own team.md and may only narrow it, never widen or substitute it. Ignored on an unattended run."
         context:
           type: string
           description: "Optional free-form context to frame the federation turn."

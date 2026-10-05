@@ -32,9 +32,10 @@
  * network.
  *
  * DEFERRED (recorded, not silently skipped): this bundles personas plus the squad
- * and boundary instructions only. The full referenced SKILL trees are deferred to
- * the execution expansion to keep image size bounded; untrusted-content-boundary
- * enforcement does not depend on skill files being present.
+ * and boundary instructions, and from the squad skill only the reference files the
+ * server itself parses ({@link SQUAD_SKILL_REFERENCES}). The full referenced SKILL
+ * trees are deferred to the execution expansion to keep image size bounded;
+ * untrusted-content-boundary enforcement does not depend on skill files being present.
  */
 import { createHash } from "node:crypto";
 import {
@@ -58,8 +59,19 @@ const MANIFEST_PATH = join(CAST_DIR, "manifest.json");
 const CAST_ROOT = join(CAST_DIR, ".github");
 const CAST_AGENTS = join(CAST_ROOT, "agents");
 const CAST_INSTRUCTIONS = join(CAST_ROOT, "instructions");
+const CAST_SKILLS = join(CAST_ROOT, "skills");
 
 const BOUNDARY_FILE = "untrusted-content-boundary.instructions.md";
+
+/** The squad skill directory, as `apm.yml` declares it (a directory, not a file). */
+const SQUAD_SKILL_DIR = "/skills/squad";
+/**
+ * The squad skill files the server parses at runtime. `hve-squad@0.18.0` moved the
+ * Cast Catalog (role -> Primary/Alternate agents) out of `squad-roster.instructions.md`
+ * into this reference, so routing, profiles, and the generator cannot resolve a role
+ * without it.
+ */
+export const SQUAD_SKILL_REFERENCES = ["references/roster-catalog.md"] as const;
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
 /** Bounded so a snapshot cannot look like abuse to the origin. */
@@ -101,6 +113,7 @@ interface CastManifest {
   generatedAt: string;
   agentFileCount: number;
   instructionFileCount: number;
+  referenceFileCount: number;
   agentNames: string[];
   duplicateAgentNames: string[];
   files: { path: string; sha256: string; source: string }[];
@@ -200,7 +213,28 @@ export function bundleDestination(dep: Dependency, packageSlug: string): string 
   if (file.endsWith(".instructions.md") && dep.path.includes("/instructions/squad/")) {
     return `instructions/squad/${file}`;
   }
+  if (dep.slug === packageSlug) {
+    const reference = SQUAD_SKILL_REFERENCES.find((ref) =>
+      dep.path.endsWith(`${SQUAD_SKILL_DIR}/${ref}`),
+    );
+    if (reference) {
+      return `skills/squad/${reference}`;
+    }
+  }
   return undefined;
+}
+
+/**
+ * Expand a directory dependency into the individual files the bundle carries.
+ * `apm.yml` deploys the package's squad skill as a whole directory; the bundle
+ * takes only {@link SQUAD_SKILL_REFERENCES} from it. Every other entry is a file
+ * and passes through unchanged.
+ */
+export function expandDependency(dep: Dependency, packageSlug: string): Dependency[] {
+  if (dep.slug === packageSlug && dep.path.endsWith(SQUAD_SKILL_DIR)) {
+    return SQUAD_SKILL_REFERENCES.map((ref) => ({ ...dep, path: `${dep.path}/${ref}` }));
+  }
+  return [dep];
 }
 
 function authHeaders(): Record<string, string> {
@@ -294,7 +328,8 @@ async function resolveBundle(pin: Pin): Promise<Resolution> {
   const planned: PlannedFile[] = [];
   const byDest = new Map<string, PlannedFile>();
 
-  for (const dep of parseApmDependencies(apmYaml)) {
+  const deps = parseApmDependencies(apmYaml).flatMap((dep) => expandDependency(dep, pin.package));
+  for (const dep of deps) {
     const dest = bundleDestination(dep, pin.package);
     if (!dest) {
       continue;
@@ -342,6 +377,13 @@ async function resolveBundle(pin: Pin): Promise<Resolution> {
   if (!planned.some((file) => file.dest === `instructions/${BOUNDARY_FILE}`)) {
     throw new Error(`apm.yml does not carry ${BOUNDARY_FILE} — boundary enforcement would ship absent.`);
   }
+  for (const reference of SQUAD_SKILL_REFERENCES) {
+    if (!planned.some((file) => file.dest === `skills/squad/${reference}`)) {
+      throw new Error(
+        `apm.yml does not deploy the squad skill (${SQUAD_SKILL_DIR}) — ${reference} would ship absent.`,
+      );
+    }
+  }
 
   const files = await mapWithConcurrency(planned, FETCH_CONCURRENCY, async (file) => {
     const content = normalizeContent(await fetchText(rawUrl(file.slug, file.commit, file.path)));
@@ -380,6 +422,7 @@ async function resolveBundle(pin: Pin): Promise<Resolution> {
 
 function buildManifest(pin: Pin, resolution: Resolution, generatedAt: string): CastManifest {
   const agents = resolution.files.filter((file) => file.dest.startsWith("agents/"));
+  const references = resolution.files.filter((file) => file.dest.startsWith("skills/"));
   const names = agents
     .map((file) => file.agentName)
     .filter((name): name is string => Boolean(name))
@@ -396,7 +439,8 @@ function buildManifest(pin: Pin, resolution: Resolution, generatedAt: string): C
     ),
     generatedAt,
     agentFileCount: agents.length,
-    instructionFileCount: resolution.files.length - agents.length,
+    instructionFileCount: resolution.files.length - agents.length - references.length,
+    referenceFileCount: references.length,
     agentNames: [...new Set(names)],
     duplicateAgentNames: resolution.duplicateAgentNames,
     files: resolution.files.map((file) => ({
@@ -404,7 +448,9 @@ function buildManifest(pin: Pin, resolution: Resolution, generatedAt: string): C
       sha256: file.sha256,
       source: `${file.slug}/${file.path}#${file.commit}`,
     })),
-    note: "Skill file trees are DEFERRED to the execution expansion; personas + squad/boundary instructions only.",
+    note:
+      "Skill file trees are DEFERRED to the execution expansion; personas + squad/boundary instructions " +
+      "plus the squad skill references the server parses (skills/squad/references/roster-catalog.md) only.",
   };
 }
 
@@ -412,6 +458,7 @@ function writeBundle(resolution: Resolution, manifest: CastManifest): void {
   // Clean the generated subtrees so a removed agent does not linger.
   rmSync(CAST_AGENTS, { recursive: true, force: true });
   rmSync(CAST_INSTRUCTIONS, { recursive: true, force: true });
+  rmSync(CAST_SKILLS, { recursive: true, force: true });
   for (const file of resolution.files) {
     const target = join(CAST_ROOT, file.dest);
     mkdirSync(dirname(target), { recursive: true });
@@ -488,7 +535,8 @@ export async function runCli(argv: string[]): Promise<number> {
     }
     process.stdout.write(
       `Cast bundle matches ${pin.package}@${pin.version} ` +
-        `(${manifest.agentFileCount} agents, ${manifest.instructionFileCount} instructions).\n`,
+        `(${manifest.agentFileCount} agents, ${manifest.instructionFileCount} instructions, ` +
+        `${manifest.referenceFileCount} skill references).\n`,
     );
     return 0;
   }
@@ -501,7 +549,7 @@ export async function runCli(argv: string[]): Promise<number> {
   }
   process.stdout.write(
     `Snapshot: ${manifest.agentFileCount} agent files, ${manifest.agentNames.length} named personas, ` +
-      `${manifest.instructionFileCount} instruction files; ` +
+      `${manifest.instructionFileCount} instruction files, ${manifest.referenceFileCount} skill references; ` +
       `linked ${pin.package}@${pin.version} (${manifest.sourceCommit.slice(0, 7)}).\n`,
   );
   return 0;

@@ -6,6 +6,9 @@
  * findings, following the advisory subset of
  * `squad-src/.github/instructions/squad/squad-council.instructions.md`:
  *
+ *   * The council is TASK-FIT: only the roles whose lens the work touches are
+ *     dispatched, and every lens left out is recorded under
+ *     `Council Members Not Proposed` so a narrow council stays auditable.
  *   * Each member is dispatched against the SAME scoped input (the plan
  *     artifact), never threaded member-to-member — the council is a parallel
  *     go/no-go over one proposal, not a pipeline.
@@ -27,7 +30,7 @@ import { resolvePersonaForRole } from "./embedded-roles.js";
 import type { PersonaRecord } from "./persona-loader.js";
 import type { BackendUsage, ModelBackend } from "./model-backend.js";
 import type { CoordinatorRequest } from "./coordinator-engine.js";
-import type { RoutePlan } from "./routing.js";
+import type { CouncilLensOmission, RoutePlan } from "./routing.js";
 
 /** The three canonical Council Verdict classes (advisory subset). */
 export type CouncilVerdictClass = "Go" | "Go-With-Conditions" | "Stop";
@@ -183,10 +186,16 @@ function renderVerdict(
   verdict: CouncilVerdictClass,
   conditions: string[],
   opinions: CouncilMemberOpinion[],
+  notProposed: readonly CouncilLensOmission[],
 ): string {
   const lines: string[] = ["## Council Verdict", ""];
   lines.push(`* Verdict: ${verdict}`);
   lines.push(`* Council Members Dispatched: ${opinions.map((o) => o.agentName).join(", ")}`);
+  lines.push(
+    `* Council Members Not Proposed: ${
+      notProposed.length > 0 ? notProposed.map((o) => `${o.role} — ${o.reason}`).join("; ") : "none"
+    }`,
+  );
   lines.push("", "### Findings by Member", "");
   lines.push("| Member | Verdict | Conditions |");
   lines.push("| --- | --- | --- |");
@@ -212,6 +221,34 @@ function renderVerdict(
 // ---------------------------------------------------------------------------
 // Member resolution + dispatch.
 // ---------------------------------------------------------------------------
+
+/**
+ * Render the council extension offer for a council that triggered but whose
+ * task-fit roles are not all on the seeded roster. No member is dispatched and
+ * no verdict is synthesized: the coordinator never covers a lens it did not
+ * dispatch. The advisory pipeline has no implement stage to gate, so the offer
+ * is recorded in the artifact rather than stopping the run.
+ */
+export function renderCouncilExtension(
+  extension: readonly string[],
+  notProposed: readonly CouncilLensOmission[],
+): string {
+  const lines: string[] = ["## Council Extension", ""];
+  lines.push(`* Roles to Add: ${extension.join(", ")}`);
+  lines.push(
+    `* Council Members Not Proposed: ${
+      notProposed.length > 0 ? notProposed.map((o) => `${o.role} — ${o.reason}`).join("; ") : "none"
+    }`,
+  );
+  lines.push("* Verdict: none (council not dispatched)");
+  lines.push(
+    "",
+    "The work needs council roles the seeded profile does not carry, so no Council Verdict was " +
+      "synthesized. Re-run with a profile that seeds them (`full` seeds every council role), or " +
+      "add the roles to the squad roster, before relying on this plan to gate implementation.",
+  );
+  return lines.join("\n");
+}
 
 /**
  * Resolve a routed {@link RoutePlan}'s council member `agentName`s into ordered
@@ -243,6 +280,7 @@ export async function runCouncil(
   planArtifact: string,
   request: CoordinatorRequest,
   deps: CouncilDeps,
+  notProposed: readonly CouncilLensOmission[] = [],
 ): Promise<CouncilVerdict> {
   const opinions = await Promise.all(
     members.map(async (member): Promise<CouncilMemberOpinion> => {
@@ -271,6 +309,6 @@ export async function runCouncil(
 
   const synth = synthesizeVerdict(opinions);
   const usage = opinions.map((o) => o.usage).filter((u): u is BackendUsage => Boolean(u));
-  const markdown = renderVerdict(synth.verdict, synth.conditions, opinions);
+  const markdown = renderVerdict(synth.verdict, synth.conditions, opinions, notProposed);
   return { verdict: synth.verdict, conditions: synth.conditions, members: opinions, usage, markdown };
 }

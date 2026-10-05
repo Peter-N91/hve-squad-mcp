@@ -19,6 +19,11 @@ without the full repository or an `apm install` at runtime.
 - `.github/instructions/untrusted-content-boundary.instructions.md` — the
   boundary instruction the loader applies to any persona that ingests external
   content (VF-07 / G6).
+- `.github/skills/squad/references/roster-catalog.md` — the roster **Cast
+  Catalog** and Registered External Cast. `hve-squad@0.18.0` moved them out of
+  `squad-roster.instructions.md`, and the router, the profile resolver, and the
+  generator resolve every role through this file. It is the only file the
+  bundle takes from the squad skill, which `apm.yml` deploys as a directory.
 - `manifest.json` — the integrity record: the resolved package and upstream
   commits, a SHA-256 per bundled file with the pinned source it came from, and
   the file counts.
@@ -73,4 +78,5 @@ commit the regenerated bundle + manifest.
 Bundling the full referenced **skill** file trees is deferred to the later
 execution expansion to keep image size and scope bounded. The loader's
 untrusted-content-boundary enforcement does not depend on skill files being
-present; personas + squad/boundary instructions are bundled now.
+present; personas, squad/boundary instructions, and the squad skill's roster
+catalog are bundled now.

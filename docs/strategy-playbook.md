@@ -48,20 +48,27 @@ Passing any `mode`, or using `profile=full`, forces the broader advisory route.
 
 ### Council engagement
 
-The remote council is engaged when the request explicitly spans at least two of
-these domains:
+The remote council triggers when the request explicitly spans at least two of
+the architecture, security, cost, and product domains, or raises any
+responsible-AI concern on its own:
 
-| Domain | Representative trigger language |
-| --- | --- |
-| Architecture | architecture, system design, component, design tradeoff |
-| Security | security, threat, vulnerability, STRIDE |
-| Cost | cost, budget, pricing, FinOps, spend |
-| Product | product, requirement, backlog, PRD, BRD, roadmap, epic |
-| Responsible AI | responsible AI, RAI, fairness, harm, bias |
+| Domain | Representative trigger language | Council seat |
+| --- | --- | --- |
+| Architecture | architecture, system design, component, design tradeoff | `architect` |
+| Security | security, threat, vulnerability, STRIDE | `security` |
+| Cost | cost, budget, pricing, FinOps, spend | `cost-manager` |
+| Product | product, requirement, backlog, PRD, BRD, roadmap, epic | `product-owner` |
+| Responsible AI | responsible AI, RAI (whole word), fairness, harm, bias | `rai` |
 
-Council members inspect the same plan independently and in parallel. Their
-verdict is synthesized with `Stop` over `Go-With-Conditions` over `Go`. RAI joins
-only when the request crosses enough domains and includes the RAI domain.
+The council is task-fit (since `hve-squad@0.18.0`): only the seats whose domain
+the request names are dispatched, and the verdict lists every other seat under
+`Council Members Not Proposed`. Council members inspect the same plan
+independently and in parallel. Their verdict is synthesized with `Stop` over
+`Go-With-Conditions` over `Go`.
+
+When a needed seat is not in the seeded profile, the run records a
+`## Council Extension` section naming the roles to add instead of a partial
+verdict. Use `profile=full` when you need every seat available.
 
 Do not rely on vague wording if a council review matters. Name the actual review
 dimensions in the request, for example: "Review this architecture for security,
@@ -422,8 +429,8 @@ Remote HTTP stops after step 4. It cannot implement the plan.
 
 ### Recipe C: Governed multi-domain proposal
 
-1. Call remote `squad_run` with `mode=autopilot`.
-2. Name at least two genuine council dimensions in the request.
+1. Call remote `squad_run` with `mode=autopilot` and `profile=full` so every council seat is available.
+2. Name every genuine council dimension in the request (at least two, or a responsible-AI concern).
 3. Operator releases the held run out of band.
 4. Poll with `squad_status`.
 5. Inspect the Council Verdict and all conditions before downstream action.

@@ -10,9 +10,10 @@
  *       — the "Default Routing Rules" table (intent keyword -> role, autonomy
  *         tier, parallel-eligibility) used for classification and per-stage
  *         tier/parallel resolution.
- *   * squad-src/.github/instructions/squad/squad-roster.instructions.md
+ *   * squad-src/.github/skills/squad/references/roster-catalog.md
  *       — the "Cast Catalog" table (role KEY -> Primary Agent `name:`) used as
- *         the role -> agentName resolver. This is exactly the injectable map the
+ *         the role -> agentName resolver (in `squad-roster.instructions.md`
+ *         before hve-squad 0.18.0; see `rosterCatalogPath`). This is exactly the injectable map the
  *         Phase 1 persona loader helpers (`loadPersonaForRosterRole` /
  *         `resolvePersonaForRosterRole`) consume.
  *
@@ -26,15 +27,16 @@
  *
  *     research (`researcher`)
  *       -> plan (`lead`)
- *       -> council (`architect`, `security`, `cost-manager`, `product-owner`,
- *                   +`rai` when the request touches the RAI domain)
+ *       -> council (task-fit: one role per lens the request touches, from
+ *                   `architect`, `security`, `cost-manager`, `product-owner`,
+ *                   `rai`)
  *       -> review (`tester`)
  *       -> backlog-handoff
  *
  * The linear pipeline stages returned in {@link RoutePlan.stages} are
  * research -> plan -> review; the council is surfaced separately in
- * {@link RoutePlan.council} (engaged only when the request crosses two or more
- * council domains) so Phase 3 can interleave it between plan and review without
+ * {@link RoutePlan.council} (triggered when the request crosses two or more
+ * council lenses or raises any RAI concern) so Phase 3 can interleave it between plan and review without
  * this Phase re-planning. A single research-type request routes to the single
  * `researcher` stage only.
  *
@@ -45,7 +47,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { resolveSquadGithubRoot } from "../paths.js";
+import { resolveSquadGithubRoot, rosterCatalogPath } from "../paths.js";
 import {
   defaultProfileTables,
   INTAKE_VALIDATOR_ROLE,
@@ -131,7 +133,7 @@ export function parseRosterMap(markdown: string): Map<string, string> {
   );
   if (!table) {
     throw new Error(
-      "Could not find the roster cast catalog (Primary Agent) in squad-roster.instructions.md.",
+      "Could not find the roster cast catalog (Primary Agent) in roster-catalog.md.",
     );
   }
   const roleIdx = table.headers.findIndex((h) => h.trim().toLowerCase() === "role");
@@ -161,10 +163,7 @@ export function loadRoutingTables(githubRoot = resolveSquadGithubRoot()): Routin
     join(githubRoot, "instructions", "squad", "squad-routing.instructions.md"),
     "utf8",
   );
-  const rosterMd = readFileSync(
-    join(githubRoot, "instructions", "squad", "squad-roster.instructions.md"),
-    "utf8",
-  );
+  const rosterMd = readFileSync(rosterCatalogPath(githubRoot), "utf8");
   return {
     intents: parseRoutingIntents(routingMd),
     rosterMap: parseRosterMap(rosterMd),
@@ -198,20 +197,33 @@ export interface RouteStage {
 
 /** The council decision for a route. */
 export interface RouteCouncil {
-  /** True when the request crosses two or more council domains AND quorum is seated. */
+  /**
+   * True when the council triggered AND every task-fit role is seated, so a
+   * verdict can be synthesized from dispatched findings only.
+   */
   engaged: boolean;
   /** The council member agent `name:` values (resolved via the roster). */
   members: string[];
   /**
-   * Quorum roles the seeded profile does not carry.
+   * Task-fit roles the seeded profile does not carry: the council extension to
+   * offer (`squad-council.instructions.md` *Council Extension*).
    *
-   * `squad-council.instructions.md` makes quorum the FULL default membership and
-   * forbids dispatching a partial council or synthesizing a verdict to cover a
-   * missing role: "a verdict assembled without the full quorum's dispatched
-   * findings is invalid and must not gate implementation". A non-empty list is
-   * therefore an escalation, not a smaller council.
+   * The council is sized to the lenses the work touches, and the coordinator
+   * "never synthesizes a Council Verdict from its own reasoning to cover a lens
+   * it did not dispatch". A non-empty list is therefore an offer to add roles,
+   * never a smaller council.
    */
-  missingQuorum: string[];
+  extension: string[];
+  /** Every lens left out of the council, with its reason (the verdict's *Council Members Not Proposed*). */
+  notProposed: CouncilLensOmission[];
+}
+
+/** A council lens the request did not touch, recorded so a narrow council stays auditable. */
+export interface CouncilLensOmission {
+  /** The council role KEY the lens maps to. */
+  role: string;
+  /** Why the role was not proposed. */
+  reason: string;
 }
 
 /** The ordered advisory stage plan produced by {@link route}. */
@@ -249,14 +261,24 @@ const RESEARCH_ROLE = "researcher";
 const PLAN_ROLE = "lead";
 const REVIEW_ROLE = "tester";
 
-/** Council member role KEYS (base four + optional `rai`). */
-const COUNCIL_BASE_ROLES = ["architect", "security", "cost-manager", "product-owner"] as const;
-const RAI_ROLE = "rai";
 /**
- * Council DOMAINS and their trigger keywords. The router engages the council
- * when a request crosses two or more of these domains (mirrors the routing
- * council row + Implementation Gate domains: architecture, security, cost,
- * product-fit, RAI).
+ * The council LENSES, each mapped to the one role that covers it, in the order
+ * `squad-council.instructions.md` lists them. The council has no fixed quorum:
+ * only the roles whose lens the request touches are dispatched.
+ */
+const COUNCIL_LENSES = [
+  { lens: "architecture", role: "architect" },
+  { lens: "security", role: "security" },
+  { lens: "cost", role: "cost-manager" },
+  { lens: "product", role: "product-owner" },
+  { lens: "rai", role: "rai" },
+] as const;
+const RAI_LENS = "rai";
+/**
+ * Council LENSES and their trigger keywords. The router triggers the council
+ * when a request crosses two or more of the architecture, security, cost, and
+ * product-fit lenses, or raises any responsible-AI concern (mirrors the council
+ * triggers and the Implementation Gate).
  */
 const COUNCIL_DOMAINS: Record<string, string[]> = {
   architecture: ["architecture", "architectural", "system design", "component", "design tradeoff"],
@@ -265,6 +287,12 @@ const COUNCIL_DOMAINS: Record<string, string[]> = {
   product: ["product", "requirement", "backlog", "prd", "brd", "user story", "roadmap", "epic"],
   rai: ["responsible ai", "rai", "fairness", "harm", "bias"],
 };
+
+/**
+ * Keywords matched as WHOLE words. A single RAI concern now triggers the council
+ * on its own, so `rai` must not prefix-match `raise` or `rain`.
+ */
+const WHOLE_WORD_KEYWORDS = new Set(["rai"]);
 
 /** Keywords that identify the research intent (research-only detection). */
 const RESEARCH_KEYWORDS = ["research", "investigate", "explore", "find out"];
@@ -275,7 +303,8 @@ const RESEARCH_KEYWORDS = ["research", "investigate", "explore", "find out"];
  */
 function keywordPresent(haystack: string, keyword: string): boolean {
   const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(^|[^a-z0-9])${escaped}`, "i").test(haystack);
+  const end = WHOLE_WORD_KEYWORDS.has(keyword) ? "(?![a-z0-9])" : "";
+  return new RegExp(`(^|[^a-z0-9])${escaped}${end}`, "i").test(haystack);
 }
 
 /** Find the routing row that owns a canonical keyword (e.g. `research`, `plan`, `review`). */
@@ -327,8 +356,8 @@ function crossedCouncilDomains(request: string): string[] {
  *     no council domain, no mode/full-profile override) routes to the single
  *     `researcher` stage.
  *   * Any other request is a full advisory request and routes to
- *     research -> plan -> review, with the council engaged when the request
- *     crosses two or more council domains.
+ *     research -> plan -> review, with a task-fit council triggered when the
+ *     request crosses two or more council lenses or raises any RAI concern.
  */
 export function computeRoutePlan(
   request: string,
@@ -369,7 +398,7 @@ export function computeRoutePlan(
   if (researchMatched && !otherMatched) {
     return {
       stages: [researchStage].filter(seeded),
-      council: { engaged: false, members: [], missingQuorum: [] },
+      council: { engaged: false, members: [], extension: [], notProposed: [] },
       profile: profile.name,
       intake,
       fanOut,
@@ -383,26 +412,42 @@ export function computeRoutePlan(
     buildStage(tables, REVIEW_ROLE, "review", "auto", true),
   ].filter(seeded);
 
-  const councilCrossed = councilDomains.length >= 2;
-  const missingQuorum = councilCrossed
-    ? COUNCIL_BASE_ROLES.filter((role) => !profile.seeded.has(role))
-    : [];
-  const memberRoles =
-    councilCrossed && missingQuorum.length === 0
-      ? [
-          ...COUNCIL_BASE_ROLES,
-          ...(councilDomains.includes(RAI_ROLE) && profile.seeded.has(RAI_ROLE) ? [RAI_ROLE] : []),
-        ]
-      : [];
-  const members = memberRoles.map((roleKey) => resolveAgent(tables, roleKey));
+  const council = planCouncil(councilDomains, profile.seeded, tables);
 
   return {
     stages,
-    council: { engaged: members.length > 0, members, missingQuorum: [...missingQuorum] },
+    council,
     profile: profile.name,
     intake,
     fanOut,
   };
+}
+
+/**
+ * Size the council to the work (`squad-council.instructions.md` *Council
+ * Membership*). The trigger is unchanged in spirit — two or more of the
+ * architecture/security/cost/product-fit lenses, or any RAI concern — but the
+ * membership is task-fit: one role per lens touched, every other lens recorded
+ * as not proposed. A needed role the profile did not seed becomes the council
+ * extension, and the council is not engaged until it is seated.
+ */
+function planCouncil(
+  councilDomains: string[],
+  seeded: ReadonlySet<string>,
+  tables: RoutingTables,
+): RouteCouncil {
+  const classicLenses = councilDomains.filter((domain) => domain !== RAI_LENS);
+  const triggered = classicLenses.length >= 2 || councilDomains.includes(RAI_LENS);
+  if (!triggered) {
+    return { engaged: false, members: [], extension: [], notProposed: [] };
+  }
+  const needed = COUNCIL_LENSES.filter(({ lens }) => councilDomains.includes(lens)).map(({ role }) => role);
+  const notProposed = COUNCIL_LENSES.filter(({ lens }) => !councilDomains.includes(lens)).map(
+    ({ lens, role }) => ({ role, reason: `the request does not touch the ${lens} lens` }),
+  );
+  const extension = needed.filter((role) => !seeded.has(role));
+  const members = extension.length === 0 ? needed.map((role) => resolveAgent(tables, role)) : [];
+  return { engaged: members.length > 0, members, extension, notProposed };
 }
 
 let cachedTables: RoutingTables | undefined;

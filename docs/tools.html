@@ -63,8 +63,10 @@
   <p>
     <code>squad_run</code> is the catch-all. It routes data-driven across the real roster — researcher → lead →
     council members → tester — and the council synthesizes a most-restrictive-wins verdict of Go, Go-With-Conditions,
-    or Stop. It honours <code>mode</code>: interactive pauses per stage, autopilot runs through to one compiled
-    artifact.
+    or Stop. The council is task-fit: it seats only the roles whose lens the request touches (architecture, security,
+    cost, product-fit, responsible AI) and records every lens it left out. When a needed council role is not in the
+    seeded profile, the run records a council extension naming the roles to add instead of a partial verdict. It
+    honours <code>mode</code>: interactive pauses per stage, autopilot runs through to one compiled artifact.
   </p>
   <p>
     It is <strong>safe by construction</strong>. It holds at a non-bypassable Human Gate and never auto-releases. An
@@ -112,6 +114,17 @@
     <strong>The remote path never runs it.</strong> An embedded run has nobody to interview, so no offer is made and an
     explicit <code>discovery</code> is ignored rather than honoured — the caller's payload becomes the intake gate's
     input instead. An unattended run is gated by validation, not by ideation.
+  </p>
+
+  <h3>Model routing</h3>
+  <p>
+    Both catch-all tools also take an optional <code>routing</code> mode of <code>off</code>, <code>ranked</code>, or
+    <code>manual</code>, mirroring the argument <code>hve-squad@0.18.0</code> added to <code>/squad</code> and
+    <code>/squad-federation</code>. The coordinator persists it as the <code>Model routing:</code> line in
+    <code>team.md</code> until changed. <code>ranked</code> picks each role's model by fit from the squad model
+    catalog, <code>manual</code> asks you to choose from the models your host can run, and <code>off</code> dispatches
+    with no model parameter. Omit it to keep the recorded mode. The remote path ignores it, because an embedded run
+    uses the operator-configured backend.
   </p>
 
   <h2>Utility tools</h2>

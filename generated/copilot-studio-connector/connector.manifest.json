@@ -20,7 +20,7 @@
     {
       "name": "squad_review",
       "title": "Squad Review",
-      "description": "Run the squad's review stage. Routes to the Squad Reviewer (squad `tester` role) at the `auto` tier for quality, correctness, and standards review. When the request asks for a pre-implementation go/no-go or crosses two or more council domains, it engages the council row (architect, security, cost-manager, product-owner, and optionally rai) at the `confirm` tier. Embedded execution (squad-guided / embedded): the server runs the review stage under the squad's gates and methodology and returns a finished reviewer artifact (a single reviewer pass, not a convened council verdict). Use for \"review\", \"validate\", \"check quality\", \"council\", or \"go/no-go\" requests.",
+      "description": "Run the squad's review stage. Routes to the Squad Reviewer (squad `tester` role) at the `auto` tier for quality, correctness, and standards review. When the request asks for a pre-implementation go/no-go, crosses two or more council domains, or raises any responsible-AI concern, it engages a task-fit council at the `confirm` tier: only the seats whose lens the work touches (architect, security, cost-manager, product-owner, rai), with every lens left out recorded in the verdict. Embedded execution (squad-guided / embedded): the server runs the review stage under the squad's gates and methodology and returns a finished reviewer artifact (a single reviewer pass, not a convened council verdict). Use for \"review\", \"validate\", \"check quality\", \"council\", or \"go/no-go\" requests.",
       "scope": "Squad.Review"
     },
     {

@@ -57,7 +57,7 @@
 
   <h3>squad_run — le pipeline consultatif complet</h3>
   <p>
-    <code>squad_run</code> est le point d'entrée généraliste. Il applique un routage piloté par les données aux agents réels — chercheur → responsable → membres du conseil → testeur — et le conseil synthétise un verdict Go, Go-With-Conditions ou Stop selon la règle suivante : la décision la plus restrictive prévaut. Il respecte le paramètre <code>mode</code> : le mode interactif marque une pause à chaque étape, tandis que le mode autopilot poursuit l'exécution jusqu'à l'obtention d'un artefact consolidé.
+    <code>squad_run</code> est le point d'entrée généraliste. Il applique un routage piloté par les données aux agents réels — chercheur → responsable → membres du conseil → testeur — et le conseil synthétise un verdict Go, Go-With-Conditions ou Stop selon la règle suivante : la décision la plus restrictive prévaut. Le conseil est adapté à la tâche : il ne réunit que les rôles dont l'angle est concerné par la demande (architecture, sécurité, coût, adéquation produit, IA responsable) et consigne chaque angle écarté. Lorsqu'un rôle de conseil nécessaire ne figure pas dans le profil initialisé, l'exécution consigne une extension du conseil qui nomme les rôles à ajouter, plutôt qu'un verdict partiel. Il respecte le paramètre <code>mode</code> : le mode interactif marque une pause à chaque étape, tandis que le mode autopilot poursuit l'exécution jusqu'à l'obtention d'un artefact consolidé.
   </p>
   <p>
     Il est <strong>sûr par conception</strong>. Il suspend l'exécution à une étape obligatoire de validation humaine, impossible à contourner, et ne la débloque jamais automatiquement. Un opérateur disposant du rôle d'application distinct <code>Squad.Operate</code> débloque une exécution suspendue via la route hors bande <code>POST /admin/approve</code> — jamais via <code>tools/call</code> — après quoi une interrogation par <code>squad_status</code> la fait progresser jusqu'à son terme. Les approbations sont consignées à des fins d'audit avec l'identité de l'approbateur et un horodatage, et leur portée est limitée au locataire.
@@ -90,6 +90,11 @@
   </p>
   <p>
     <strong>Le mode distant n'exécute jamais cette étape.</strong> Une exécution intégrée n'a personne à interroger : cette étape n'est donc pas proposée et un paramètre <code>discovery</code> explicite est ignoré plutôt qu'appliqué — la charge utile de l'appelant sert alors d'entrée au contrôle à l'entrée. Une exécution sans surveillance est soumise à une validation, et non à une démarche d'idéation.
+  </p>
+
+  <h3>Routage des modèles</h3>
+  <p>
+    Les deux outils généralistes acceptent aussi un mode <code>routing</code> facultatif, <code>off</code>, <code>ranked</code> ou <code>manual</code>, qui reprend l'argument ajouté par <code>hve-squad@0.18.0</code> aux invites <code>/squad</code> et <code>/squad-federation</code>. Le coordinateur l'enregistre dans la ligne <code>Model routing:</code> de <code>team.md</code> jusqu'à sa prochaine modification. <code>ranked</code> choisit le modèle de chaque rôle selon son adéquation, d'après le catalogue de modèles de l'équipe ; <code>manual</code> vous demande de choisir parmi les modèles que votre hôte peut exécuter ; <code>off</code> invoque les rôles sans paramètre de modèle. Omettez-le pour conserver le mode enregistré. Le mode distant l'ignore, car une exécution intégrée utilise le modèle configuré par l'opérateur.
   </p>
 
   <h2>Outils utilitaires</h2>
