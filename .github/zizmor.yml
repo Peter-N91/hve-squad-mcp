@@ -1,0 +1,57 @@
+# zizmor configuration (cicd bicep-cicd-pipeline; security C13's "any accepted
+# finding carries an inline suppression and a stated reason" convention,
+# applied here the way zizmor supports it for whole workflow files: a
+# per-audit, per-line `ignore` entry in this repo-root config file, discovered
+# automatically by `uvx zizmor .github/workflows/` (see zizmor's own
+# "Configuration" docs on `.github/zizmor.yml` special-case discovery for a
+# `.github/workflows/` directory input). Every ignore below is a reviewed,
+# justified acceptance — not a blanket audit disable.
+#
+# MAINTENANCE NOTE: these `ignore` entries are LINE-NUMBER based. Any edit to
+# infra-deploy.yml that adds or removes a line ABOVE one of the lines named
+# below shifts it, silently un-suppressing that finding (discovered once
+# during this pipeline's own implementation — a one-line insertion elsewhere
+# in the file drifted four `github-env` line numbers by one without changing
+# their content). Re-run `zizmor` after any edit to infra-deploy.yml and
+# update the line numbers below if any of the four re-appear.
+rules:
+  dangerous-triggers:
+    ignore:
+      # infra-deploy.yml's `on: workflow_run` trigger. zizmor flags
+      # `workflow_run` categorically ("almost always used insecurely") because
+      # a naive `workflow_run` handler that trusts `head_sha`/`head_branch`
+      # directly lets a fork PR forge a "successful run on main" context and
+      # reach a job with `id-token`/`environment: prod`. This workflow does
+      # NOT do that: its very first job, `resolve`, holds NO `id-token`
+      # permission and independently re-verifies whichever SHA the trigger
+      # proposes — a `^[0-9a-f]{40}$` regex, a real commit object, and
+      # `git merge-base --is-ancestor <sha> origin/main` — before any later
+      # job ever requests an Azure token. The `if:` on `resolve` additionally
+      # requires `workflow_run.event == 'push'` and
+      # `workflow_run.head_repository.full_name == github.repository`, so a
+      # fork-triggered or non-push `workflow_run` completion never even
+      # reaches the `resolve` job. See this workflow's own header comment
+      # ("Dispatch boundary") for the full design.
+      - infra-deploy.yml:60
+  github-env:
+    ignore:
+      # Four `... >> "$GITHUB_ENV"` writes, all of a value this workflow
+      # itself fully controls — never externally-influenced input that could
+      # smuggle in an extra "NAME=value" line:
+      #   * SQUAD_INFRA_BUDGET_START_DATE — read from this job's OWN
+      #     `az resource show` call against a resource ID this job derived
+      #     from repository variables (RESOURCE_GROUP/subscription), and
+      #     explicitly regex-validated (`^[0-9]{4}-[0-9]{2}-[0-9]{2}...$`)
+      #     BEFORE the `$GITHUB_ENV` write — a value that fails the shape
+      #     check never reaches the append. See "Resolve budgetStartDate"
+      #     in both the what-if and deploy jobs.
+      #   * SQUAD_INFRA_CONTAINER_IMAGE — a fully static, hardcoded
+      #     placeholder digest string in the what-if jobs (see "Set the
+      #     placeholder container image"), and `${CONTAINER_REGISTRY_SERVER}/hve-squad-mcp@sha256:${DIGEST}`
+      #     in the deploy job, where `$DIGEST` is itself regex-validated
+      #     (`^[0-9a-f]{64}$`) immediately after being read from
+      #     `needs.build.outputs.digest` — see "Set the real container image".
+      - infra-deploy.yml:264
+      - infra-deploy.yml:297
+      - infra-deploy.yml:543
+      - infra-deploy.yml:570

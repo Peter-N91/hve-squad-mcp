@@ -1,0 +1,770 @@
+# Verified-SHA resolve, pre-approval what-if, approval-gated build/deploy, and
+# an advisory post-deploy smoke check.
+#
+# cicd bicep-cicd-pipeline (federation autopilot inner run bicep-cicd-2026-09-27).
+# Plan: .copilot-tracking/squad/members/cicd/plans/2026-09-28-bicep-cicd-pipeline-plan.md
+# Council conditions this file satisfies (see the plan's "Council Conditions
+# Traceability" table for the full mapping): security C1/C2/C3/C4/C5/C6/C7/
+# C8/C9/C10/C11/C13, supply-chain R1/R2/R4/R5/R6/R7/R8, deployer
+# DC1/DC2/DC3/DC4/DC5/DC6/DC7/DC8/DC9/DC10/DC13/DC14.
+#
+# ============================================================================
+# Dispatch boundary (security C1/C2, closing security finding F1 / deployer
+# blocking issue 2 — the fork/`workflow_run` privilege-escalation path).
+# ============================================================================
+# This workflow starts ONLY from:
+#   (a) `workflow_run` completing for "Infra validate", filtered to a
+#       same-repository PUSH to `main` that itself SUCCEEDED (the four-clause
+#       gate on the `resolve` job below), or
+#   (b) an operator's `workflow_dispatch` with an explicit `sha` input.
+# Neither path is trusted directly. The `resolve` job — the ONLY job in this
+# file with no `id-token` permission — independently re-verifies whichever
+# SHA the trigger proposes: a `^[0-9a-f]{40}$` regex, a real commit object,
+# and `git merge-base --is-ancestor <sha> origin/main`. Every later job reads
+# `needs.resolve.outputs.sha`, never the raw trigger context. The
+# `github.ref == 'refs/heads/main'` check inside `resolve` is UX ONLY — a
+# friendlier failure for an operator who dispatched from the wrong branch. The
+# ACTUAL security boundary is the ancestor check: `github.ref` can be true for
+# a rewritten/force-pushed `main` tip in ways `git merge-base --is-ancestor`
+# cannot be fooled by.
+#
+# Concurrency: a SINGLETON group (not per-ref) — at most one pending deploy
+# run at a time. A second trigger QUEUES behind an in-flight run; it never
+# races or cancels it (`cancel-in-progress: false`).
+#
+# Trusted-tooling boundary (security C3): identical to `infra-validate.yml`'s
+# — every job below with `id-token: write` checks out `.github/scripts/` and
+# `host/infra/tests/check-no-placeholders.mjs` from `github.workflow_sha`
+# (`ci/`), and the Bicep/Containerfile content from `needs.resolve.outputs.sha`
+# (`target/`), into two SEPARATE directories. No `az`/`node` command in any of
+# these jobs ever reads Bicep/build content from `ci/`, or gating tooling from
+# `target/`.
+#
+# Approval gate: `build` and `deploy` BOTH declare `environment: prod` (this
+# plan's chosen shape — security C7 permits merging them into one job
+# instead; kept separate here for the digest hand-off's job-output clarity).
+# Expect TWO approval prompts per run in practice: `deploy` only becomes
+# eligible for the `prod` Environment's review queue once `build` has already
+# completed (`needs: build`), so GitHub cannot batch the two into one combined
+# prompt the way it does for two jobs that are BOTH already queued at the same
+# time. Record the ACTUALLY OBSERVED count from the first real run in
+# host/RUNBOOK.md (deployer DC14) — this comment states the expected count,
+# not a verified one.
+#
+# Rollback floor: a `workflow_dispatch` redeploy/rollback passes through the
+# IDENTICAL `resolve` verification as any other run — a rollback target must
+# itself be a real, already-merged, ancestor-of-`main` commit. There is no
+# second, weaker verification path for a rollback.
+name: Infra deploy
+
+on:
+  workflow_run:
+    workflows: ["Infra validate"]
+    types: [completed]
+  # checkov:skip=CKV_GHA_7:CKV_GHA_7 targets workflows whose OWN build output could be changed by a workflow_dispatch input. This workflow builds nothing new from the input: "sha" only SELECTS which already-existing, already-merged commit to redeploy or roll back to, and the resolve job's own git merge-base --is-ancestor check refuses any SHA that is not already an ancestor of origin/main — the input cannot introduce content that was not already reviewed and merged.
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit SHA to deploy, redeploy, or roll back to. Must be an ancestor of main. Dispatch from main (UX check only — the real check is the ancestor check)."
+        required: true
+
+concurrency:
+  group: infra-deploy
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  # Shared Bicep CLI pin (supply-chain R4, deployer DC12) — the same value
+  # infra's own changes record validated against (Bicep CLI 0.43.8).
+  BICEP_CLI_VERSION: v0.43.8
+  # Forces the Azure CLI to install and use ITS OWN managed Bicep binary
+  # (never the runner's preinstalled `bicep`), so `az bicep install --version
+  # "$BICEP_CLI_VERSION"` below actually takes effect. Azure CLI's own
+  # `bicep.use_binary_from_path` default is `if_found_in_ci`, which — on a
+  # GitHub-hosted runner (already CI) — silently prefers whatever `bicep` the
+  # image ships, ignoring the pin entirely (deployer DC12/R4). Every job that
+  # compiles Bicep also runs `az config set bicep.use_binary_from_path=false`
+  # itself, and this env var is a second, independent enforcement of the
+  # same setting (environment variables take priority over `az config` in
+  # Azure CLI's own precedence order).
+  AZURE_BICEP_USE_BINARY_FROM_PATH: "false"
+
+jobs:
+  # ==========================================================================
+  # resolve — no id-token. Turns an attacker-influenceable trigger context
+  # into the one SHA every later job trusts.
+  # ==========================================================================
+  resolve:
+    name: Resolve and verify the deploy SHA (no id-token)
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.verify.outputs.sha }}
+    steps:
+      - name: Determine and shape-check the candidate SHA
+        id: candidate
+        env:
+          DISPATCH_SHA: ${{ github.event.inputs.sha }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          DISPATCH_EVENT: ${{ github.event_name }}
+          DISPATCH_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          CANDIDATE="${DISPATCH_SHA:-$WORKFLOW_RUN_SHA}"
+          if [ -z "$CANDIDATE" ]; then
+            echo "::error::no candidate SHA resolved from either trigger path"
+            exit 1
+          fi
+          if ! [[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::candidate is not a 40-character hex commit SHA"
+            exit 1
+          fi
+          if [ "$DISPATCH_EVENT" = "workflow_dispatch" ] && [ "$DISPATCH_REF" != "refs/heads/main" ]; then
+            echo "::error::workflow_dispatch must be run from main (dispatch ref was $DISPATCH_REF). This is a friendly early check — the actual security boundary is the ancestor-of-main check below, which still runs regardless."
+            exit 1
+          fi
+          echo "sha=$CANDIDATE" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout (full history — origin/main and the candidate SHA must both be reachable)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify the candidate is a real commit object and an ancestor of origin/main
+        id: verify
+        env:
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin main --quiet
+          if ! git cat-file -e "${CANDIDATE_SHA}^{commit}" 2>/dev/null; then
+            echo "::error::$CANDIDATE_SHA is not a known commit object in this repository"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$CANDIDATE_SHA" origin/main; then
+            echo "::error::$CANDIDATE_SHA is not an ancestor of origin/main — refusing to trust it"
+            exit 1
+          fi
+          echo "sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          echo "OK   $CANDIDATE_SHA verified: a real commit object and an ancestor of origin/main"
+
+  # ==========================================================================
+  # what-if — pre-approval, ciPlanIdentity, no environment: key (S6).
+  # ==========================================================================
+  what-if:
+    name: Pre-approval what-if (ciPlanIdentity)
+    needs: resolve
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      signature: ${{ steps.gate.outputs.signature }}
+      # Set to 'true' ONLY by the "Confirm the gate truly ran and passed"
+      # step below — which itself only runs when ciPlanIdentity was
+      # configured AND every prior step (including "Gate the what-if
+      # result") succeeded. If this job's steps were all SKIPPED (the
+      # unconfigured-identity path) the job still reports overall SUCCESS to
+      # GitHub Actions (skipped steps are not failures), so `build`/`deploy`
+      # cannot rely on this job's own conclusion alone — they gate on this
+      # explicit output instead (security C11/SEC-AC3, deployer DC6).
+      gated: ${{ steps.confirm-gated.outputs.gated }}
+    env:
+      RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      CONTAINER_REGISTRY_SERVER: ${{ vars.SQUAD_INFRA_CONTAINER_REGISTRY_SERVER }}
+    steps:
+      - name: Skip notice when ciPlanIdentity is not yet configured (security C11)
+        id: configured
+        env:
+          CI_PLAN_CLIENT_ID: ${{ vars.CI_PLAN_CLIENT_ID }}
+        run: |
+          if [ -z "$CI_PLAN_CLIENT_ID" ]; then
+            echo "::notice::vars.CI_PLAN_CLIENT_ID is not set — ciPlanIdentity has not been bootstrapped yet. Skipping the what-if job cleanly (see host/RUNBOOK.md Step 1)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout gating tooling (trusted commit)
+        if: steps.configured.outputs.skip == 'false'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: ci
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            host/infra/tests/check-no-placeholders.mjs
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout target content (resolved deploy SHA)
+        if: steps.configured.outputs.skip == 'false'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          path: target
+          persist-credentials: false
+
+      - name: Trusted checkout exists
+        if: steps.configured.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          test -f ci/.github/scripts/whatif-gate.mjs
+          test -f ci/host/infra/tests/check-no-placeholders.mjs
+          test -f target/host/infra/main.bicep
+          test -f target/host/infra/environments/prod.bicepparam
+
+      - name: Pin and log the Bicep CLI
+        if: steps.configured.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          az config set bicep.use_binary_from_path=false
+          az bicep install --version "$BICEP_CLI_VERSION"
+          INSTALLED_VERSION=$(az bicep version)
+          EXPECTED_VERSION="${BICEP_CLI_VERSION#v}"
+          if ! echo "$INSTALLED_VERSION" | grep -qF "Bicep CLI version $EXPECTED_VERSION "; then
+            echo "::error::az bicep version did not report the pinned $EXPECTED_VERSION (deployer DC12/R4) — got: $INSTALLED_VERSION"
+            exit 1
+          fi
+          {
+            echo "### Bicep CLI (pre-approval what-if)"
+            echo '```'
+            az version
+            echo "$INSTALLED_VERSION"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Azure login (ciPlanIdentity, OIDC)
+        if: steps.configured.outputs.skip == 'false'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.CI_PLAN_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Export SQUAD_INFRA_* variables (only non-empty)
+        if: steps.configured.outputs.skip == 'false'
+        env:
+          VARS_JSON: ${{ toJSON(vars) }}
+        run: node ci/.github/scripts/export-infra-vars.mjs
+
+      - name: Resolve budgetStartDate (read-only; DC13)
+        if: steps.configured.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          BUDGET_NAME="${SQUAD_INFRA_NAME_PREFIX:-squadmcp}-budget"
+          BUDGET_ID="/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.Consumption/budgets/${BUDGET_NAME}"
+          set +e
+          START_DATE=$(az resource show --ids "$BUDGET_ID" --api-version 2023-11-01 --query properties.timePeriod.startDate -o tsv 2>/tmp/budget-lookup.err)
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            if grep -qi "ResourceNotFound" /tmp/budget-lookup.err; then
+              START_DATE=""
+              echo "::notice::budget resource not found yet — using main.bicep's own first-deploy default (current UTC month)"
+            else
+              echo "::error::budget lookup failed for a reason other than ResourceNotFound"
+              cat /tmp/budget-lookup.err >&2
+              exit 1
+            fi
+          fi
+          if [ -n "$START_DATE" ] && ! [[ "$START_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ].*)?$ ]]; then
+            echo "::error::budgetStartDate did not resolve to an expected date shape"
+            exit 1
+          fi
+          echo "SQUAD_INFRA_BUDGET_START_DATE=$START_DATE" >> "$GITHUB_ENV"
+
+      - name: Placeholder preflight (deployer DC1; key-less by construction)
+        if: steps.configured.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          az bicep build-params --file target/host/infra/environments/prod.bicepparam --outfile "$RUNNER_TEMP/prod.parameters.json"
+          node ci/host/infra/tests/check-no-placeholders.mjs "$RUNNER_TEMP/prod.parameters.json"
+
+      - name: Set the placeholder container image (this job never builds one)
+        if: steps.configured.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          echo "SQUAD_INFRA_CONTAINER_IMAGE=${CONTAINER_REGISTRY_SERVER}/hve-squad-mcp@sha256:0000000000000000000000000000000000000000000000000000000000000000" >> "$GITHUB_ENV"
+
+      - name: What-if against host/infra/environments/prod.bicepparam
+        if: steps.configured.outputs.skip == 'false'
+        # Security C6: a fixed, obviously-fake 44-char base64 placeholder key
+        # (32 zero bytes) is used here — step-level only — so the ARM diff's
+        # conditional shape matches what `deploy` will actually apply. This
+        # job never touches the real secret (no `environment: prod`).
+        env:
+          SQUAD_INFRA_RUN_ENCRYPTION_KEY_B64: ${{ (vars.SQUAD_INFRA_ENABLE_REMOTE_PIPELINE == 'true') && 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' || '' }}
+        run: |
+          set -euo pipefail
+          az deployment group what-if \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file target/host/infra/main.bicep \
+            --parameters target/host/infra/environments/prod.bicepparam \
+            --name main --mode Incremental --validation-level ProviderNoRbac \
+            --result-format FullResourcePayloads --no-pretty-print --only-show-errors \
+            -o json > "$RUNNER_TEMP/whatif.json"
+
+      - name: Gate the what-if result and emit the change signature
+        if: steps.configured.outputs.skip == 'false'
+        id: gate
+        run: node ci/.github/scripts/whatif-gate.mjs "$RUNNER_TEMP/whatif.json"
+
+      # Only reached when NOT skipped (ciPlanIdentity configured) AND every
+      # prior step succeeded — a failed "Gate the what-if result" step stops
+      # the job here by GitHub Actions' own default (implicit success()).
+      # This is the SOLE place `gated=true` is ever written, and its own
+      # signature must also be non-empty — this is what closes the
+      # SEC-AC3/DEP-C6 fail-open path: an unconfigured or non-gating run of
+      # this job produces neither `gated=true` nor a real signature, so
+      # `build`/`deploy` (which require BOTH) never start.
+      - name: Confirm the gate truly ran and passed
+        if: steps.configured.outputs.skip == 'false'
+        id: confirm-gated
+        env:
+          SIGNATURE: ${{ steps.gate.outputs.signature }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SIGNATURE" ]; then
+            echo "::error::the gate step produced no signature — refusing to mark this run as gated"
+            exit 1
+          fi
+          echo "gated=true" >> "$GITHUB_OUTPUT"
+
+  # ==========================================================================
+  # build — approval-gated (environment: prod), digest-capturing, redeploy-
+  # aware. ciDeployIdentity.
+  # ==========================================================================
+  build:
+    name: Build (approval-gated, digest-capturing)
+    needs: [resolve, what-if]
+    # SEC-AC3/DEP-C6: the kill switch alone is not enough — this job must
+    # also confirm the pre-approval what-if job truly ran (not merely
+    # "succeeded" via all-steps-skipped) and produced a real signature.
+    # `needs.what-if.outputs.gated` is set to 'true' by ONE step in that job,
+    # reached only when ciPlanIdentity was configured and the gate passed.
+    if: vars.INFRA_DEPLOY_ENABLED == 'true' && needs.what-if.outputs.gated == 'true' && needs.what-if.outputs.signature != ''
+    environment: prod
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      digest: ${{ steps.digest.outputs.digest }}
+    env:
+      CONTAINER_REGISTRY_NAME: ${{ vars.CONTAINER_REGISTRY_NAME }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+    steps:
+      - name: Checkout gating tooling (trusted commit)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: ci
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            host/infra/tests/check-no-placeholders.mjs
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout target content (resolved deploy SHA)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          path: target
+          persist-credentials: false
+
+      - name: Azure login (ciDeployIdentity, OIDC)
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # Redeploy/rollback fast path (deployer DC8). --top 100 (rather than
+      # this workflow's own resolution query below, which uses --top 1) is a
+      # deliberate widening ONLY for this pre-build search: a rollback target
+      # SHA's own successful build is very unlikely to still be the single
+      # most recent ACR task run by the time an operator rolls back to it.
+      - name: Check for an existing successful build for this SHA (skip rebuild if found)
+        id: reuse
+        env:
+          RESOLVED_SHA: ${{ needs.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+          set +e
+          RAW_DIGEST=$(az acr task list-runs --registry "$CONTAINER_REGISTRY_NAME" --run-status Succeeded --top 100 \
+            --query "[?outputImages[?tag=='${RESOLVED_SHA}']] | [0].outputImages[?tag=='${RESOLVED_SHA}'].digest | [0]" -o tsv 2>/tmp/list-runs.err)
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ] || [ -z "$RAW_DIGEST" ] || [ "$RAW_DIGEST" = "None" ]; then
+            echo "reuse=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          DIGEST="${RAW_DIGEST#sha256:}"
+          if ! [[ "$DIGEST" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::existing digest did not match the expected sha256 hex shape"
+            exit 1
+          fi
+          echo "reuse=true" >> "$GITHUB_OUTPUT"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "OK   found an existing successful build for $RESOLVED_SHA — skipping az acr build"
+
+      - name: Build the image in ACR (deployer DC9; skipped when already built)
+        if: steps.reuse.outputs.reuse != 'true'
+        env:
+          RESOLVED_SHA: ${{ needs.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+          az acr build --registry "$CONTAINER_REGISTRY_NAME" --subscription "$AZURE_SUBSCRIPTION_ID" \
+            --image "hve-squad-mcp:${RESOLVED_SHA}" --file target/host/Containerfile --platform linux/amd64 target
+
+      # The exact query shape this dispatch specifies, used here in its
+      # literal --top 1 form: our OWN build immediately above IS the most
+      # recent successful task run, so --top 1 is correct at this point.
+      - name: Resolve the digest of the image just built
+        if: steps.reuse.outputs.reuse != 'true'
+        id: resolve-digest
+        env:
+          RESOLVED_SHA: ${{ needs.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+          RAW_DIGEST=$(az acr task list-runs --registry "$CONTAINER_REGISTRY_NAME" --run-status Succeeded --top 1 \
+            --query "[0].outputImages[?tag=='${RESOLVED_SHA}'].digest | [0]" -o tsv)
+          DIGEST="${RAW_DIGEST#sha256:}"
+          if ! [[ "$DIGEST" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::built image digest did not match the expected sha256 hex shape"
+            exit 1
+          fi
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Capture the digest as this job's output
+        id: digest
+        env:
+          REUSE_DIGEST: ${{ steps.reuse.outputs.digest }}
+          BUILT_DIGEST: ${{ steps.resolve-digest.outputs.digest }}
+        run: |
+          set -euo pipefail
+          DIGEST="${REUSE_DIGEST:-$BUILT_DIGEST}"
+          if [ -z "$DIGEST" ]; then
+            echo "::error::no digest resolved (neither reuse nor a fresh build produced one)"
+            exit 1
+          fi
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Build"
+            echo "* Digest: \`sha256:$DIGEST\` (never a floating tag)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ==========================================================================
+  # deploy — approval-gated (environment: prod), digest-pinned,
+  # encryption-key fail-fast, immediate re-what-if. ciDeployIdentity.
+  # ==========================================================================
+  deploy:
+    name: Deploy (approval-gated, digest-pinned)
+    needs: [resolve, what-if, build]
+    # SEC-AC3/DEP-C6: same rationale as `build`'s own `if:` above — the kill
+    # switch alone must never be sufficient. `deploy` ALSO re-verifies the
+    # signature itself (immediate re-what-if + `--compare`, below), which
+    # closes this same class of gap a second, independent way.
+    if: vars.INFRA_DEPLOY_ENABLED == 'true' && needs.what-if.outputs.gated == 'true' && needs.what-if.outputs.signature != ''
+    environment: prod
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      CONTAINER_REGISTRY_SERVER: ${{ vars.SQUAD_INFRA_CONTAINER_REGISTRY_SERVER }}
+    steps:
+      - name: Checkout gating tooling (trusted commit)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: ci
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            host/infra/tests/check-no-placeholders.mjs
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout target content (resolved deploy SHA)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          path: target
+          persist-credentials: false
+
+      - name: Pin and log the Bicep CLI
+        run: |
+          set -euo pipefail
+          az config set bicep.use_binary_from_path=false
+          az bicep install --version "$BICEP_CLI_VERSION"
+          INSTALLED_VERSION=$(az bicep version)
+          EXPECTED_VERSION="${BICEP_CLI_VERSION#v}"
+          if ! echo "$INSTALLED_VERSION" | grep -qF "Bicep CLI version $EXPECTED_VERSION "; then
+            echo "::error::az bicep version did not report the pinned $EXPECTED_VERSION (deployer DC12/R4) — got: $INSTALLED_VERSION"
+            exit 1
+          fi
+          {
+            echo "### Bicep CLI (deploy)"
+            echo '```'
+            az version
+            echo "$INSTALLED_VERSION"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Azure login (ciDeployIdentity, OIDC)
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Export SQUAD_INFRA_* variables (only non-empty)
+        env:
+          VARS_JSON: ${{ toJSON(vars) }}
+        run: node ci/.github/scripts/export-infra-vars.mjs
+
+      - name: Resolve budgetStartDate (read-only; DC13)
+        run: |
+          set -euo pipefail
+          BUDGET_NAME="${SQUAD_INFRA_NAME_PREFIX:-squadmcp}-budget"
+          BUDGET_ID="/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.Consumption/budgets/${BUDGET_NAME}"
+          set +e
+          START_DATE=$(az resource show --ids "$BUDGET_ID" --api-version 2023-11-01 --query properties.timePeriod.startDate -o tsv 2>/tmp/budget-lookup.err)
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            if grep -qi "ResourceNotFound" /tmp/budget-lookup.err; then
+              START_DATE=""
+              echo "::notice::budget resource not found yet — using main.bicep's own first-deploy default (current UTC month)"
+            else
+              echo "::error::budget lookup failed for a reason other than ResourceNotFound"
+              cat /tmp/budget-lookup.err >&2
+              exit 1
+            fi
+          fi
+          if [ -n "$START_DATE" ] && ! [[ "$START_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ].*)?$ ]]; then
+            echo "::error::budgetStartDate did not resolve to an expected date shape"
+            exit 1
+          fi
+          echo "SQUAD_INFRA_BUDGET_START_DATE=$START_DATE" >> "$GITHUB_ENV"
+
+      - name: Set the real container image (needs.build.outputs.digest; never a floating tag)
+        env:
+          DIGEST: ${{ needs.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DIGEST" ]; then
+            echo "::error::needs.build.outputs.digest is empty"
+            exit 1
+          fi
+          echo "SQUAD_INFRA_CONTAINER_IMAGE=${CONTAINER_REGISTRY_SERVER}/hve-squad-mcp@sha256:${DIGEST}" >> "$GITHUB_ENV"
+
+      - name: Placeholder preflight (key-less; also read for the encryption-key fail-fast guard below)
+        id: preflight
+        run: |
+          set -euo pipefail
+          az bicep build-params --file target/host/infra/environments/prod.bicepparam --outfile "$RUNNER_TEMP/prod.parameters.json"
+          node ci/host/infra/tests/check-no-placeholders.mjs "$RUNNER_TEMP/prod.parameters.json"
+          ENABLE_REMOTE_PIPELINE=$(jq -r '.parameters.enableRemotePipeline.value' "$RUNNER_TEMP/prod.parameters.json")
+          ENABLE_MEMORY=$(jq -r '.parameters.enableMemory.value' "$RUNNER_TEMP/prod.parameters.json")
+          echo "enableRemotePipeline=$ENABLE_REMOTE_PIPELINE" >> "$GITHUB_OUTPUT"
+          echo "enableMemory=$ENABLE_MEMORY" >> "$GITHUB_OUTPUT"
+
+      # Security C5. KEY_SET is a boolean derived from whether the secret
+      # resolves non-empty — never the key value or its length is printed.
+      # "Covering memory encryption": main.bicep shares runEncryptionKeyBase64
+      # across two independent, both-optional features — the async pipeline
+      # (enableRemotePipeline, encryptionEnv) and memory-at-rest encryption
+      # (enableMemory && !enableRemotePipeline, memoryEncryptionEnv). Only the
+      # FIRST is a hard fail (an operator who turned on the pipeline expects
+      # it encrypted); the second is reported as an informational warning,
+      # since main.bicep itself treats an empty key for memory as "no
+      # encryption", not an error.
+      - name: Encryption-key fail-fast guard (security C5)
+        env:
+          RUN_ENCRYPTION_KEY: ${{ secrets.RUN_ENCRYPTION_KEY }}
+          ENABLE_REMOTE_PIPELINE: ${{ steps.preflight.outputs.enableRemotePipeline }}
+          ENABLE_MEMORY: ${{ steps.preflight.outputs.enableMemory }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RUN_ENCRYPTION_KEY" ]; then KEY_SET=false; else KEY_SET=true; fi
+          if [ "$ENABLE_REMOTE_PIPELINE" = "true" ] && [ "$KEY_SET" = "false" ]; then
+            echo "::error::SQUAD_INFRA_ENABLE_REMOTE_PIPELINE is true but the RUN_ENCRYPTION_KEY secret is not set — refusing to deploy an unencrypted async pipeline. Set the secret and retry (its value is never printed by this guard)."
+            exit 1
+          fi
+          if [ "$ENABLE_MEMORY" = "true" ] && [ "$ENABLE_REMOTE_PIPELINE" = "false" ] && [ "$KEY_SET" = "false" ]; then
+            echo "::warning::SQUAD_INFRA_ENABLE_MEMORY is true and no RUN_ENCRYPTION_KEY secret is set — memory-at-rest encryption is optional and is currently OFF for this deploy."
+          fi
+          echo "OK   encryption-key fail-fast guard passed (KEY_SET=$KEY_SET; never the value itself)"
+
+      # Security C6 = deployer DC7: the diff a reviewer approved and the diff
+      # about to be applied must be the identical (resourceId, changeType,
+      # changed-property-path) set. The real key is used here (the real
+      # image digest is already the only intentional difference from the
+      # pre-approval what-if, and whatif-gate.mjs's same-digest policy
+      # accounts for exactly that).
+      - name: Immediate re-what-if (recompute the signature the approver saw)
+        env:
+          SQUAD_INFRA_RUN_ENCRYPTION_KEY_B64: ${{ secrets.RUN_ENCRYPTION_KEY }}
+        run: |
+          set -euo pipefail
+          az deployment group what-if \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file target/host/infra/main.bicep \
+            --parameters target/host/infra/environments/prod.bicepparam \
+            --name main --mode Incremental --validation-level ProviderNoRbac \
+            --result-format FullResourcePayloads --no-pretty-print --only-show-errors \
+            -o json > "$RUNNER_TEMP/whatif-deploy.json"
+
+      - name: Gate + compare against the pre-approval signature (security C6/DC7)
+        env:
+          EXPECTED_SIGNATURE: ${{ needs.what-if.outputs.signature }}
+        run: node ci/.github/scripts/whatif-gate.mjs "$RUNNER_TEMP/whatif-deploy.json" --compare "$EXPECTED_SIGNATURE"
+
+      # Deployer DC10. One retry after an RBAC-propagation-lag first-pull
+      # failure (a documented RUNBOOK behavior) — never retried indefinitely.
+      # The real key is supplied here, step-level only, exactly as above.
+      - name: Deploy (--mode Incremental, digest-pinned; never --mode Complete)
+        id: deploy
+        env:
+          SQUAD_INFRA_RUN_ENCRYPTION_KEY_B64: ${{ secrets.RUN_ENCRYPTION_KEY }}
+        run: |
+          set -euo pipefail
+          set +e
+          az deployment group create \
+            --resource-group "$RESOURCE_GROUP" --name main --mode Incremental \
+            --template-file target/host/infra/main.bicep \
+            --parameters target/host/infra/environments/prod.bicepparam \
+            --only-show-errors -o json > "$RUNNER_TEMP/deploy-result.json" 2>"$RUNNER_TEMP/deploy-attempt-1.log"
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -eq 0 ]; then
+            echo "retry=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::warning::first deployment attempt failed (can be RBAC-propagation lag on a fresh AcrPull grant) — retrying once after a delay"
+          cat "$RUNNER_TEMP/deploy-attempt-1.log" >&2
+          echo "retry=true" >> "$GITHUB_OUTPUT"
+          sleep 90
+
+      # Re-login before the retry (a fresh token; the first one may be close
+      # to expiry by the time the 90s delay above elapses).
+      - name: Re-login before the retry (ciDeployIdentity, OIDC)
+        if: steps.deploy.outputs.retry == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy retry (one retry only; fails the job if this also fails)
+        if: steps.deploy.outputs.retry == 'true'
+        env:
+          SQUAD_INFRA_RUN_ENCRYPTION_KEY_B64: ${{ secrets.RUN_ENCRYPTION_KEY }}
+        run: |
+          set -euo pipefail
+          az deployment group create \
+            --resource-group "$RESOURCE_GROUP" --name main --mode Incremental \
+            --template-file target/host/infra/main.bicep \
+            --parameters target/host/infra/environments/prod.bicepparam \
+            --only-show-errors -o json > "$RUNNER_TEMP/deploy-result.json"
+
+      # Diagnostics-only: read-only `az` calls under the SAME permissions
+      # this job already holds — no new privilege. Justified per this file's
+      # validation instructions as the one allowed `if: failure()` step.
+      - name: On failure, append deployment operations to the step summary
+        if: failure()
+        run: |
+          {
+            echo "### Deployment failure — operations"
+            echo '```'
+            az deployment operation group list --resource-group "$RESOURCE_GROUP" --name main -o table || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ==========================================================================
+  # smoke — advisory only. ciPlanIdentity (read-only; no environment: key, so
+  # no third approval prompt).
+  # ==========================================================================
+  smoke:
+    name: Smoke check (advisory)
+    needs: [resolve, deploy]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+    steps:
+      - name: Azure login (ciPlanIdentity, OIDC — read-only, no environment:)
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.CI_PLAN_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve mcpFqdn (fresh; never hardcoded or reused from an earlier step)
+        id: fqdn
+        run: |
+          set -euo pipefail
+          FQDN=$(az deployment group show --resource-group "$RESOURCE_GROUP" --name main --query properties.outputs.mcpFqdn.value -o tsv)
+          echo "fqdn=$FQDN" >> "$GITHUB_OUTPUT"
+
+      # Deployer DC4 / security C10: token acquisition and the initialize call
+      # happen inside this ONE step; the token is masked the instant it is
+      # captured and never crosses a job output, artifact, or later step.
+      - name: Authenticated initialize handshake (token acquired, masked, and used within this one step)
+        id: primary
+        continue-on-error: true
+        env:
+          SQUAD_INFRA_AUDIENCE: ${{ vars.SQUAD_INFRA_AUDIENCE }}
+          SQUAD_INFRA_ENTRA_CLIENT_ID: ${{ vars.SQUAD_INFRA_ENTRA_CLIENT_ID }}
+          MCP_FQDN: ${{ steps.fqdn.outputs.fqdn }}
+        run: |
+          set -euo pipefail
+          TOKEN=$(az account get-access-token --resource "${SQUAD_INFRA_AUDIENCE:-$SQUAD_INFRA_ENTRA_CLIENT_ID}" --query accessToken -o tsv)
+          echo "::add-mask::$TOKEN"
+          HTTP_CODE=$(curl -sS -o /tmp/smoke-response.json -w '%{http_code}' "https://${MCP_FQDN}/mcp" \
+            -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}') || HTTP_CODE="000"
+          if [ "$HTTP_CODE" = "200" ] && grep -q '"hve-squad-mcp"' /tmp/smoke-response.json; then
+            echo "OK   smoke check: HTTP 200 and serverInfo.name matched"
+            exit 0
+          fi
+          echo "::warning::smoke check primary handshake did not succeed (HTTP $HTTP_CODE) — falling back to a 401 probe and a revision-health check"
+          exit 1
+
+      - name: Fallback — unauthenticated 401 probe + deployed-image/revision check
+        if: steps.primary.outcome == 'failure'
+        continue-on-error: true
+        env:
+          MCP_FQDN: ${{ steps.fqdn.outputs.fqdn }}
+        run: |
+          set -euo pipefail
+          HTTP_CODE=$(curl -sS -o /dev/null -w '%{http_code}' "https://${MCP_FQDN}/mcp" \
+            -X POST -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}') || HTTP_CODE="000"
+          echo "unauthenticated probe HTTP status: $HTTP_CODE (401 = endpoint reachable and enforcing auth)"
+          az resource show --resource-group "$RESOURCE_GROUP" --name "${SQUAD_INFRA_NAME_PREFIX:-squadmcp}-app" \
+            --resource-type Microsoft.App/containerApps \
+            --query "{image: properties.template.containers[0].image, latestRevisionName: properties.latestRevisionName, provisioningState: properties.provisioningState}" \
+            -o json || echo "::warning::could not read the Container App resource for the revision-health fallback"
+          echo "::notice::the smoke check is advisory only — its result never blocks this workflow run"

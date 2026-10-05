@@ -29,6 +29,7 @@ copilot-studio/connector/apiProperties.json
 
 # Bicep parameter files completed with real tenant/subscription values.
 host/infra/*.local.bicepparam
+host/infra/**/*.local.bicepparam
 
 # Environment files and credential material.
 .env
