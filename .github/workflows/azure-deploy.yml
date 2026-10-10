@@ -1,0 +1,205 @@
+# Validate Bicep on every infrastructure change. Trusted main/manual runs also
+# authenticate as a user-assigned managed identity through OIDC, execute what-if,
+# and wait at the protected production environment before any image build or
+# Azure deployment begins.
+name: Azure infrastructure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/azure-deploy.yml"
+      - "host/Containerfile"
+      - "host/infra/**"
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
+      - "tools.catalog.yml"
+      - "generated/**"
+      - "host/cast/**"
+      - "host/render/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/azure-deploy.yml"
+      - "host/infra/**"
+  workflow_dispatch:
+
+concurrency:
+  group: azure-infrastructure-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  BICEP_VERSION: v0.43.8
+  BICEP_FILE: host/infra/main.bicep
+  PARAMETER_FILE: host/infra/main.bicepparam
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  validate:
+    name: Lint and compile Bicep
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Bicep CLI
+        run: az bicep install --version "$BICEP_VERSION"
+
+      - name: Validate image tag
+        shell: bash
+        run: |
+          if [[ ! "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "::error::The image tag is not a valid OCI tag."
+            exit 1
+          fi
+
+      - name: Lint templates
+        run: |
+          az bicep lint --file "$BICEP_FILE"
+          az bicep lint --file host/infra/graph-memory-permissions.bicep
+
+      - name: Compile parameter files
+        run: |
+          az bicep build-params --file "$PARAMETER_FILE" --stdout > /dev/null
+          az bicep build-params \
+            --file host/infra/graph-memory-permissions.bicepparam \
+            --stdout > /dev/null
+
+  what-if:
+    name: Azure what-if
+    if: ${{ github.event_name != 'pull_request' }}
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: preview
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate deployment configuration
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+        run: |
+          set -euo pipefail
+          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_RESOURCE_GROUP; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name must be configured as a GitHub Actions repository variable."
+              exit 1
+            fi
+          done
+
+      - name: Azure login with managed identity federation
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install pinned Bicep CLI
+        run: az bicep install --version "$BICEP_VERSION"
+
+      - name: Run what-if
+        env:
+          AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+        run: |
+          set -euo pipefail
+          {
+            echo '## Azure what-if'
+            echo
+            echo '```text'
+            az deployment group what-if \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --template-file "$BICEP_FILE" \
+              --parameters "$PARAMETER_FILE" \
+              --parameters imageTag="$IMAGE_TAG" \
+              --result-format ResourceIdOnly \
+              --no-pretty-print
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Build image and deploy
+    if: ${{ github.event_name != 'pull_request' }}
+    needs:
+      - validate
+      - what-if
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Azure login with managed identity federation
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install pinned Bicep CLI
+        run: az bicep install --version "$BICEP_VERSION"
+
+      - name: Read image settings from the parameter file
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          parameters=$(az bicep build-params --file "$PARAMETER_FILE" --stdout)
+          registry=$(jq -r '.parameters.containerRegistryName.value' <<< "$parameters")
+          repository=$(jq -r '.parameters.imageRepository.value' <<< "$parameters")
+          {
+            echo "registry=$registry"
+            echo "repository=$repository"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push image in Azure Container Registry
+        env:
+          ACR_NAME: ${{ steps.image.outputs.registry }}
+          IMAGE_REPOSITORY: ${{ steps.image.outputs.repository }}
+        run: |
+          az acr build \
+            --registry "$ACR_NAME" \
+            --image "$IMAGE_REPOSITORY:$IMAGE_TAG" \
+            --file host/Containerfile \
+            .
+
+      - name: Deploy infrastructure
+        id: deploy
+        env:
+          AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+        run: |
+          set -euo pipefail
+          outputs=$(az deployment group create \
+            --name "hve-squad-mcp-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file "$BICEP_FILE" \
+            --parameters "$PARAMETER_FILE" \
+            --parameters imageTag="$IMAGE_TAG" \
+            --query properties.outputs \
+            --output json)
+          {
+            echo '## Azure deployment outputs'
+            echo
+            echo '| Output | Value |'
+            echo '|---|---|'
+            jq -r 'to_entries[] | "| \(.key) | `\(.value.value)` |"' <<< "$outputs"
+          } >> "$GITHUB_STEP_SUMMARY"
