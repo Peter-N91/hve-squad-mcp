@@ -704,6 +704,157 @@ Entra-authenticated `/mcp` endpoint.
   (`DurableRunStateStore`); the production store targets Azure Storage / Key Vault
   (a follow-up) rather than the local file store used here.
 
+## Optional Copilot economy routing
+
+For an operator-provisioned Copilot SDK sandbox using
+`SQUAD_MCP_STAGE_EXECUTOR=copilot`, `SQUAD_MCP_COPILOT_ROUTING` accepts `off`
+(the default) or `economy`. Existing deployments retain their fixed
+`SQUAD_MCP_COPILOT_MODEL` or runtime default until the operator explicitly opts in.
+This option does not affect delegated stdio or Azure OpenAI execution.
+
+Set `SQUAD_MCP_COPILOT_ROUTING=economy` in the server process environment to
+enable native model selection. Startup identity verification checks eligible
+models and logs `economy routing verification`. Selection intersects the
+immutable cast's fit/cost/capability tables with models available to the verified
+GitHub identity and respects each role's `team.md` Model Tier floor. The mode
+overrides the fixed Copilot model; caller request text cannot disable it.
+
+Research, review, council and other protected roles retain fit-first selection.
+Only developer, technical-writer, presenter, prompt-engineer and data-scientist
+implementation roles may take a cost-first pick with fit at least 2. Unrostered
+workers inherit the parent's ranked model rather than its economy discount.
+Known-role delegates without an eligible model are omitted from dispatch and
+recorded as unavailable; a stage without an eligible main model fails explicitly.
+
+Stage source manifests record `routing`, `modelRoute`, `delegateModels`,
+`delegateModelRoutes` and `unavailableDelegates`. The roster records selected
+models through an ETag-checked update. A concurrent roster change blocks the
+stage rather than silently overwriting it.
+
+The native adapter consumes inert pinned references; it does not run upstream
+PowerShell skills, skip advisory stages, waive intake/review/approval gates, or
+automatically escalate economy floors. Report synthesis remains text-only, with
+up to 32 tool calls, 16 model calls and 180 seconds, bounded by operator limits.
+The last two tool calls are reserved for artifact persistence and completion.
+Product-owner handoffs live below `plans/<run-id>/handoff/`, preserving the Lead
+plan and its source manifest.
+
+## Full upstream Copilot execution
+
+New projects on `SQUAD_MCP_STAGE_EXECUTOR=copilot` default to upstream execution.
+Set `SQUAD_MCP_UPSTREAM_RUNTIME_ENABLED=false` for native-only execution.
+Existing projects with native `team.md`/`state.json` retain their runtime and
+schema; enabling upstream is not migration. An upstream project is bound to an
+immutable commit and schema 1.4; changing that commit requires explicit verified
+migration rather than following the rolling tag.
+The upstream path does not silently rebase federation/sub-squad requests into
+the project root. Keep those workflows on their existing native bindings until
+a dedicated upstream namespace adapter is configured.
+Initialization writes a pending marker before any seed files and the binding
+last. Partial upstream seeds and unbound schema 1.4 are blocked for explicit
+recovery rather than misclassified as native projects.
+
+The server and [full sandbox image](sandbox/README.md#full-upstream-execution)
+must contain the same [upstream bundle](upstream-runtime/README.md). The remote
+pipeline, durable run-state store and artifact/memory settings are required.
+The first run holds for user Init and stores the exact pending operation.
+Operator enablement and outer run approval cannot substitute for project Init.
+
+The user confirms profile, naming `skip`, approval channel `in-chat`, and routing:
+
+```json
+{
+  "confirmed": true,
+  "profile": "default",
+  "naming": "skip",
+  "routing": { "mode": "ranked" },
+  "routingAccepted": true,
+  "approvalChannel": "in-chat"
+}
+```
+
+Use `{"mode":"economy"}` for eligible implementation discounts, or
+`{"mode":"manual","model":"<exact offered model ID>"}` to keep one fixed model.
+Ranked uses fit-first selection. Manual selection is validated against account
+availability and each roster capability floor; it is an explicit override of
+automatic task-fit ranking, not a promise of optimal quality. Manual corrections
+and fixed helpers retain that model. The user receives the eligible manual
+inventory during Init. Broad "yes" or a caller-supplied actor cannot create
+consent. Legacy explicit economy confirmations remain supported.
+
+The pinned `Initialize-SquadConsumptionRates.ps1` refuses every non-economy
+mode. Ranked/manual Init therefore uses the upstream-required Scribe cold seed:
+copy the exact pinned rate template, validate the existing tables/calibration,
+and run a genuine read-only ledger measurement. The logical initialization
+receipt records `execution: native-scribe`; economy records `pinned-script`.
+The adapter never temporarily switches routing to economy, claims a refused
+script ran, discards operator-added rates, or resets existing calibration.
+The compact dispatch brief, scripted handoff and cost-preflight mutator are
+also economy-only upstream. Ranked/manual read the full pinned references and
+use native upstream-schema Scribe history/state/preflight CAS transactions;
+genuine read-only ledger measurements validate their resulting histories.
+Their receipts explicitly distinguish native transactions from executed scripts.
+Multi-file native writes retain the same non-atomic partial-commit recovery
+boundary as the script bridge.
+After native handoffs, the genuine mode-independent `Measure-SquadLedger -Write`
+updates only the derived consumption sections and state cost totals under an
+exact two-file write policy, followed by its read-only `-Check`. This preserves
+upstream derivation math instead of inventing a second pricing implementation.
+
+The routing mode and manual model are recorded in `runtime-binding.json`,
+the roster and decisions. Later turns and resumed operations preserve that
+choice even if operator defaults change. Profile changes and unresolved
+specialist scopes cannot silently expand the existing roster.
+
+Upstream role stages share a bounded 100-completion maximum and 35-minute
+deadline, with a 40-minute claim lease, including helpers and accounting
+closeout. Independent review must read exact final report bytes, compare hashes
+and record its own verdict. Failures may trigger one original-owner correction
+and protected rereview, never acceptance of a failed review. Source paging
+tracks full required-input coverage; a preview alone cannot satisfy critique.
+Read-only artifact hashing does not grant shell access or prove visual review
+of binary exports.
+
+The script bridge preserves timestamp strings through PowerShell 7.5 JSON
+transport, handles large responses as bounded hash-verified binary chunks, and
+validates the complete tree diff before committing allowed writes. No-ceiling
+preflight omits decision text; other decisions still require their explicit
+entry. Multi-file writes are not atomic: partial-commit receipts identify paths
+requiring reconciliation. Never clear a runtime binding or reset project state
+as an automatic recovery shortcut.
+
+Local specialists expose only Markdown-to-DOCX and DOT-to-PNG conversion. Binary
+publication uses the existing server Blob/render settings, never a sandbox
+credential, and stores immutable hashes/byte counts in `.artifact.json` metadata.
+`squad_history` can return short-lived download references or authenticated
+base64 pages using `binaryOffset`; verify the complete bytes after assembly.
+Do not combine text `offset` with `binaryOffset`.
+
+Copilot `assistant.usage.copilotUsage.totalNanoAiu` is stored as
+`hostBilledCredits` (one credit = 1,000,000,000 nano-AIU). SDK event IDs are
+preserved for deduplication and pending accounting writes must succeed before
+completion. `billingStatus` distinguishes complete totals, partial subtotals and
+unavailable billing. Credits are not configured USD estimates; a provider
+`stop` event is not an acceptance verdict. Run-scoped billing/value projection
+uses exact reviewed deliverables and deduplicated root-run records, without
+rewriting project-wide history or replacing missing charges with estimates.
+
+Deploy the server and sandbox as a matching unit, only between active runs.
+Missing SDK conversation/checkpoint state prevents safe continuation and must
+be reported explicitly. Installed prerequisites do not authorize cloud/tracker
+actions; external authenticated connections remain deferred.
+Upstream role sessions expose only virtual project file tools, server-owned
+project search and approved source readers. Sandbox-disk discovery (`glob` and
+`grep`), direct `web_fetch`, generic shell and recursive delegation remain
+disabled: private script staging is not a model-readable filesystem or a new
+network authorization.
+While the full upstream runtime shares a sandbox, legacy native stage sessions
+also lose physical-scratch shell/discovery tools; their schemas, routing and
+virtual project reads/writes remain native. Use a separate native-only
+deployment (`SQUAD_MCP_UPSTREAM_RUNTIME_ENABLED=false`) for the older shell/browser
+research fallback. This prevents a legacy session from browsing another
+upstream session's private staging tree.
+
 ## Cross-references
 
 - IaC: [host/infra/main.bicep](infra/main.bicep) · [host/infra/main.bicepparam](infra/main.bicepparam)

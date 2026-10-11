@@ -33,6 +33,8 @@
     "generate:connector:check": "tsx generators/build-copilot-studio-connector.ts --check",
     "snapshot:cast": "tsx host/snapshot-cast.ts",
     "snapshot:cast:check": "tsx host/snapshot-cast.ts --check",
+    "snapshot:upstream": "tsx host/snapshot-upstream.ts",
+    "snapshot:upstream:check": "tsx host/snapshot-upstream.ts --check",
     "snapshot:render": "tsx host/snapshot-render.ts",
     "version:set": "tsx scripts/set-version.ts",
     "change": "tsx scripts/new-change-fragment.ts",

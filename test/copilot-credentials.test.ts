@@ -18,7 +18,9 @@ import { FileSquadMemoryStore } from "../src/engine/backends/file-squad-memory.j
 import { RedactingLogger } from "../src/observability/logger.js";
 import { buildCopilotCredentialSource, buildCopilotRuntime, prepareReadiness } from "../src/server-http.js";
 import type { CopilotSdkClient } from "../src/engine/copilot/copilot-sdk-client.js";
+import type { CopilotSessionConfig } from "../src/engine/copilot/copilot-stage-executor.js";
 import type { ReadinessProbe } from "../src/transports/readiness.js";
+import { EphemeralRunStateStore } from "../src/engine/run-state.js";
 import { buildHarness } from "./conformance/support/harness.js";
 
 const TOKEN_A = `gho_${"a".repeat(36)}`;
@@ -74,6 +76,7 @@ test("verification proves Copilot entitlement and reports failures without ever 
   env.GH = TOKEN_A;
   status = await credentials.verify();
   assert.deepEqual({ ready: status.ready, models: status.models }, { ready: true, models: 2 });
+  assert.deepEqual(status.modelIds, ["claude-sonnet-5", "gpt-6-sol"]);
 
   outcome.value = () => new Error("Request models.list failed: Bad credentials");
   status = await credentials.verify();
@@ -205,10 +208,14 @@ test("the identity source is mandatory for the Copilot executor and its token ne
       SQUAD_MCP_AUDIENCE: "api://squad", SQUAD_MCP_ENABLE_MEMORY: "true", SQUAD_MCP_MEMORY_AUTO_ENABLED: "true",
       SQUAD_MCP_ENABLE_ARTIFACTS: "true", SQUAD_MCP_MEMORY_DIR: join(root, "memory"),
       SQUAD_MCP_STAGE_EXECUTOR: "copilot", SQUAD_MCP_COPILOT_CLI_URL: "127.0.0.1:4321", SQUAD_MCP_COPILOT_CONNECTION_TOKEN: "c".repeat(32),
+      SQUAD_MCP_UPSTREAM_RUNTIME_ENABLED: "false",
     };
     assert.throws(() => loadOperatorConfig(base), /requires a GitHub identity/);
     const fromEnv = loadOperatorConfig({ ...base, SQUAD_MCP_COPILOT_GITHUB_TOKEN: TOKEN_A });
     assert.deepEqual(fromEnv.copilot.identity, { kind: "env", variable: "SQUAD_MCP_COPILOT_GITHUB_TOKEN" });
+    assert.equal(fromEnv.copilot.routing, "off");
+    assert.equal(loadOperatorConfig({ ...base, SQUAD_MCP_COPILOT_GITHUB_TOKEN: TOKEN_A, SQUAD_MCP_COPILOT_ROUTING: "economy" }).copilot.routing, "economy");
+    assert.throws(() => loadOperatorConfig({ ...base, SQUAD_MCP_COPILOT_GITHUB_TOKEN: TOKEN_A, SQUAD_MCP_COPILOT_ROUTING: "invalid" }), /COPILOT_ROUTING/);
     assert.ok(!JSON.stringify(fromEnv).includes(TOKEN_A), "The token value is read on demand, never held in config.");
     assert.deepEqual(loadOperatorConfig({ ...base, SQUAD_MCP_COPILOT_GITHUB_TOKEN_COMMAND: "gh auth token" }).copilot.identity,
       { kind: "command", argv: ["gh", "auth", "token"] });
@@ -236,5 +243,81 @@ test("the identity source is mandatory for the Copilot executor and its token ne
       const prepared = await runtime.readiness.prepare();
       assert.deepEqual({ ready: prepared.ready, identity: prepared.checks.copilotIdentity.ok }, { ready: true, identity: true });
     } finally { runtime.credentials.stopMonitoring(); }
+
+    const economyConfig = loadOperatorConfig({
+      ...base, SQUAD_MCP_COPILOT_GITHUB_TOKEN: TOKEN_A, SQUAD_MCP_COPILOT_ROUTING: "economy",
+    });
+    const economyRuntime = buildCopilotRuntime(economyConfig,
+      { memoryStore: new FileSquadMemoryStore({ baseDir: join(root, "memory") }) },
+      { env: { SQUAD_MCP_COPILOT_GITHUB_TOKEN: TOKEN_A }, client: fakeClient });
+    assert.ok(economyRuntime);
+    try {
+      assert.equal((await economyRuntime.readiness.prepare()).ready, true);
+      assert.deepEqual(economyRuntime.credentials.status().modelIds, ["claude-sonnet-5"]);
+    } finally { economyRuntime.credentials.stopMonitoring(); }
+
+    const unavailableRuntime = buildCopilotRuntime(economyConfig,
+      { memoryStore: new FileSquadMemoryStore({ baseDir: join(root, "memory") }) },
+      {
+        env: { SQUAD_MCP_COPILOT_GITHUB_TOKEN: TOKEN_A },
+        client: {
+          ...fakeClient,
+          entitlementVerifier: () => ({ verify: async () => ({ models: ["gpt-5.4-mini"] }) }),
+        },
+      });
+    assert.ok(unavailableRuntime);
+    try {
+      assert.equal((await unavailableRuntime.readiness.prepare()).ready, false);
+      assert.match(unavailableRuntime.credentials.status().reason, /no available catalog model/);
+      assert.equal(unavailableRuntime.credentials.status().modelIds, undefined);
+    } finally { unavailableRuntime.credentials.stopMonitoring(); }
+
+    const upstreamConfig = loadOperatorConfig({
+      ...base, SQUAD_MCP_COPILOT_GITHUB_TOKEN: TOKEN_A, SQUAD_MCP_UPSTREAM_RUNTIME_ENABLED: undefined,
+    });
+    assert.equal(upstreamConfig.copilot.upstreamRuntime, true);
+    assert.equal(upstreamConfig.copilot.routing, "off", "New upstream execution does not force economy routing.");
+    const memory = { memoryStore: new FileSquadMemoryStore({ baseDir: join(root, "upstream-memory") }) };
+    assert.throws(() => buildCopilotRuntime(upstreamConfig, memory, { client: fakeClient }), /durable run-state/);
+    const runs = new EphemeralRunStateStore();
+    const upstream = buildCopilotRuntime(upstreamConfig, memory, {
+      env: { SQUAD_MCP_COPILOT_GITHUB_TOKEN: TOKEN_A }, runStateStore: runs,
+      client: { ...fakeClient, entitlementVerifier: () => ({ verify: async () => ({ models: ["gpt-5.4", "gpt-5.4-mini", "gpt-5.6-sol"] }) }) },
+    });
+    assert.ok(upstream?.upstreamRun);
+    try {
+      assert.equal((await upstream.readiness.prepare()).ready, true);
+      const created = await runs.create({ tenantId: "tenant", toolId: "squad_run" });
+      const pending = (await runs.update(created.runId, { status: "running", request: "Produce an advisory report." }))!;
+      const result = await upstream.upstreamRun(pending, {
+        toolId: "squad_run", request: pending.request!, project: "upstream-project",
+      }, { id: "workspace", tenantId: "tenant", root, resolve: path => join(root, path), dispose: async () => undefined }, async () => undefined);
+      assert.equal(result?.outcome, "held");
+      assert.match(result?.humanInput?.question ?? "", /ranked.*economy.*manual/);
+      assert.ok(result?.humanInput?.choices?.some(choice => choice.includes('"mode":"ranked"')));
+      assert.ok(result?.humanInput?.choices?.some(choice => choice.includes('"mode":"economy"')));
+      assert.equal((await runs.get(pending.runId))?.status, "held");
+    } finally { upstream.credentials.stopMonitoring(); }
+
+    const captured: CopilotSessionConfig[] = [];
+    const restricted = buildCopilotRuntime(upstreamConfig, memory, {
+      env: { SQUAD_MCP_COPILOT_GITHUB_TOKEN: TOKEN_A }, runStateStore: runs,
+      client: {
+        ...fakeClient,
+        entitlementVerifier: () => ({ verify: async () => ({ models: ["gpt-5.4", "gpt-5.4-mini", "gpt-5.6-sol"] }) }),
+        createSession: async config => { captured.push(config); throw new Error("Native session captured without running."); },
+      },
+    });
+    assert.ok(restricted);
+    try {
+      await restricted.readiness.prepare();
+      const executor = restricted.stageExecutorFactory({
+        id: "native-workspace", tenantId: "tenant", root, resolve: path => join(root, path), dispose: async () => undefined,
+      }, "native-project", "native-capture");
+      await assert.rejects(executor.execute({ role: "Squad Implementor", charter: "Report only.", applyTo: [] },
+        { toolId: "squad_run", request: "Report current findings." }, undefined, "developer"), /Native session captured/);
+      assert.ok(captured.length);
+      assert.ok(!captured[0].availableTools.some(tool => ["builtin:bash", "builtin:glob", "builtin:grep"].includes(tool)));
+    } finally { restricted.credentials.stopMonitoring(); }
   } finally { await rm(root, { recursive: true, force: true }); }
 });

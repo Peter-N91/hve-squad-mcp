@@ -1,0 +1,10 @@
+{
+  "name": "hve-squad-specialist-node",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Pinned local Linux specialist document dependencies; no authenticated services",
+  "dependencies": {
+    "docx": "9.6.1",
+    "marked": "17.0.4"
+  }
+}

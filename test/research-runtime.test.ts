@@ -214,6 +214,86 @@ test("text-only report mode restricts tools, writes one report, and applies a sm
   } finally { await f.cleanup(); }
 });
 
+test("native report reads preserve finalization calls and rejected reads do not consume them", async () => {
+  const output = ".copilot-tracking/changes/run-1/artifact.md";
+  const f = await fixture([
+    call("read_artifact", { path: "input/context.md" }),
+    call("list_artifacts", {}),
+    { ...call("list_artifacts", {}), toolCalls: [0, 1, 2].map(index => ({
+      id: `denied-${index}`, name: "list_artifacts", arguments: "{}",
+    })) },
+    call("write_artifact", { path: output, content: "# Report\n\nThe brief was read (E1). Further input reads were exhausted; gaps remain open." }),
+    finish(output, ["E1"]),
+  ]);
+  try {
+    const runtime = new ResearchRuntime({
+      backend: f.backend, workspace: f.workspace, store: f.store, project: "project-a", runId: "run-1",
+      githubRoot: f.githubRoot, date: "2026-09-18", maxStageToolCalls: 4,
+    });
+    await runtime.execute({ role: "Squad Implementor", charter: "Implement.", applyTo: [] },
+      request, "Prior findings", "developer", undefined, "text-only-report");
+    assert.match((await f.store.get("tenant-a", "project-a", output))!.content, /gaps remain open/);
+    const denied = f.backend.seen[3].messages.filter(message => message.role === "tool" && message.content.includes("report_read_budget"));
+    assert.equal(denied.length, 3);
+    assert.deepEqual(f.backend.seen[2].tools?.map(tool => tool.name).sort(), ["finish_stage", "write_artifact"]);
+    assert.match(f.backend.seen[0].system, /2026-09-18\/run-1-research\.md/);
+    assert.match(f.backend.seen[0].system, /plans\/run-1\/artifact\.md/);
+  } finally { await f.cleanup(); }
+});
+
+test("native report input discovery also reserves the final two model turns", async () => {
+  const output = ".copilot-tracking/changes/run-1/artifact.md";
+  const f = await fixture([
+    call("list_artifacts", {}),
+    call("list_artifacts", {}),
+    call("write_artifact", { path: output, content: "# Report\n\nOnly supplied findings were available; source verification remains open." }),
+    finish(output, []),
+  ]);
+  try {
+    const runtime = new ResearchRuntime({
+      backend: f.backend, workspace: f.workspace, store: f.store, project: "project-a", runId: "run-1",
+      githubRoot: f.githubRoot, date: "2026-09-18", maxStageModelCalls: 4,
+    });
+    await runtime.execute({ role: "Squad Implementor", charter: "Implement.", applyTo: [] },
+      request, undefined, "developer", undefined, "text-only-report");
+    assert.deepEqual(f.backend.seen[2].tools?.map(tool => tool.name).sort(), ["finish_stage", "write_artifact"]);
+    assert.ok(await f.store.get("tenant-a", "project-a", output));
+  } finally { await f.cleanup(); }
+});
+
+test("native product-owner handoff preserves the Lead plan and its source manifest", async () => {
+  const plan = ".copilot-tracking/plans/run-1/artifact.md";
+  const handoff = ".copilot-tracking/plans/run-1/handoff/artifact.md";
+  const f = await fixture([
+    call("write_artifact", { path: handoff, content: "# Handoff\n\nNo tracker writes or stakeholder approval inferred." }),
+    finish(handoff, []),
+  ]);
+  try {
+    await f.store.put("tenant-a", "project-a", plan, "# Protected Lead plan");
+    await f.store.put("tenant-a", "project-a", `${plan}.sources.json`, "{\"leadEvidence\":true}");
+    await f.runtime.execute({ role: "Functional Planner", charter: "Prepare an advisory handoff.", applyTo: [] },
+      request, undefined, "product-owner");
+    assert.equal((await f.store.get("tenant-a", "project-a", plan))!.content, "# Protected Lead plan");
+    assert.equal((await f.store.get("tenant-a", "project-a", `${plan}.sources.json`))!.content, "{\"leadEvidence\":true}");
+    assert.ok(await f.store.get("tenant-a", "project-a", `${handoff}.sources.json`));
+  } finally { await f.cleanup(); }
+});
+
+test("native advisory review retains mandatory provenance and honest pending-review status", async () => {
+  const output = `${deliverableRootFor("tester", defaultProfileTables(), { date: "2026-09-18" })}/run-1/artifact.md`;
+  const f = await fixture([
+    call("write_artifact", { path: output, content: "# Review\n\nSource verification remains open." }),
+    finish(output, []),
+  ]);
+  try {
+    await f.runtime.execute({ role: "Test Advisor", charter: "Review prior work.", applyTo: [] },
+      request, "Report pending independent review", "tester");
+    assert.match(f.backend.seen[0].system, /presence is not a defect/);
+    assert.match(f.backend.seen[0].system, /pre-review report truthfully marked pending independent review is expected/i);
+    assert.match(f.backend.seen[0].system, /unsupported-claim findings fully enforced/);
+  } finally { await f.cleanup(); }
+});
+
 test("paging rejects invalid offsets without evidence and preserves Unicode boundaries", async () => {
   const source = ".copilot-tracking/squad/history/unicode.md";
   const output = ".copilot-tracking/reviews/test-advisor/run-1/artifact.md";

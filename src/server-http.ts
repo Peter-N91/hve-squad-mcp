@@ -1,3 +1,12 @@
+import { resolveSquadGithubRoot } from "./paths.js";
+import { selectEconomyModel } from "./engine/copilot/economy-routing.js";
+import { createHash } from "node:crypto";
+import { basename } from "node:path";
+import { LocalSpecialists } from "./engine/copilot/local-specialists.js";
+import { readUpstreamPublicSource, UPSTREAM_SOURCE_ORIGINS } from "./engine/copilot/upstream-source-reader.js";
+import { UpstreamRunService } from "./engine/copilot/upstream-run-service.js";
+import { installedUpstreamBundle } from "./engine/copilot/upstream-bundle.js";
+
 /**
  * Live HTTP server bootstrap (deployed process only).
  *
@@ -138,6 +147,9 @@ export interface CopilotRuntime {
   stageExecutorFactory: NonNullable<EmbeddedCoordinatorDeps["stageExecutorFactory"]>;
   credentials: CopilotCredentials;
   readiness: CopilotReadiness;
+  upstreamRun?: EmbeddedCoordinatorDeps["upstreamRun"];
+  localArtifactReference?: (tenantId: string, project: string, metadataPath: string) => Promise<{ downloadUrl: string; expiresAt: string; sha256: string; mediaType: string } | undefined>;
+  localArtifactChunk?: (tenantId: string, project: string, metadataPath: string, offset: number) => Promise<{ base64: string; offset: number; nextOffset: number | null; totalBytes: number; sha256: string; mediaType: string } | undefined>;
 }
 
 /** The configured source of the server-owned GitHub identity. */
@@ -156,7 +168,7 @@ export function buildCopilotCredentialSource(config: OperatorConfig, env: NodeJS
 export function buildCopilotRuntime(
   config: OperatorConfig,
   memoryStack: SquadMemoryStack | undefined,
-  options: { env?: NodeJS.ProcessEnv; logger?: RedactingLogger; client?: CopilotSdkClient } = {},
+  options: { env?: NodeJS.ProcessEnv; logger?: RedactingLogger; client?: CopilotSdkClient; runStateStore?: RunStateStore } = {},
 ): CopilotRuntime | undefined {
   if (config.stageExecutor !== "copilot") {
     return undefined;
@@ -164,6 +176,10 @@ export function buildCopilotRuntime(
   if (!memoryStack) {
     throw new Error("SQUAD_MCP_STAGE_EXECUTOR=copilot requires the squad memory broker for durable artifacts.");
   }
+  if (config.copilot.upstreamRuntime && !options.runStateStore) {
+    throw new Error("Full upstream execution requires the existing durable run-state and human-response store.");
+  }
+  const upstreamBundle = config.copilot.upstreamRuntime ? installedUpstreamBundle() : undefined;
   const client = options.client ?? lazyCopilotSdkClient({
     cliUrl: config.copilot.cliUrl,
     connectionToken: config.copilot.connectionToken,
@@ -171,14 +187,119 @@ export function buildCopilotRuntime(
   });
   const credentials = new CopilotCredentials({
     source: buildCopilotCredentialSource(config, options.env),
-    verifier: client.entitlementVerifier(),
+    verifier: {
+      async verify(token) {
+        const result = await client.entitlementVerifier().verify(token);
+        if (config.copilot.routing === "economy") {
+          const root = resolveSquadGithubRoot();
+          if (!root) throw new Error("Economy routing catalog root is unavailable.");
+          const picks = ["researcher", "lead", "developer", "tester"].map(role => selectEconomyModel(root, role, "default", result.models));
+          options.logger?.info("economy routing verification", { routing: "economy", picks: Object.fromEntries(picks.map(pick => [pick.role, pick.model])) });
+        }
+        return result;
+      },
+    },
     reverifyMs: config.copilot.identityReverifyMs,
   });
   const store = new MemoryBackedArtifactStore(memoryStack.memoryStore);
   const sessionState = new FileCopilotSessionStateStore(config.copilot.sessionStateDir);
+  const localBinaryStore = upstreamBundle && config.storageAccount && config.enableRenderPptx ? new AzureBlobArtifactStore({
+    account: config.storageAccount, container: config.renderBlobContainer,
+    getAccessToken: createManagedIdentityTokenProvider(STORAGE_SCOPE), logger: options.logger,
+  }) : undefined;
+  const upstreamSourceOrigins = UPSTREAM_SOURCE_ORIGINS.filter(origin =>
+    !config.copilot.allowedHosts.length || config.copilot.allowedHosts.includes(new URL(origin).hostname));
+  const upstreamService = upstreamBundle && options.runStateStore ? new UpstreamRunService({
+    store: options.runStateStore,
+    runtimeOptions: ({ run, workspace, request }) => {
+      const identity = credentials.status();
+      if (!identity.ready || !identity.modelIds?.length) throw new Error("Upstream execution requires verified Copilot model availability.");
+      const proposedRouting = config.copilot.routing === "economy" ? { mode: "economy" as const } : { mode: "ranked" as const };
+      return { enabled: true, client, bundle: upstreamBundle, store, workspace, sessionState,
+        routing: proposedRouting,
+        tenantId: run.tenantId, project: request.project ?? config.memoryDefaultProject, runId: run.runId,
+        // Init opens no SDK session. The runtime resolves the actual coordinator model after the user selects routing.
+        modelIds: identity.modelIds, coordinatorModel: identity.modelIds[0], gitHubTokenProvider: credentials.tokenProvider,
+        profile: request.profile, mode: "autopilot", deadlineMs: 2100000, maxModelCalls: 100, maxProcedureCalls: 100,
+        sourceOrigins: upstreamSourceOrigins,
+        sourceReader: (source, signal) => readUpstreamPublicSource(source.target, signal, upstreamSourceOrigins),
+        ...(localBinaryStore ? { localSpecialistFactory: context => new LocalSpecialists({
+          port: context.port, timeoutMs: Math.max(1000, Math.min(120000, context.deadlineAt - Date.now())),
+          readTextArtifact: context.readTextArtifact,
+          writeBinaryArtifact: async (artifact, receipt, control) => {
+            control?.signal?.throwIfAborted();
+            if (createHash("sha256").update(artifact.bytes).digest("hex") !== artifact.sha256 || receipt.sha256 !== artifact.sha256) throw new Error("Specialist binary hash receipt mismatch.");
+            const metadataPath = artifact.path + ".artifact.json";
+            if (await store.get(run.tenantId, request.project ?? config.memoryDefaultProject, metadataPath)) throw new Error("Specialist output metadata already exists; refusing overwrite.");
+            const link = await localBinaryStore.uploadSpecialistArtifact(run.tenantId, request.project ?? config.memoryDefaultProject, run.runId, basename(artifact.path), artifact.bytes, artifact.mediaType, 900000);
+            control?.signal?.throwIfAborted();
+            const metadata = JSON.stringify({kind:"local-specialist-artifact",path:artifact.path,sha256:artifact.sha256,bytes:artifact.bytes.byteLength,mediaType:artifact.mediaType,blobPath:link.blobPath,operation:receipt.operation,inputSha256:receipt.inputSha256},null,2);
+            const written = await store.put(run.tenantId, request.project ?? config.memoryDefaultProject, metadataPath, metadata, "");
+            if (!written.ok || (await store.get(run.tenantId, request.project ?? config.memoryDefaultProject, metadataPath))?.content !== metadata) throw new Error("Specialist binary metadata was not persisted exactly; uploaded blob requires operator reconciliation.");
+          },
+        }) } : {}),
+        ...(localBinaryStore ? { getLocalArtifactReference: async (path, context) => {
+          context.signal.throwIfAborted();
+          const metadataPath = path + ".artifact.json";
+          const stored = await store.get(run.tenantId, request.project ?? config.memoryDefaultProject, metadataPath);
+          if (!stored) throw new Error("Specialist artifact metadata is absent.");
+          const metadata = JSON.parse(stored.content) as {kind?:string;path?:string;sha256?:string;blobPath?:string;mediaType?:string};
+          if (metadata.kind !== "local-specialist-artifact" || metadata.path !== path || !metadata.sha256 || !/^[a-f0-9]{64}$/.test(metadata.sha256) || !metadata.blobPath || !metadata.mediaType) throw new Error("Specialist artifact metadata is invalid.");
+          const link = await localBinaryStore.mintSpecialistArtifactReference(run.tenantId, request.project ?? config.memoryDefaultProject, run.runId, metadata.blobPath, metadata.mediaType, 900000);
+          context.signal.throwIfAborted();
+          return { metadataPath, downloadUrl: link.downloadUrl, expiresAt: link.expiresAt, sha256: metadata.sha256 };
+        } } : {}),
+        requestHumanInput: async () => { throw new Error("Human input must be handled by the durable upstream run service."); },
+        continuation: { save: async () => { throw new Error("Checkpoint must be handled by the durable upstream run service."); } },
+        isActionablePipelineApproved: async () => false,
+      };
+    },
+  }) : undefined;
   return {
     credentials,
     readiness: new CopilotReadiness(credentials, client, options.logger),
+    ...(localBinaryStore ? { localArtifactReference: async (tenantId, project, metadataPath) => {
+      const stored = await store.get(tenantId, project, metadataPath);
+      if (!stored) return undefined;
+      const meta = JSON.parse(stored.content) as {kind?:string;path?:string;blobPath?:string;sha256?:string;mediaType?:string;bytes?:number};
+      if (meta.kind !== "local-specialist-artifact") return undefined;
+      if (!meta.path || metadataPath !== meta.path + ".artifact.json" || !meta.blobPath || !meta.sha256 || !meta.mediaType || !meta.bytes) throw new Error("Invalid specialist artifact metadata.");
+      const runId = meta.blobPath.split("/")[3];
+      const prefix = `specialists/${encodeURIComponent(tenantId)}/${project}/`;
+      if (!meta.blobPath.startsWith(prefix) || !runId) throw new Error("Specialist artifact crosses project or tenant boundary.");
+      const bytes = await localBinaryStore.getObject(meta.blobPath);
+      if (!bytes || bytes.byteLength !== meta.bytes || createHash("sha256").update(bytes).digest("hex") !== meta.sha256) throw new Error("Stored specialist artifact does not match its immutable receipt.");
+      const link = await localBinaryStore.mintSpecialistArtifactReference(tenantId, project, runId, meta.blobPath, meta.mediaType, 900000);
+      return {downloadUrl:link.downloadUrl,expiresAt:link.expiresAt,sha256:meta.sha256,mediaType:meta.mediaType};
+    } } : {}),
+    ...(localBinaryStore ? { localArtifactChunk: async (tenantId: string, project: string, metadataPath: string, offset: number) => {
+      const stored = await store.get(tenantId, project, metadataPath);
+      if (!stored) return undefined;
+      const meta = JSON.parse(stored.content) as {kind?:string;path?:string;blobPath?:string;sha256?:string;mediaType?:string;bytes?:number};
+      if (meta.kind !== "local-specialist-artifact" || !meta.path || metadataPath !== meta.path + ".artifact.json" ||
+          !meta.blobPath?.startsWith(`specialists/${encodeURIComponent(tenantId)}/${project}/`) ||
+          /[?#]/.test(meta.blobPath) || !meta.sha256 || !/^[a-f0-9]{64}$/.test(meta.sha256) ||
+          !Number.isSafeInteger(meta.bytes) || !meta.bytes || meta.bytes > 8000000 ||
+          !["image/png","application/vnd.openxmlformats-officedocument.wordprocessingml.document"].includes(meta.mediaType ?? "")) {
+        throw new Error("Invalid scoped specialist artifact metadata.");
+      }
+      const bytes = await localBinaryStore.getObject(meta.blobPath);
+      if (!bytes || bytes.byteLength !== meta.bytes || createHash("sha256").update(bytes).digest("hex") !== meta.sha256) {
+        throw new Error("Stored binary does not match its immutable receipt.");
+      }
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset >= bytes.byteLength) throw new Error("Binary offset is outside its immutable byte range.");
+      const end = Math.min(bytes.byteLength, offset + 4096);
+      return {base64:Buffer.from(bytes.subarray(offset,end)).toString("base64"),offset,
+        nextOffset:end < bytes.byteLength ? end : null,totalBytes:bytes.byteLength,sha256:meta.sha256,mediaType:meta.mediaType!};
+    } } : {}),
+    ...(upstreamService ? { upstreamRun: async (run, request, workspace, onCompletion) => {
+      const result = await upstreamService.run(run, workspace, request, onCompletion);
+      if (!result) return undefined;
+      const common = { kind: "embedded" as const, matchedRouting: { routingIntent: "upstream", role: "Squad Coordinator", tier: "confirm", parallelEligible: false, council: [], catchAll: true, gates: true }, runId: run.runId, backendId: "copilot-sdk", artifact: result.artifact, usage: result.usage };
+      if (result.status === "held") return { ...common, outcome: "held" as const, reason: "awaiting human input", humanInput: result.humanInput };
+      if (result.status === "failed") return { ...common, outcome: "denied" as const, reason: result.reason };
+      return { ...common, outcome: "completed" as const };
+    } } : {}),
     stageExecutorFactory: (workspace, project, runId, stageOptions) => new CopilotStageExecutor({
       client,
       workspace,
@@ -187,10 +308,14 @@ export function buildCopilotRuntime(
       project: project ?? config.memoryDefaultProject,
       runId,
       model: config.copilot.model || undefined,
+      routing: config.copilot.routing,
       gitHubTokenProvider: credentials.tokenProvider,
       identityStatus: () => credentials.status(),
-      builtInTools: config.copilot.tools.length > 0 ? config.copilot.tools : undefined,
-      allowShell: config.copilot.allowShell,
+      builtInTools: config.copilot.upstreamRuntime
+        ? (config.copilot.tools.length ? config.copilot.tools : ["view", "create", "edit", "web_fetch"])
+          .filter(name => !["bash", "glob", "grep"].includes(name))
+        : config.copilot.tools.length > 0 ? config.copilot.tools : undefined,
+      allowShell: config.copilot.allowShell && !config.copilot.upstreamRuntime,
       delegation: config.copilot.subagents,
       network: { allowedHosts: config.copilot.allowedHosts },
       sandboxWorkspace: config.copilot.sandboxWorkspace,
@@ -361,7 +486,7 @@ export function buildHttpHandler(
   // (off by default). The SAME store instance serves the resource read surface
   // and the write-back tool (wired in later phases).
   const memoryStack = buildSquadMemoryStack(config, logger);
-  const copilotRuntime = buildCopilotRuntime(config, memoryStack, { env, logger });
+  const copilotRuntime = buildCopilotRuntime(config, memoryStack, { env, logger, runStateStore: stack?.runStateStore });
 
   // The deterministic render tool is built only when the operator enabled it. It
   // reuses the Storage managed-identity token (storage.azure.com) for the Blob
@@ -400,6 +525,7 @@ export function buildHttpHandler(
     // run continues in-process, so long stages never hold a request past the 240s
     // ingress ceiling (which MCP clients report as an unreachable connector).
     pollDriveWaitMs: config.workerEnabled ? undefined : POLL_DRIVE_WAIT_MS,
+    leaseMs: config.copilot.upstreamRuntime ? 40 * 60 * 1000 : undefined,
     // Deterministic server-side memory continuity. Built ONLY when the operator
     // enabled both the memory broker and auto-memory; otherwise the engine keeps
     // its previous behavior exactly (memory stays a manual tool).
@@ -430,6 +556,7 @@ export function buildHttpHandler(
         ? new MemoryBackedArtifactStore(memoryStack.memoryStore)
         : undefined,
     stageExecutorFactory: copilotRuntime?.stageExecutorFactory,
+    upstreamRun: copilotRuntime?.upstreamRun,
     logger,
   });
 
@@ -446,6 +573,8 @@ export function buildHttpHandler(
     memoryStore: memoryStack?.memoryStore,
     businessToolsExposed: config.enableBusinessTools,
     readiness: copilotRuntime?.readiness,
+    localArtifactReference: copilotRuntime?.localArtifactReference,
+    localArtifactChunk: copilotRuntime?.localArtifactChunk,
   });
 }
 

@@ -24,7 +24,7 @@ import { RunWorker, WORKER_EXECUTION_OPTIONS } from "./engine/run-worker.js";
 import { AzureOpenAIBackend, modelPricingFromEnvironment } from "./engine/backends/azure-openai.js";
 import { createManagedIdentityTokenProvider } from "./engine/backends/managed-identity-credential.js";
 import { RedactingLogger } from "./observability/logger.js";
-import { buildRunStateStack, buildSquadMemoryStack } from "./server-http.js";
+import { buildCopilotRuntime, buildRunStateStack, buildSquadMemoryStack } from "./server-http.js";
 import { AutoMemory } from "./engine/auto-memory.js";
 import { MemoryBackedArtifactStore } from "./engine/artifact-store.js";
 import { SquadRunRecorder } from "./engine/squad-run-recorder.js";
@@ -65,6 +65,13 @@ export function buildWorker(
   });
 
   const memoryStack = buildSquadMemoryStack(config, logger);
+  const copilot = buildCopilotRuntime(config, memoryStack, { env, logger, runStateStore: stack.runStateStore });
+  const prepareCopilot = async () => {
+    if (!copilot) return;
+    const status = await copilot.credentials.verify();
+    if (!status.ready) throw new Error(`Worker Copilot identity is unavailable: ${status.reason}`);
+    if (!(await copilot.readiness.check()).ready) throw new Error("Worker Copilot sandbox is unavailable.");
+  };
   const artifactStore = config.enableArtifacts && config.memoryAutoEnabled && memoryStack
     ? new MemoryBackedArtifactStore(memoryStack.memoryStore) : undefined;
   const coordinator = new EmbeddedCoordinator({
@@ -83,6 +90,14 @@ export function buildWorker(
       : undefined,
     runRecorder: artifactStore ? new SquadRunRecorder({ store: artifactStore, logger }) : undefined,
     researchArtifacts: artifactStore,
+    stageExecutorFactory: copilot ? (workspace, project, runId, options) => {
+      const executor = copilot.stageExecutorFactory(workspace, project, runId, options);
+      return { execute: async (...args) => { await prepareCopilot(); return executor.execute(...args); } };
+    } : undefined,
+    upstreamRun: copilot?.upstreamRun ? async (...args) => {
+      await prepareCopilot();
+      return copilot.upstreamRun!(...args);
+    } : undefined,
     logger,
   });
 

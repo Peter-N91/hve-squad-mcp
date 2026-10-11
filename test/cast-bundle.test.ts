@@ -17,6 +17,7 @@ import { loadCatalog } from "../src/catalog/catalog.js";
 import { resolvePersonaForRole } from "../src/engine/embedded-roles.js";
 import { loadPersonaForRole } from "../src/engine/persona-loader.js";
 import { MAX_BUNDLE_RESOURCE_CHARS } from "../src/engine/research-runtime.js";
+import { readRosterDocumentation } from "../src/engine/roster-documentation.js";
 
 /**
  * Cast-bundle drift check.
@@ -54,6 +55,8 @@ const BUNDLE_BOUNDARY = join(
 );
 
 interface CastManifest {
+  sourceCommit: string;
+  sourceRef: string;
   linkedPackageVersion: string;
   sourcePackage: string;
   sourceManifestSha256: string;
@@ -93,7 +96,7 @@ function bundledPaths(dir = BUNDLE_ROOT, acc: string[] = []): string[] {
 
 test("every shipped agent and instruction fits the runtime resource budget", () => {
   const paths = bundledPaths().filter((path) =>
-    /^(?:agents|instructions)\//.test(path) && /\.md$/.test(path));
+    /^(?:agents|instructions|references)\//.test(path) && /\.md$/.test(path));
   assert.ok(paths.length > 100, "Check the complete pinned bundle, not a miniature fixture.");
   for (const path of paths) {
     const text = readFileSync(join(BUNDLE_ROOT, path), "utf8");
@@ -109,8 +112,6 @@ test("every shipped agent and instruction fits the runtime resource budget", () 
  * assert different things — and the runner's answer is the one that matters.
  * `npm run snapshot:cast:check` is what confirms this roster is the pinned one.
  */
-const ROSTER_FILE = join(BUNDLE_ROOT, "instructions", "squad", "squad-roster.instructions.md");
-
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
 function collectAgentFiles(dir: string, acc: string[] = []): string[] {
@@ -166,7 +167,7 @@ const isSeparator = (line: string): boolean =>
  * the Profiles / Members-schema tables are never mistaken for cast rows.
  */
 function rosterPrimaryAgents(): { role: string; primary: string }[] {
-  const lines = readFileSync(ROSTER_FILE, "utf8").split(/\r?\n/);
+  const lines = readRosterDocumentation(BUNDLE_ROOT).split(/\r?\n/);
   const primaries: { role: string; primary: string }[] = [];
   let inFence = false;
   for (let i = 0; i < lines.length; i += 1) {
@@ -217,7 +218,7 @@ function slugify(value: string): string {
  * the upstream resource id (`qa-subagent`).
  */
 function optInExternalAgents(): { resources: Set<string>; roles: Set<string> } {
-  const lines = readFileSync(ROSTER_FILE, "utf8").split(/\r?\n/);
+  const lines = readRosterDocumentation(BUNDLE_ROOT).split(/\r?\n/);
   const resources = new Set<string>();
   const roles = new Set<string>();
   let inFence = false;
@@ -329,21 +330,31 @@ test("the manifest counts agree with the recorded files", () => {
   const manifest = readManifest();
   const agents = manifest.files.filter((entry) => entry.path.startsWith("agents/"));
   assert.equal(manifest.agentFileCount, agents.length);
-  assert.equal(manifest.instructionFileCount, manifest.files.filter((entry) => entry.path.startsWith("instructions/")).length);
+  assert.equal(manifest.instructionFileCount, manifest.files.filter((entry) =>
+    entry.path.startsWith("instructions/") || entry.path.startsWith("references/")).length);
   assert.equal(manifest.skillFileCount, manifest.files.filter((entry) => entry.path.startsWith("skills/")).length);
   assert.equal(manifest.dataFileCount, manifest.files.filter((entry) => entry.kind === "data").length);
   assert.equal(manifest.files.length, manifest.agentFileCount + manifest.instructionFileCount + manifest.skillFileCount);
 });
 
-test("active cast contains pinned agents and squad instructions only", () => {
+test("the rolling preview is pinned to an immutable commit, not its moving tag", () => {
   const manifest = readManifest();
-  assert.equal(manifest.linkedPackageVersion, "0.17.0");
+  const pin = JSON.parse(readFileSync(PIN_FILE, "utf8")) as { ref: string; commit: string };
+  assert.equal(pin.ref, "v0.19.0-pre");
+  assert.match(pin.commit, /^[a-f0-9]{40}$/);
+  assert.equal(manifest.sourceRef, pin.ref);
+  assert.equal(manifest.sourceCommit, pin.commit);
+});
+
+test("active cast contains pinned agents, squad instructions and inert references only", () => {
+  const manifest = readManifest();
+  assert.equal(manifest.linkedPackageVersion, "0.18.1");
   assert.equal(manifest.skillCount, 0);
   assert.equal(manifest.skillFileCount, 0);
   assert.equal(manifest.dataFileCount, 0);
   assert.ok(manifest.skills.length === 0);
   assert.ok(manifest.files.every((file) =>
-    file.path.startsWith("agents/") || file.path.startsWith("instructions/")));
+    file.path.startsWith("agents/") || file.path.startsWith("instructions/") || file.path.startsWith("references/")));
   for (const entry of manifest.files) {
     const [source, commit] = entry.source.split("#");
     const [owner, repo] = source.split("/");
@@ -409,12 +420,13 @@ test("runtime supplies native procedures instead of skill-loading tools", () => 
   assert.match(runtime, /RPI Researcher is a read-only source finder/);
 });
 
-test("bundle source provenance is immutable and contains only agent and instruction Markdown", () => {
+test("bundle source provenance is immutable and contains only approved Markdown", () => {
   const manifest = readManifest();
   assert.match(manifest.sourceManifestSha256, /^[a-f0-9]{64}$/);
   assert.ok(manifest.files.every((entry) =>
-    /\.(?:agent|instructions)\.md$/.test(entry.path) &&
-    (entry.path.startsWith("agents/") || entry.path.startsWith("instructions/"))));
+    (/\.(?:agent|instructions)\.md$/.test(entry.path) &&
+      (entry.path.startsWith("agents/") || entry.path.startsWith("instructions/"))) ||
+    /^references\/squad\/(?:roster-catalog|model-routing|model-catalog|economy-mode)\.md$/.test(entry.path)));
   assert.ok(manifest.upstreamCommits["Peter-N91/hve-squad"]);
 });
 

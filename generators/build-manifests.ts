@@ -1,3 +1,5 @@
+import { readRosterDocumentation } from "../src/engine/roster-documentation.js";
+
 /**
  * Manifest generator (build-time).
  *
@@ -183,10 +185,7 @@ export function loadGeneratorInputs(): GeneratorInputs {
     join(githubRoot, "instructions", "squad", "squad-routing.instructions.md"),
     "utf8",
   );
-  const rosterMd = readFileSync(
-    join(githubRoot, "instructions", "squad", "squad-roster.instructions.md"),
-    "utf8",
-  );
+  const rosterMd = readRosterDocumentation(githubRoot);
   const routingRows = parseRoutingRows(routingMd);
   const rosterAgents = parseRosterAgents(rosterMd);
   const squadAgents = readAgentNames(join(githubRoot, "agents", "squad"));

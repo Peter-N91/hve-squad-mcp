@@ -11,6 +11,7 @@
  *         tier, parallel-eligibility) used for classification and per-stage
  *         tier/parallel resolution.
  *   * squad-src/.github/instructions/squad/squad-roster.instructions.md
+ *     + bundled references/squad/roster-catalog.md when present
  *       — the "Cast Catalog" table (role KEY -> Primary Agent `name:`) used as
  *         the role -> agentName resolver. This is exactly the injectable map the
  *         Phase 1 persona loader helpers (`loadPersonaForRosterRole` /
@@ -49,6 +50,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { resolveSquadGithubRoot } from "../paths.js";
+import { readRosterDocumentation } from "./roster-documentation.js";
 import {
   defaultProfileTables,
   INTAKE_VALIDATOR_ROLE,
@@ -155,7 +157,7 @@ export function parseRosterMap(markdown: string): Map<string, string> {
   return map;
 }
 
-/** Load + parse the routing and roster instructions from disk (read-only). */
+/** Load routing instructions and combined roster documentation (read-only). */
 export function loadRoutingTables(githubRoot = resolveSquadGithubRoot()): RoutingTables {
   if (!githubRoot) {
     throw new Error(
@@ -166,10 +168,7 @@ export function loadRoutingTables(githubRoot = resolveSquadGithubRoot()): Routin
     join(githubRoot, "instructions", "squad", "squad-routing.instructions.md"),
     "utf8",
   );
-  const rosterMd = readFileSync(
-    join(githubRoot, "instructions", "squad", "squad-roster.instructions.md"),
-    "utf8",
-  );
+  const rosterMd = readRosterDocumentation(githubRoot);
   return {
     intents: parseRoutingIntents(routingMd),
     rosterMap: parseRosterMap(rosterMd),

@@ -90,6 +90,7 @@ export interface CopilotIdentityStatus {
   /** Why the identity is not ready: the credential itself, or an unreachable runtime. */
   cause?: "credential" | "runtime";
   models?: number;
+  modelIds?: readonly string[];
   premiumRemainingPercent?: number;
 }
 
@@ -170,6 +171,7 @@ export class CopilotCredentials {
           checkedAt,
           reason: exhausted ? "Copilot identity verified; premium request quota is exhausted." : "Copilot identity verified.",
           models: result.models.length,
+          modelIds: [...result.models],
           ...(result.premiumRemainingPercent !== undefined ? { premiumRemainingPercent: result.premiumRemainingPercent } : {}),
         };
       } catch (error) {

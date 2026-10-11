@@ -1,0 +1,11 @@
+import {createHash} from "node:crypto";
+import {execFile} from "node:child_process";
+import {promisify} from "node:util";
+import assert from "node:assert/strict";
+import {LocalSpecialists} from "/opt/hve-bridge/dist/src/engine/copilot/local-specialists.js";
+const run=promisify(execFile),results=[];
+const input=new Map([["docs/report.md","# Specialist test\n\nThis is an isolated advisory report.\n\n- Point one\n- Point two\n"],["docs/diagram.dot","digraph { Browser -> MCP -> Sandbox; }"]]);
+const local=new LocalSpecialists({port:{runServerCommand:async(command)=>{const args=command.split(" ");try{const {stdout}=await run(args[0],args.slice(1),{encoding:"utf8",timeout:120000,maxBuffer:12000000});return {success:true,exitCode:0,output:stdout};}catch(e){return {success:false,exitCode:typeof e.code==="number"?e.code:1,output:e.stdout??""};}}},readTextArtifact:async path=>input.get(path),writeBinaryArtifact:async artifact=>{assert.equal(createHash('sha256').update(artifact.bytes).digest('hex'),artifact.sha256);if(artifact.mediaType==='image/png')assert.equal(Buffer.from(artifact.bytes).subarray(0,8).toString('hex'),'89504e470d0a1a0a');else assert.equal(Buffer.from(artifact.bytes).subarray(0,2).toString(),'PK');results.push({path:artifact.path,mediaType:artifact.mediaType,bytes:artifact.bytes.length,sha256:artifact.sha256});},timeoutMs:120000});
+await local.execute({operation:"markdown-to-docx",inputPath:"docs/report.md",outputPath:"outputs/report.docx"});
+await local.execute({operation:"graphviz-to-png",inputPath:"docs/diagram.dot",outputPath:"outputs/diagram.png"});
+assert.equal(results.length,2);console.log(JSON.stringify({kind:"scoped-local-specialist-smoke",artifacts:results,productionUsage:false}));

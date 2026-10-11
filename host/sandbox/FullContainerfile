@@ -1,0 +1,106 @@
+FROM node:22-bookworm-slim AS bridgebuild
+WORKDIR /build
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY . .
+RUN npm run build
+
+FROM node:24-bookworm-slim AS specialistnode
+
+# Copilot stage sandbox: a disposable Linux "desktop" for one HVE Squad run.
+#
+# Runs the GitHub Copilot runtime in headless server mode. The MCP server's
+# Copilot stage executor connects to it over TCP, owns every permission
+# decision and tool hook, and persists artifacts itself. Nothing in this image
+# holds server credentials, and nothing written here is collected as output.
+#
+# The CLI version is pinned to the one the server's @github/copilot-sdk release
+# was built against (dist/cliVersion.js). Move both together.
+FROM node:22-bookworm-slim
+
+ARG COPILOT_CLI_VERSION=1.0.90
+ARG TARGETARCH
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl git jq python3 ripgrep libicu72 libgssapi-krb5-2 python3-venv python3-pip ffmpeg libreoffice-writer libreoffice-impress poppler-utils graphviz pandoc build-essential unzip zip \
+ && if [ "${TARGETARCH:-$(dpkg --print-architecture)}" = "arm64" ]; then \
+      curl --fail --location --proto =https --tlsv1.2 https://github.com/PowerShell/PowerShell/releases/download/v7.5.3/powershell-7.5.3-linux-arm64.tar.gz -o /tmp/pwsh.tar.gz \
+      && echo "4a6b656dd0e751e82c5df9b9a4245bd1ec7d21de5334afbbd802dfd009595599  /tmp/pwsh.tar.gz" | sha256sum -c - \
+      && mkdir -p /opt/pwsh && tar -xzf /tmp/pwsh.tar.gz -C /opt/pwsh \
+      && chmod +x /opt/pwsh/pwsh && ln -s /opt/pwsh/pwsh /usr/bin/pwsh && rm /tmp/pwsh.tar.gz; \
+    elif [ "${TARGETARCH:-$(dpkg --print-architecture)}" = "amd64" ]; then \
+      curl --fail --location --proto =https --tlsv1.2 https://github.com/PowerShell/PowerShell/releases/download/v7.5.3/powershell_7.5.3-1.deb_amd64.deb -o /tmp/powershell.deb \
+      && echo "e2c7c338281c165cfc2b8ddcaaaf923d49353daef4f1a504dbc8b26b7349ce20  /tmp/powershell.deb" | sha256sum -c - \
+      && apt-get install -y /tmp/powershell.deb && rm /tmp/powershell.deb; \
+    else echo "Unsupported PowerShell architecture: $TARGETARCH" >&2; exit 1; fi \
+ && python3 -m venv /opt/hve-tools \
+ && /opt/hve-tools/bin/pip install --no-cache-dir uv==0.13.0 \
+ && ln -s /opt/hve-tools/bin/uv /usr/local/bin/uv \
+ && npm install -g --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
+ && mkdir -p /opt/hve-browser \
+ && useradd --create-home --uid 10001 agent \
+ && mkdir -p /workspace \
+ && chown agent:agent /workspace
+COPY host/sandbox/package.json host/sandbox/package-lock.json /opt/hve-browser/
+RUN PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --prefix /opt/hve-browser --omit=dev --no-audit --no-fund \
+ && PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright /opt/hve-browser/node_modules/.bin/playwright install --with-deps chromium \
+ && chmod -R a-w /opt/hve-browser /opt/ms-playwright \
+ && rm -rf /var/lib/apt/lists/* \
+ && npm cache clean --force
+
+USER agent
+WORKDIR /workspace
+ENV HOME=/home/agent \
+    XDG_CACHE_HOME=/opt/copilot-cache \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+
+# The CLI unpacks its native runtime into the cache on first start and then
+# loads it as a shared object. Unpack it at build time into an image-owned,
+# read-only location: the writable tmpfs mounts stay noexec, and code running
+# in the sandbox cannot modify the runtime that hosts the session.
+USER root
+RUN mkdir -p /opt/copilot-cache && chown agent:agent /opt/copilot-cache \
+ && su agent -s /bin/sh -c "XDG_CACHE_HOME=/opt/copilot-cache HOME=/tmp/build-home copilot --version" \
+ && rm -rf /tmp/build-home \
+ && chown -R root:root /opt/copilot-cache && chmod -R a-w /opt/copilot-cache
+COPY host/sandbox/entrypoint.sh /usr/local/bin/sandbox-entrypoint
+RUN chown root:root /usr/local/bin/sandbox-entrypoint && chmod 0555 /usr/local/bin/sandbox-entrypoint
+COPY host/sandbox/browser-policy.mjs host/sandbox/browser-runner.mjs /opt/hve-browser-cli/
+COPY host/sandbox/squad-browser /usr/local/bin/squad-browser
+RUN chown -R root:root /opt/hve-browser-cli /usr/local/bin/squad-browser \
+ && chmod 0555 /opt/hve-browser-cli/browser-policy.mjs /opt/hve-browser-cli/browser-runner.mjs /usr/local/bin/squad-browser
+USER agent
+
+USER root
+COPY host/upstream-runtime /opt/hve-upstream
+# ACR CLI excludes .gitignore files from its upload; restore only verified declared bytes.
+COPY host/sandbox/upstream-transport-files.json /tmp/upstream-transport-files.json
+RUN node -e "const fs=require('fs'),c=require('crypto');for(const f of JSON.parse(fs.readFileSync('/tmp/upstream-transport-files.json'))){if(!f.path.endsWith('/.gitignore')||f.path.includes('..'))throw Error('unsafe path');const b=Buffer.from(f.base64,'base64');if(c.createHash('sha256').update(b).digest('hex')!==f.sha256)throw Error('bad hash');fs.writeFileSync('/opt/hve-upstream/'+f.path,b)}"
+COPY host/sandbox/install-specialist-python.mjs /opt/install-specialist-python.mjs
+RUN node /opt/install-specialist-python.mjs
+COPY --from=specialistnode /usr/local/bin/node /usr/local/bin/node
+RUN node --version \
+ && su agent -s /bin/sh -c "XDG_CACHE_HOME=/opt/copilot-cache HOME=/tmp copilot --version"
+COPY host/sandbox/specialist-node/package.json host/sandbox/specialist-node/package-lock.json /opt/hve-specialist-node-lock/
+COPY host/sandbox/install-specialist-node.mjs /opt/install-specialist-node.mjs
+RUN node /opt/install-specialist-node.mjs
+RUN chown -R root:root /opt/hve-upstream && chmod -R a-w /opt/hve-upstream
+COPY host/sandbox/upstream-linux-smoke.mjs /opt/hve-upstream-smoke.mjs
+COPY --from=bridgebuild /build/dist /opt/hve-bridge/dist
+COPY --from=bridgebuild /build/node_modules /opt/hve-bridge/node_modules
+COPY package.json /opt/hve-bridge/package.json
+COPY host/sandbox/upstream-bridge-linux-smoke.mjs /opt/hve-upstream-bridge-smoke.mjs
+COPY host/sandbox/specialist-tools-smoke.mjs /opt/hve-specialist-tools-smoke.mjs
+COPY host/sandbox/local-specialists-linux-smoke.mjs /opt/hve-local-specialists-smoke.mjs
+USER agent
+RUN node /opt/hve-upstream-smoke.mjs && node /opt/hve-upstream-bridge-smoke.mjs && node /opt/hve-specialist-tools-smoke.mjs && node /opt/hve-local-specialists-smoke.mjs
+EXPOSE 4321
+
+# COPILOT_CONNECTION_TOKEN must be supplied at run time; the runtime rejects
+# clients that do not present it. The server supplies the GitHub identity per
+# session; never bake one in or set COPILOT_GITHUB_TOKEN on the container.
+# The entrypoint starts the runtime from an allowlisted environment, so
+# platform-injected variables (such as a managed-identity endpoint) never reach
+# the agent's shell.
+ENTRYPOINT ["/usr/local/bin/sandbox-entrypoint"]

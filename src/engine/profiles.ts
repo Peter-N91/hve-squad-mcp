@@ -17,8 +17,7 @@
  * Nothing here calls a model or touches storage; it is parsing and resolution
  * only, so the whole surface is unit-testable against the bundled cast.
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readRosterDocumentation } from "./roster-documentation.js";
 
 import { resolveSquadGithubRoot } from "../paths.js";
 import { parseTables } from "./markdown-table.js";
@@ -235,17 +234,14 @@ export function parseCastCatalog(markdown: string): Map<string, CastCatalogRow> 
   return cast;
 }
 
-/** Load + parse the profile and deliverable-root tables from disk (read-only). */
+/** Load profile, cast and deliverable-root tables from combined roster documentation. */
 export function loadProfileTables(githubRoot = resolveSquadGithubRoot()): ProfileTables {
   if (!githubRoot) {
     throw new Error(
       "Could not resolve the squad .github root (squad-roster.instructions.md not found).",
     );
   }
-  const rosterMd = readFileSync(
-    join(githubRoot, "instructions", "squad", "squad-roster.instructions.md"),
-    "utf8",
-  );
+  const rosterMd = readRosterDocumentation(githubRoot);
   const profiles = parseProfiles(rosterMd);
   const cast = parseCastCatalog(rosterMd);
   const analyst = cast.get("analyst");

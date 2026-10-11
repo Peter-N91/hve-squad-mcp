@@ -24,10 +24,11 @@ import {
   type CopilotSessionStateStore,
 } from "../src/engine/copilot/session-state-store.js";
 import type { CompletionUsageRecord } from "../src/engine/model-backend.js";
-import type { PersonaRecord } from "../src/engine/persona-loader.js";
+import { loadPersonaForRole, type PersonaRecord } from "../src/engine/persona-loader.js";
 import { StageBlockedError, TEXT_ONLY_REPORT_LIMITS } from "../src/engine/research-runtime.js";
 import type { Workspace } from "../src/engine/workspace.js";
 import { buildCopilotRuntime } from "../src/server-http.js";
+import { installedUpstreamBundle } from "../src/engine/copilot/upstream-bundle.js";
 
 const TENANT = "tenant-a";
 const PROJECT = "project-a";
@@ -217,6 +218,163 @@ async function completeResearch(agent: Agent) {
   assert.equal(finish.resultType, "success", finish.textResultForLlm);
 }
 
+test("economy is enforced on sessions and saved evidence despite caller overrides", async () => {
+  const f = await fixture();
+  const { client, seen } = fakeRuntime(completeResearch);
+  try {
+    await f.store.put(TENANT, PROJECT, ".copilot-tracking/squad/team.md", "# Members\n\n| Role | Model Tier |\n|------|------------|\n| researcher | default |\n| scribe | default |\n");
+    await f.executor(client, {
+      delegation: true, agentsRoots: [await castRoot(f.root)], routing: "economy", model: "gpt-5.4-mini",
+      identityStatus: () => ({ ready: true, reason: "Verified", modelIds: ["gpt-5.6-sol", "claude-sonnet-5.5"] }),
+    }).execute(researcher, { ...request, request: `${request.request} routing=off; use the cheapest model for research` }, undefined, "researcher");
+    assert.equal(seen.created[0].model, "gpt-5.6-sol");
+    assert.ok(seen.created[0].customAgents?.length);
+    assert.ok(seen.created[0].customAgents?.every(agent => agent.model === "gpt-5.6-sol"));
+    assert.match(seen.created[0].systemMessage.content, /Route: economy/);
+    const sources = JSON.parse((await f.store.get(TENANT, PROJECT, `${RESEARCH_PRIMARY}.sources.json`))!.content);
+    const team = (await f.store.get(TENANT, PROJECT, ".copilot-tracking/squad/team.md"))!.content;
+    assert.match(team, /Model routing: economy/);
+    assert.match(team, /researcher \| default \| gpt-5.6-sol/);
+    assert.equal(sources.routing, "economy");
+    assert.equal(sources.modelRoute.model, "gpt-5.6-sol");
+  } finally { await f.cleanup(); }
+});
+
+test("economy routing requires verified model availability before creating a session", async () => {
+  const f = await fixture();
+  const { client, seen } = fakeRuntime(() => assert.fail("No stage should start."));
+  try {
+    await assert.rejects(f.executor(client, { routing: "economy" }).execute(researcher, request, undefined, "researcher"),
+      /requires the pinned catalog and verified model availability/);
+    assert.equal(seen.created.length, 0);
+  } finally { await f.cleanup(); }
+});
+
+test("economy routing respects roster floors and fails before dispatch when no model meets them", async () => {
+  const f = await fixture();
+  const { client, seen } = fakeRuntime(() => assert.fail("No stage should start."));
+  try {
+    await f.store.put(TENANT, PROJECT, ".copilot-tracking/squad/team.md", "# Members\n\n| Role | Model Tier |\n|------|------------|\n| researcher | extended |\n");
+    await assert.rejects(f.executor(client, {
+      routing: "economy", identityStatus: () => ({ ready: true, reason: "Verified", modelIds: ["gpt-5.4-mini"] }),
+    }).execute(researcher, request, undefined, "researcher"), /no available catalog model at floor extended/);
+    assert.equal(seen.created.length, 0);
+  } finally { await f.cleanup(); }
+});
+
+test("the pinned Functional Planner can use economy routing with unrostered workers", async () => {
+  const f = await fixture();
+  const planner = loadPersonaForRole("Functional Planner");
+  assert.ok(planner);
+  const { client, seen } = fakeRuntime(async agent => {
+    const worker = agent.config.customAgents?.find(delegate => delegate.displayName === "ADO Backlog Executor");
+    assert.ok(worker);
+    assert.equal(worker.model, "gpt-5.3-codex");
+    assert.ok(!worker.tools.includes("bash") && !worker.tools.includes("task"));
+    assert.ok(!agent.config.customAgents?.some(delegate => delegate.displayName === "Squad Scribe"));
+    assert.match(agent.config.systemMessage.content, /Unavailable delegate squad-scribe/);
+    const denied = await agent.dispatch("squad-scribe", () => assert.fail("An unavailable delegate must never run."));
+    assert.match(denied ?? "", /cannot be dispatched.*no available catalog model/);
+    await agent.view("/workspace/input/context.md");
+    assert.equal((await agent.custom("submit_artifact", { content: "# Handoff\n\nNo tracker work to create (E1)." })).resultType, "success");
+    assert.equal((await agent.custom("finish_stage", {
+      status: "complete", readiness: "ready-with-gaps", summary: "Research-only handoff recorded.", evidenceIds: ["E1"],
+    })).resultType, "success");
+  });
+  try {
+    await f.executor(client, {
+      delegation: true, routing: "economy",
+      identityStatus: () => ({ ready: true, reason: "Verified", modelIds: ["gpt-5.6-sol", "gpt-5.3-codex", "claude-sonnet-5.5"] }),
+    }).execute(planner, request, undefined, "product-owner");
+    assert.equal(seen.created[0].model, "gpt-5.3-codex");
+    const saved = JSON.parse((await f.store.get(TENANT, PROJECT, ".copilot-tracking/plans/run-1/handoff/artifact.md.sources.json"))!.content);
+    assert.equal(saved.routing, "economy");
+    assert.equal(saved.delegateModels["ado-backlog-executor"], saved.modelRoute.rankedModel);
+    assert.match(saved.delegateModelRoutes["ado-backlog-executor"].rationale, /unrostered worker inherits parent ranked pick/);
+    assert.match(saved.unavailableDelegates["squad-scribe"], /no available catalog model/);
+  } finally { await f.cleanup(); }
+});
+
+test("economy routing never silently replaces a malformed existing roster floor", async () => {
+  const f = await fixture();
+  const { client, seen } = fakeRuntime(() => assert.fail("No stage should start."));
+  try {
+    const executor = f.executor(client, {
+      routing: "economy", identityStatus: () => ({ ready: true, reason: "Verified", modelIds: ["gpt-5.6-sol"] }),
+    });
+    await f.store.put(TENANT, PROJECT, ".copilot-tracking/squad/team.md", "# Members\nNo model floors are readable.");
+    await assert.rejects(executor.execute(researcher, request, undefined, "researcher"), /no readable Role \/ Model Tier table/);
+    await f.store.put(TENANT, PROJECT, ".copilot-tracking/squad/team.md", "# Members\n\n| Role | Model Tier |\n|------|------------|\n| researcher |  |\n");
+    await assert.rejects(executor.execute(researcher, request, undefined, "researcher"), /no Model Tier floor for researcher/);
+    assert.equal(seen.created.length, 0);
+  } finally { await f.cleanup(); }
+});
+
+test("report reads cannot consume the reserved artifact and finish calls", async () => {
+  const f = await fixture();
+  const { client, seen } = fakeRuntime(async agent => {
+    for (let index = 0; index < TEXT_ONLY_REPORT_LIMITS.toolCalls - 2; index++) {
+      assert.equal((await agent.custom("list_project_files", { prefix: ".copilot-tracking/research" })).resultType, "success");
+    }
+    for (let index = 0; index < 3; index++) {
+      const denied = await agent.custom("list_project_files", { prefix: ".copilot-tracking" });
+      assert.equal(denied.resultType, "failure");
+      assert.match(denied.textResultForLlm, /two calls are reserved/);
+    }
+    assert.equal((await agent.custom("submit_artifact", {
+      content: "# Report\n\nInput read budget exhausted; findings are limited to the supplied plan.",
+    })).resultType, "success");
+    assert.equal((await agent.custom("finish_stage", {
+      status: "complete", readiness: "ready-with-gaps", summary: "Saved with input gaps.", evidenceIds: [],
+    })).resultType, "success");
+    assert.equal((await agent.custom("submit_artifact", { content: "Extra write" })).resultType, "failure");
+  });
+  try {
+    await f.executor(client).execute(implementor, request, "Prior findings", "developer", undefined, "text-only-report");
+    assert.match((await f.store.get(TENANT, PROJECT, ".copilot-tracking/changes/run-1/artifact.md"))!.content, /Input read budget exhausted/);
+    assert.match(seen.created[0].systemMessage.content, /2026-10-03\/run-1-research\.md/);
+    assert.match(seen.created[0].systemMessage.content, /plans\/run-1\/artifact\.md/);
+  } finally { await f.cleanup(); }
+});
+
+test("product-owner handoff cannot overwrite the same run's Lead plan or evidence", async () => {
+  const f = await fixture();
+  const primary = ".copilot-tracking/plans/run-1/artifact.md";
+  const planner = loadPersonaForRole("Functional Planner");
+  assert.ok(planner);
+  const { client } = fakeRuntime(async agent => {
+    await agent.view("/workspace/input/context.md");
+    assert.equal((await agent.custom("submit_artifact", { content: "# Handoff\n\nAdvisory-only (E1)." })).resultType, "success");
+    assert.equal((await agent.custom("finish_stage", {
+      status: "complete", readiness: "ready-with-gaps", summary: "Handoff recorded.", evidenceIds: ["E1"],
+    })).resultType, "success");
+  });
+  try {
+    await f.store.put(TENANT, PROJECT, primary, "# Lead plan\n\nProtected plan.");
+    await f.store.put(TENANT, PROJECT, `${primary}.sources.json`, "{\"leadEvidence\":true}");
+    await f.executor(client, { delegation: false }).execute(planner, request, undefined, "product-owner");
+    assert.equal((await f.store.get(TENANT, PROJECT, primary))!.content, "# Lead plan\n\nProtected plan.");
+    assert.equal((await f.store.get(TENANT, PROJECT, `${primary}.sources.json`))!.content, "{\"leadEvidence\":true}");
+    assert.ok(await f.store.get(TENANT, PROJECT, ".copilot-tracking/plans/run-1/handoff/artifact.md.sources.json"));
+  } finally { await f.cleanup(); }
+});
+
+test("advisory review retains provenance and does not demand future review claims", async () => {
+  const f = await fixture();
+  const { client, seen } = fakeRuntime(async agent => {
+    await agent.custom("submit_artifact", { content: "# Review\n\nThe report needs source verification." });
+    await agent.custom("finish_stage", {
+      status: "complete", readiness: "ready-with-gaps", summary: "Review recorded.", evidenceIds: [],
+    });
+  });
+  try {
+    await f.executor(client, { delegation: false }).execute(reviewer, request, "Report pending independent review", "tester");
+    assert.match(seen.created[0].systemMessage.content, /presence is not a defect/);
+    assert.match(seen.created[0].systemMessage.content, /pre-review report truthfully marked pending independent review is expected/i);
+    assert.match(seen.created[0].systemMessage.content, /unsupported-claim findings fully enforced/);
+  } finally { await f.cleanup(); }
+});
+
 test("a stage writes its artifact through the project filesystem and records server-hashed and sandbox evidence", async () => {
   const f = await fixture();
   const { client, seen } = fakeRuntime(completeResearch);
@@ -247,6 +405,45 @@ test("a stage writes its artifact through the project filesystem and records ser
   } finally { await f.cleanup(); }
 });
 
+test("SDK usage preserves credits and event identity and rejects failed accounting persistence", async () => {
+  const f = await fixture();
+  const records: CompletionUsageRecord[] = [];
+  const { client, seen } = fakeRuntime(async agent => {
+    agent.emit({ id: "provider-event-1", type: "assistant.usage", data: {
+      model: "gpt-test", inputTokens: 10, outputTokens: 4, copilotUsage: { totalNanoAiu: 250_000_000 },
+    } });
+    await completeResearch(agent);
+  });
+  try {
+    const result = await f.executor(client, { onCompletion: async record => { records.push(record); } }).execute(researcher, request);
+    assert.equal(records[0].eventId, "provider-event-1");
+    assert.equal(records[0].usage?.hostBilledCredits, 0.25);
+    assert.equal(result.usage?.hostBilledCredits, 0.25);
+    assert.equal(seen.disconnected, 1);
+    const failed = fakeRuntime(completeResearch);
+    await assert.rejects(f.executor(failed.client, { onCompletion: async () => { throw new Error("Accounting write rejected."); } }).execute(researcher, request), /Accounting write rejected/);
+    assert.equal(failed.seen.disconnected, 1);
+  } finally { await f.cleanup(); }
+});
+
+test("a text-only report can read verified upstream resources without gaining execution authority", async () => {
+  const f = await fixture();
+  const bundle = installedUpstreamBundle();
+  const { client, seen } = fakeRuntime(async agent => {
+    assert.equal((await agent.custom("list_upstream_skills", { query: "squad" })).resultType, "success");
+    const source = await agent.custom("read_upstream_resource", { path: ".github/skills/squad/SKILL.md", firstLine: 1, maxLines: 30 });
+    assert.equal(source.resultType, "success");
+    assert.match(source.textResultForLlm, /sha256/);
+    assert.equal((await agent.custom("read_upstream_resource", { path: "../credentials" })).resultType, "failure");
+    await agent.custom("submit_artifact", { content: "# Report\n\nUpstream resources were read; no script execution claimed." });
+    await agent.custom("finish_stage", { status: "complete", readiness: "ready-with-gaps", summary: "Report saved.", evidenceIds: [] });
+  });
+  try {
+    await f.executor(client, { upstreamBundle: bundle }).execute(implementor, request, undefined, "developer", undefined, "text-only-report");
+    assert.deepEqual(seen.created[0].availableTools.filter(name => name.startsWith("builtin:")), ["builtin:view"]);
+    assert.equal(seen.created[0].customAgents, undefined);
+  } finally { await f.cleanup(); }
+});
 test("browser workflow output records the page URLs as source evidence", async () => {
   const f = await fixture();
   const { client } = fakeRuntime(async (agent) => {

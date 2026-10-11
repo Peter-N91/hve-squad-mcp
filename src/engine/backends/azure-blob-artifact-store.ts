@@ -219,6 +219,41 @@ export class AzureBlobArtifactStore {
     return new Uint8Array(await response.arrayBuffer());
   }
 
+  /** Local specialist binaries use the same private storage channel, never a sandbox credential. */
+  async uploadSpecialistArtifact(
+    tenantId: string, project: string, runId: string, name: string, bytes: Uint8Array, contentType: string, ttlMs: number,
+  ): Promise<RenderArtifactLink> {
+    if (!tenantId || !/^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/.test(project) || !/^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/.test(runId) ||
+        !/^[A-Za-z0-9][A-Za-z0-9._-]{0,160}\.(?:docx|png)$/.test(name) || !bytes.byteLength || bytes.byteLength > 8000000 ||
+        !Number.isSafeInteger(ttlMs) || ttlMs < 60000 || ttlMs > 3600000) throw new Error("Invalid scoped local-specialist artifact upload.");
+    const expected = name.endsWith(".png") ? "image/png" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    if (contentType !== expected) throw new Error("Local-specialist MIME type does not match its file extension.");
+    const magic = Buffer.from(bytes).subarray(0, 8);
+    if (name.endsWith(".png") ? magic.toString("hex") !== "89504e470d0a1a0a" : magic.subarray(0, 2).toString() !== "PK") throw new Error("Local-specialist binary format check failed.");
+    const blobPath = `specialists/${encodeURIComponent(tenantId)}/${project}/${runId}/${randomUUID()}/${name}`;
+    await this.putObject(blobPath, bytes, contentType);
+    const start = new Date(Date.now() - 300000), expiry = new Date(Date.now() + ttlMs);
+    const key = await this.getUserDelegationKey(start, expiry);
+    const sas = this.mintDownloadSas(blobPath, key, start, expiry);
+    this.logger?.registerSecret(sas);
+    this.logger?.info("local specialist artifact uploaded", { blobPath });
+    return { downloadUrl: `${this.baseUrl}/${this.container}/${blobPath}?${sas}`, expiresAt: expiry.toISOString(), blobPath, contentType };
+  }
+
+  async mintSpecialistArtifactReference(tenantId: string, project: string, runId: string, blobPath: string, contentType: string, ttlMs: number): Promise<RenderArtifactLink> {
+    const prefix = `specialists/${encodeURIComponent(tenantId)}/${project}/${runId}/`;
+    if (!tenantId || !/^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/.test(project) || !/^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/.test(runId) ||
+        !blobPath.startsWith(prefix) || !/^[a-f0-9-]{36}\/[A-Za-z0-9][A-Za-z0-9._-]{0,160}\.(?:docx|png)$/.test(blobPath.slice(prefix.length)) ||
+        !Number.isSafeInteger(ttlMs) || ttlMs < 60000 || ttlMs > 3600000) throw new Error("Invalid scoped local-specialist download reference.");
+    const expected = blobPath.endsWith(".png") ? "image/png" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    if (expected !== contentType) throw new Error("Specialist download MIME type does not match its immutable path.");
+    const start = new Date(Date.now() - 300000), expiry = new Date(Date.now() + ttlMs);
+    const key = await this.getUserDelegationKey(start, expiry);
+    const sas = this.mintDownloadSas(blobPath, key, start, expiry);
+    this.logger?.registerSecret(sas);
+    return { downloadUrl: `${this.baseUrl}/${this.container}/${blobPath}?${sas}`, expiresAt: expiry.toISOString(), blobPath, contentType };
+  }
+
   /** Ask the service for a user-delegation key valid over [start, expiry]. */
   private async getUserDelegationKey(start: Date, expiry: Date): Promise<UserDelegationKey> {
     const url = `${this.baseUrl}/?restype=service&comp=userdelegationkey`;

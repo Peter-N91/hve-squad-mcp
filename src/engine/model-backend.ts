@@ -94,6 +94,11 @@ export interface BackendUsage {
   costBasis?: "configured_estimate";
   /** Known configured estimate; may be incomplete when `costStatus` is `incomplete`. */
   estimatedCostUsd?: number;
+  /** Copilot service-reported per-request AI credits, not a configured estimate or invoice. */
+  hostBilledCredits?: number;
+  billedCompletionCount?: number;
+  unreportedBillingCompletions?: number;
+  billingStatus?: "complete" | "incomplete" | "unavailable";
 }
 
 type UsageNumberField =
@@ -102,6 +107,7 @@ type UsageNumberField =
   | "reasoningTokens"
   | "cacheReadTokens"
   | "cacheWriteTokens"
+  | "hostBilledCredits"
   | "estimatedCostUsd";
 
 function sumReported(
@@ -134,6 +140,8 @@ export function aggregateBackendUsage(
   let pricedCompletionCount = 0;
   let incompletelyPricedCompletionCount = 0;
   let unpricedCompletionCount = 0;
+  let billedCompletionCount = 0;
+  let unreportedBillingCompletions = 0;
   for (const usage of usages) {
     const represented = usage.completionCount ?? 1;
     completionCount += represented;
@@ -153,6 +161,10 @@ export function aggregateBackendUsage(
     incompletelyPricedCompletionCount += incompletelyPriced;
     unpricedCompletionCount += usage.unpricedCompletionCount ??
       Math.max(0, represented - priced - incompletelyPriced);
+    billedCompletionCount += usage.billedCompletionCount ??
+      (usage.hostBilledCredits === undefined ? 0 : represented);
+    unreportedBillingCompletions += usage.unreportedBillingCompletions ??
+      (usage.hostBilledCredits === undefined ? represented : 0);
   }
 
   const estimatedCostUsd = sumReported(usages, "estimatedCostUsd");
@@ -161,6 +173,8 @@ export function aggregateBackendUsage(
   const reasoningTokens = sumReported(usages, "reasoningTokens");
   const cacheReadTokens = sumReported(usages, "cacheReadTokens");
   const cacheWriteTokens = sumReported(usages, "cacheWriteTokens");
+  const hostBilledCredits = sumReported(usages, "hostBilledCredits");
+  const hasBilling = usages.some(usage => usage.billingStatus !== undefined || usage.hostBilledCredits !== undefined);
   const costStatus = completionCount > 0 &&
     pricedCompletionCount === completionCount &&
     incompletelyPricedCompletionCount === 0 &&
@@ -184,6 +198,12 @@ export function aggregateBackendUsage(
     incompletelyPricedCompletionCount,
     unpricedCompletionCount,
     costStatus,
+    ...(hasBilling ? {
+      ...(hostBilledCredits !== undefined ? { hostBilledCredits } : {}),
+      billedCompletionCount, unreportedBillingCompletions,
+      billingStatus: billedCompletionCount > 0 && unreportedBillingCompletions === 0
+        ? "complete" as const : billedCompletionCount > 0 ? "incomplete" as const : "unavailable" as const,
+    } : {}),
     ...(estimatedCostUsd !== undefined
       ? {
           estimatedCostUsd,

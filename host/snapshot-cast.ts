@@ -70,6 +70,8 @@ const FETCH_CONCURRENCY = 8;
 interface Pin {
   package: string;
   version: string;
+  ref?: string;
+  commit?: string;
 }
 
 /** One `<owner>/<repo>/<path>[#<ref>]` entry from the package's `apm.yml`. */
@@ -200,6 +202,12 @@ function readPin(): Pin {
   const pin = JSON.parse(readFileSync(PACKAGE_PIN_PATH, "utf8")) as Pin;
   if (!pin.package || !pin.version) {
     throw new Error(`${PACKAGE_PIN_PATH} must declare both "package" and "version".`);
+  }
+  if (pin.commit && !/^[a-f0-9]{40}$/i.test(pin.commit)) {
+    throw new Error("The cast commit pin must be a full SHA.");
+  }
+  if (pin.ref && !pin.commit) {
+    throw new Error("An explicit cast ref requires an immutable commit pin.");
   }
   return pin;
 }
@@ -396,8 +404,8 @@ async function mapWithConcurrency<T, R>(
 }
 
 async function resolveBundle(pin: Pin): Promise<Resolution> {
-  const tag = `v${pin.version}`;
-  const sourceCommit = await resolveCommit(pin.package, tag);
+  const tag = pin.ref ?? `v${pin.version}`;
+  const sourceCommit = pin.commit ?? await resolveCommit(pin.package, tag);
   const apmYaml = await fetchText(rawUrl(pin.package, sourceCommit, "apm.yml"));
 
   // Enforce the version LINK: the tag we resolve MUST declare the pinned version,
@@ -469,6 +477,18 @@ async function resolveBundle(pin: Pin): Promise<Resolution> {
     }
   }
 
+  if (pin.ref) {
+    for (const name of ["roster-catalog.md", "model-routing.md", "model-catalog.md", "economy-mode.md"]) {
+      const path = `squad-src/.github/skills/squad/references/${name}`;
+      const dest = `references/squad/${name}`;
+      validateBundlePath(dest);
+      if (byDest.has(dest)) throw new Error(`Duplicate routing reference destination: ${dest}.`);
+      const file = { slug: pin.package, path, dest, commit: sourceCommit };
+      byDest.set(dest, file);
+      planned.push(file);
+    }
+  }
+
   if (!planned.some((file) => file.dest.startsWith("agents/"))) {
     throw new Error("apm.yml yielded no agent personas — the manifest layout changed.");
   }
@@ -531,7 +551,7 @@ function buildManifest(pin: Pin, resolution: Resolution, generatedAt: string): C
     generatedBy: "host/snapshot-cast.ts",
     sourcePackage: pin.package,
     linkedPackageVersion: pin.version,
-    sourceRef: `v${pin.version}`,
+    sourceRef: pin.ref ?? `v${pin.version}`,
     sourceCommit: resolution.sourceCommit,
     sourceManifestSha256: resolution.sourceManifestSha256,
     upstreamCommits: Object.fromEntries(
@@ -539,7 +559,8 @@ function buildManifest(pin: Pin, resolution: Resolution, generatedAt: string): C
     ),
     generatedAt,
     agentFileCount: agents.length,
-    instructionFileCount: resolution.files.filter((file) => file.dest.startsWith("instructions/")).length,
+    instructionFileCount: resolution.files.filter((file) =>
+      file.dest.startsWith("instructions/") || file.dest.startsWith("references/")).length,
     skillFileCount: resolution.files.filter((file) => file.dest.startsWith("skills/")).length,
     dataFileCount: resolution.files.filter((file) => isDeclarativeDataFile(file.dest)).length,
     skillCount: resolution.skills.length,
@@ -554,12 +575,13 @@ function buildManifest(pin: Pin, resolution: Resolution, generatedAt: string): C
       source: `${file.slug}/${file.path}#${file.commit}`,
       ...(isDeclarativeDataFile(file.dest) ? { kind: "data" as const } : {}),
     })),
-    note: "Only pinned agent charters and instruction files are bundled. Agent Skill resources are not bundled or executable in this runtime; native server procedures and artifact validators replace those dependencies. Provenance is preserved for every bundled file. Code execution and deployment remain unavailable.",
+    note: "Only pinned agent charters, instruction files and inert routing references are bundled. Agent Skill resources are not bundled or executable in this runtime; native server procedures and artifact validators replace those dependencies. Provenance is preserved for every bundled file. Code execution and deployment remain unavailable.",
   };
 }
 
 function writeBundle(resolution: Resolution, manifest: CastManifest): void {
   // Clean the generated subtrees so a removed agent does not linger.
+  rmSync(join(CAST_ROOT, "references"), { recursive: true, force: true });
   rmSync(CAST_AGENTS, { recursive: true, force: true });
   rmSync(CAST_INSTRUCTIONS, { recursive: true, force: true });
   rmSync(join(CAST_ROOT, "skills"), { recursive: true, force: true });

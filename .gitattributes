@@ -19,3 +19,6 @@ test/fixtures/rpi-templates/** text eol=lf
 # The sandbox image runs these files on Linux; a CRLF shebang (`#!/bin/sh\r`)
 # makes the launcher fail with "not found".
 host/sandbox/** text eol=lf
+
+# Preserve upstream Git-blob bytes, including binary skill assets.
+host/upstream-runtime/** -text

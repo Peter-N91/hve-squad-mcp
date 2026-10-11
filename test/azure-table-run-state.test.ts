@@ -21,6 +21,9 @@ import { AesGcmFieldCipher, type FieldCipher } from "../src/engine/field-cipher.
 import { isRunClaimable, type HumanInputState, type RunStateStore } from "../src/engine/run-state.js";
 import type { MemoryBlobWriter } from "../src/engine/backends/overflow-squad-memory.js";
 import { encodeAdvisoryCheckpoint, decodeAdvisoryCheckpoint } from "../src/engine/advisory-checkpoint.js";
+import { attributeCompletion, usageFromCompletionRecords } from "../src/engine/model-backend.js";
+import { copilotUsageFor } from "../src/engine/copilot/copilot-usage.js";
+import { StoreAdvisoryPersistence } from "../src/engine/advisory-run-store.js";
 
 /**
  * A minimal in-memory Table Storage backend behind an injectable `fetch`. Supports
@@ -764,6 +767,26 @@ test("Azure Table store multi-replica: a verdict written by one instance is visi
   assert.equal(read?.councilVerdict?.class, "Go-With-Conditions");
   assert.deepEqual(read?.history, SAMPLE_HISTORY);
   assert.deepEqual(read?.completionUsage, completionUsage);
+});
+
+test("Copilot credits remain visible after a failed run and a fresh Azure Table replica", async () => {
+  const table = new FakeTable(), key = randomBytes(32);
+  const a = storeOn(table, new AesGcmFieldCipher(key));
+  const run = await a.create({ tenantId: "t", toolId: "squad_run" });
+  const persistence = new StoreAdvisoryPersistence(a, run.runId);
+  await persistence.recordAttributedCompletion(attributeCompletion({
+    eventId: "sdk-usage-1", backendId: "copilot-sdk", attempt: 1, outcome: "completed",
+    usage: copilotUsageFor({ inputTokens: 100, outputTokens: 20, copilotUsage: { totalNanoAiu: 250_000_000 } }),
+  }, { runId: run.runId, stage: "Squad Coordinator", actor: "Squad Coordinator" }));
+  await a.update(run.runId, { status: "failed", failureReason: "upstream_execution_failed" });
+  const b = storeOn(table, new AesGcmFieldCipher(key));
+  const saved = await b.get(run.runId);
+  const usage = usageFromCompletionRecords(saved?.completionUsage);
+  assert.equal(saved?.status, "failed");
+  assert.equal(usage?.hostBilledCredits, 0.25);
+  assert.equal(usage?.billingStatus, "complete");
+  assert.equal(usage?.inputTokens, 100);
+  assert.equal(usage?.estimatedCostUsd, undefined);
 });
 
 test("listClaimable uses portable single-status filters and merges held/running candidates", async () => {

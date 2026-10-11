@@ -35,6 +35,9 @@ COPY --from=build /app/generated ./generated
 # produced reproducibly by `npm run snapshot:cast` and drift-checked by
 # test/cast-bundle.test.ts; see host/cast/README.md for the pinned SHA.
 COPY host/cast/.github ./.github
+COPY host/upstream-runtime ./upstream-runtime
+COPY host/sandbox/upstream-transport-files.json /tmp/upstream-transport-files.json
+RUN node -e "const fs=require('fs'),c=require('crypto');for(const f of JSON.parse(fs.readFileSync('/tmp/upstream-transport-files.json'))){if(!f.path.endsWith('/.gitignore')||f.path.includes('..'))throw Error('unsafe path');const b=Buffer.from(f.base64,'base64');if(c.createHash('sha256').update(b).digest('hex')!==f.sha256)throw Error('bad hash');fs.writeFileSync('/app/upstream-runtime/'+f.path,b)}"
 # squad_render_pptx (opt-in via SQUAD_MCP_ENABLE_RENDER_PPTX): the deterministic
 # python-pptx build toolchain. lxml/Pillow/PyYAML come from Alpine prebuilt wheels
 # (no musl compilation); python-pptx is pip-installed. LibreOffice/poppler/Copilot

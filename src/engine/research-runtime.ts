@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { convert } from "html-to-text";
 
 import { resolveSquadGithubRoot } from "../paths.js";
+import { advisoryStageWriteRoot } from "./advisory-stage-paths.js";
 import { AdvisoryBundle, BundleLookupError, BundleResourceError } from "./advisory-bundle.js";
 import { validatePlanArtifacts, validateResearchArtifact } from "./advisory-contracts.js";
 import { ARTIFACT_MAX_CHARS, assertSafeArtifactPath, isUtf16Boundary, type SquadArtifactStore } from "./artifact-store.js";
@@ -195,10 +196,17 @@ export const TEXT_ONLY_REPORT_CHARTER = [
 // On an agentic runtime each tool round trip is a model call, and the minimum
 // path (read research, read plan, write the report, finish) needs 4-6.
 export const TEXT_ONLY_REPORT_LIMITS = {
-  deadlineMs: 90_000,
-  modelCalls: 10,
-  toolCalls: 12,
+  deadlineMs: 180_000,
+  modelCalls: 16,
+  toolCalls: 32,
 } as const;
+
+export const ADVISORY_REPORT_REVIEW_CONTRACT = [
+  "# Advisory report review scope",
+  "Review the exact stored report for factual accuracy, usable tests, source support, scope, and honest gaps. This native pipeline produces an advisory report before this independent review, not a published or business-approved final edition.",
+  "Server-issued E-number evidence citations are mandatory provenance under this execution contract. They must accompany usable source URLs, but their presence is not a defect or a failed publication gate. Do not require their removal to approve factual content; a separate reader-facing export may omit them only while retaining the canonical evidence-bearing report.",
+  "A pre-review report truthfully marked pending independent review is expected. Record your verdict in your own review artifact without requiring the earlier immutable report to predict this review, cite a future review hash, or claim approval. Evaluate the final stored report as read now; keep substantive factual, accessibility, test-safety, and unsupported-claim findings fully enforced.",
+].join("\n");
 
 const MAX_FILE_CHARS = Math.min(64_000, ARTIFACT_MAX_CHARS);
 export const ADVISORY_EXECUTION_LIMITS = {
@@ -456,7 +464,7 @@ export class ResearchRuntime implements AdvisoryStageExecutor {
     const research = !council && (role === "researcher" || persona.role === "Squad Researcher");
     const root = (role && deliverableRootFor(role, tables, { date: this.date, squad: request.squad })) ??
       `.copilot-tracking/reviews/${slugForPath(role ?? persona.role)}`;
-    const writeRoot = `${root}/${this.options.runId}/${persona.role === "BRD Builder" ? "brd/" : ""}`;
+    const writeRoot = advisoryStageWriteRoot(root, this.options.runId, role, persona.role);
     const primaryPath = research ? `${root}/${this.options.runId}-research.md` : `${writeRoot}artifact.md`;
     const reportOnly = executionMode === "text-only-report";
     const planner = !council && (role === "lead" || persona.role === "Squad Lead");
@@ -641,8 +649,18 @@ export class ResearchRuntime implements AdvisoryStageExecutor {
       const outbound: BackendRequest = {
         ...prompt,
         system: [prompt.system, ...actor.skillTexts.values(), RUNTIME_CONTRACT,
+          ...(!actor.council && roleKey === "tester" ? [ADVISORY_REPORT_REVIEW_CONTRACT] : []),
+          ...(actor.reportOnly ? [
+            "# Text-only report inputs and finalization",
+            `Use the supplied prior-stage findings and this run's canonical research and plan files: ${deliverableRootFor("researcher", defaultProfileTables(), { date: this.date, squad: request.squad })}/${this.options.runId}-research.md and ${deliverableRootFor("lead", defaultProfileTables(), { date: this.date, squad: request.squad })}/${this.options.runId}/artifact.md. Do not list the whole project or read older runs unless the current inputs require it.`,
+            "The final two tool calls are reserved for write_artifact and finish_stage. When the read budget is exhausted, do not retry: write the report from evidence actually read, state remaining gaps, then finish. Returning text without the saved artifact does not complete the report.",
+          ] : []),
           `# Server-owned actor assignment\n${assignment}`].join("\n\n"),
-        messages, tools, toolChoice: "required", signal: this.signal,
+        messages,
+        tools: actor.reportOnly && this.reportInputBudgetExhausted(actor, true)
+          ? tools.filter(tool => tool.name === "write_artifact" || tool.name === "finish_stage")
+          : tools,
+        toolChoice: "required", signal: this.signal,
       };
       assertBackendPreflight(outbound);
       this.consumeCall("model", actor);
@@ -690,6 +708,16 @@ export class ResearchRuntime implements AdvisoryStageExecutor {
       }
       messages.push({ role: "assistant", content: completion.text, toolCalls: calls, responseItems: completion.responseItems });
       for (const call of calls) {
+        if (actor.reportOnly && ["list_artifacts", "read_artifact"].includes(call.name) &&
+            this.reportInputBudgetExhausted(actor)) {
+          messages.push({
+            role: "tool", toolCallId: call.id, content: JSON.stringify({
+              status: "blocked", reason: "report_read_budget",
+              detail: "Input reads are exhausted; two calls are reserved for write_artifact and finish_stage. Stop reading, save the report from available evidence, and finish with gaps stated explicitly.",
+            }),
+          });
+          continue;
+        }
         this.consumeCall("tool", actor);
         const validate = validators.get(call.name);
         let args: unknown;
@@ -800,6 +828,14 @@ export class ResearchRuntime implements AdvisoryStageExecutor {
       runModelCalls: { used: this.calls, limit: this.options.maxModelCalls ?? ADVISORY_EXECUTION_LIMITS.modelCallsPerRun },
       runToolCalls: { used: this.tools, limit: this.options.maxToolCalls ?? ADVISORY_EXECUTION_LIMITS.toolCallsPerRun },
     };
+  }
+
+  private reportInputBudgetExhausted(actor: Actor, includeModelCalls = false): boolean {
+    const budget = this.executionBudget(actor);
+    return budget.stageToolCalls.used >= budget.stageToolCalls.limit - 2 ||
+      budget.runToolCalls.used >= budget.runToolCalls.limit - 2 ||
+      (includeModelCalls && (budget.stageModelCalls.used >= budget.stageModelCalls.limit - 2 ||
+        budget.runModelCalls.used >= budget.runModelCalls.limit - 2));
   }
 
   private consumeCall(kind: "model" | "tool", actor: Actor): void {

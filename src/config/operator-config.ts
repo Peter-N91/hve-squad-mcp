@@ -304,6 +304,9 @@ export interface CopilotExecutorConfig {
   identityReverifyMs: number;
   /** Model id; empty = the runtime's default for the signed-in identity. */
   model: string;
+  routing: "off" | "economy";
+  /** New Copilot projects use upstream unless disabled; existing native bindings remain native. */
+  upstreamRuntime: boolean;
   /** Built-in tool names; empty = the executor default set. */
   tools: string[];
   /** Let a stage fan out the pinned agents its charter permits as parallel Copilot sub-agents. */
@@ -705,6 +708,9 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
     identityReverifyMs: boundedInteger(env.SQUAD_MCP_COPILOT_IDENTITY_REVERIFY_MS, 600_000, 30_000, 3_600_000,
       "SQUAD_MCP_COPILOT_IDENTITY_REVERIFY_MS"),
     model: (env.SQUAD_MCP_COPILOT_MODEL ?? "").trim(),
+    routing: optionalChoice(env.SQUAD_MCP_COPILOT_ROUTING, ["off", "economy"] as const, "SQUAD_MCP_COPILOT_ROUTING") ?? "off",
+    upstreamRuntime: (optionalChoice(env.SQUAD_MCP_UPSTREAM_RUNTIME_ENABLED, ["true", "false"] as const, "SQUAD_MCP_UPSTREAM_RUNTIME_ENABLED") ??
+      (stageExecutor === "copilot" ? "true" : "false")) === "true",
     tools: splitList(env.SQUAD_MCP_COPILOT_TOOLS),
     subagents: (env.SQUAD_MCP_COPILOT_SUBAGENTS ?? "true").trim().toLowerCase() !== "false",
     allowShell: (env.SQUAD_MCP_COPILOT_ALLOW_SHELL ?? "true").trim().toLowerCase() !== "false",
@@ -712,6 +718,9 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
     sandboxWorkspace: (env.SQUAD_MCP_COPILOT_SANDBOX_WORKSPACE ?? "/workspace").trim(),
     sessionStateDir: (env.SQUAD_MCP_COPILOT_SESSION_STATE_DIR ?? "").trim() || join(tmpdir(), "hve-squad-copilot-sessions"),
   };
+  if (copilot.upstreamRuntime && stageExecutor !== "copilot") {
+    throw new Error("Full upstream runtime requires the Copilot sandbox.");
+  }
   if (stageExecutor === "copilot") {
     if (copilot.cliUrl.length === 0 || copilot.connectionToken.length < 32) {
       throw new Error(

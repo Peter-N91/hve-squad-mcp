@@ -157,6 +157,11 @@ export interface EmbeddedCoordinatorDeps {
   /** Durable tenant/project artifacts for tool-enabled research and advisory stages. */
   researchArtifacts?: SquadArtifactStore;
   /** Trusted host adapter override; never populated from MCP caller arguments. */
+  /** Optional full upstream run path. Undefined result preserves native project behavior. */
+  upstreamRun?: (
+    run: RunState, request: CoordinatorRequest, workspace: Workspace,
+    onCompletion: (record: CompletionUsageRecord) => Promise<void>,
+  ) => Promise<EmbeddedResult | undefined>;
   stageExecutorFactory?: (
     workspace: Workspace,
     project: string | undefined,
@@ -238,6 +243,7 @@ export class EmbeddedCoordinator {
   private readonly runRecorder?: SquadRunRecorder;
   private readonly researchArtifacts?: SquadArtifactStore;
   private readonly stageExecutorFactory?: EmbeddedCoordinatorDeps["stageExecutorFactory"];
+  private readonly upstreamRun?: EmbeddedCoordinatorDeps["upstreamRun"];
   private readonly logger?: RedactingLogger;
   /** Outstanding held runs per tenant, started via startHttpRun (MEDIUM-2). */
   private readonly heldCounts = new Map<string, number>();
@@ -260,6 +266,7 @@ export class EmbeddedCoordinator {
     this.researchArtifacts = deps.researchArtifacts;
     this.stageExecutorFactory = deps.stageExecutorFactory;
     this.logger = deps.logger;
+    this.upstreamRun = deps.upstreamRun;
   }
 
   /**
@@ -375,6 +382,8 @@ export class EmbeddedCoordinator {
         costCurrency: record.usage?.costCurrency,
         costBasis: record.usage?.costBasis,
         costStatus: record.usage?.costStatus ?? "unavailable",
+        hostBilledCredits: record.usage?.hostBilledCredits,
+        billingStatus: record.usage?.billingStatus,
         "gen_ai.operation.name": "chat",
         "gen_ai.response.model": record.model,
         "gen_ai.request.model": record.deployment,
@@ -1248,6 +1257,10 @@ export class EmbeddedCoordinator {
     const matchedRouting = run.toolId === FEDERATION_TOOL_ID ? FEDERATION_ROUTING : EMPTY_ROUTING;
     const workspace = await this.workspaceManager.allocate(run.tenantId);
     try {
+      if (this.upstreamRun) {
+        const result = await this.upstreamRun(run, req, workspace, this.completionRecorder(run.tenantId, run.runId));
+        if (result) return result;
+      }
       const persistence = new StoreAdvisoryPersistence(this.runStateStore, run.runId);
       const recalled = await this.withMemory(run.tenantId, req);
       const checkpoint = run.advisoryCheckpoint ? readAdvisoryCheckpoint(run.advisoryCheckpoint) : undefined;

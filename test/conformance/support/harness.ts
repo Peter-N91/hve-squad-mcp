@@ -68,6 +68,8 @@ export interface HarnessOptions {
   memoryStore?: SquadMemoryStore;
   /** Whether the squad-history read surface is enabled. */
   artifactsEnabled?: boolean;
+  localArtifactReference?: (tenantId: string, project: string, path: string) => Promise<{ downloadUrl: string; expiresAt: string; sha256: string; mediaType: string } | undefined>;
+  localArtifactChunk?: (tenantId: string, project: string, path: string, offset: number) => Promise<{ base64: string; offset: number; nextOffset: number | null; totalBytes: number; sha256: string; mediaType: string } | undefined>;
   /** Whether the business-facing tools are served (default false, as in production). */
   businessToolsExposed?: boolean;
   /** Optional RFC 9728 metadata URL advertised on 401 responses. */
@@ -155,6 +157,8 @@ export function buildHarness(options: HarnessOptions = {}): Harness {
     renderService: options.renderService,
     memoryStore: options.memoryStore,
     artifactsEnabled: options.artifactsEnabled,
+    localArtifactReference: options.localArtifactReference,
+    localArtifactChunk: options.localArtifactChunk,
     businessToolsExposed: options.businessToolsExposed ?? false,
     oauthResourceMetadataUrl: options.oauthResourceMetadataUrl,
     readiness: options.readiness,

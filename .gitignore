@@ -33,6 +33,8 @@ host/infra/*.local.bicepparam
 # Environment files and credential material.
 .env
 .env.*
+# Public template required by the immutable upstream manifest, not deployment credentials.
+!host/upstream-runtime/.github/skills/experimental/mural/.env.example
 *.pem
 *.pfx
 *.p12

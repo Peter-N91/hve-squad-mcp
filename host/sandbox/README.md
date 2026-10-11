@@ -130,7 +130,9 @@ Then point the server at it:
 | `SQUAD_MCP_COPILOT_GITHUB_TOKEN` | identity source: the token itself |
 | `SQUAD_MCP_COPILOT_GITHUB_TOKEN_SOURCE` | optional `env`, `file`, or `command` when several are set |
 | `SQUAD_MCP_COPILOT_IDENTITY_REVERIFY_MS` | how often the identity is re-verified (default 600000) |
-| `SQUAD_MCP_COPILOT_MODEL` | optional model id |
+| `SQUAD_MCP_COPILOT_MODEL` | optional native fixed model when native routing is off |
+| `SQUAD_MCP_UPSTREAM_RUNTIME_ENABLED` | default `true` for Copilot: new projects use upstream after user Init; `false` retains native-only execution |
+| `SQUAD_MCP_COPILOT_ROUTING` | native `off` (default) or `economy`; also proposes ranked or economy at upstream Init, without overriding the user's choice |
 | `SQUAD_MCP_COPILOT_TOOLS` | optional built-in tool list |
 | `SQUAD_MCP_COPILOT_ALLOW_SHELL` | `false` to remove `bash` |
 | `SQUAD_MCP_COPILOT_SUBAGENTS` | `false` to stop stages fanning out pinned agents as sub-agents |
@@ -141,6 +143,43 @@ Then point the server at it:
 The executor also requires `SQUAD_MCP_ENABLE_ARTIFACTS`,
 `SQUAD_MCP_ENABLE_MEMORY`, `SQUAD_MCP_MEMORY_AUTO_ENABLED`, and exactly one
 usable identity source.
+
+## Full upstream execution
+
+The phase-0 sandbox above does not contain upstream script or converter
+prerequisites. For upstream execution, build the full image from the repository
+root and use the override:
+
+```bash
+docker compose -f host/sandbox/compose.yaml -f host/sandbox/compose.upstream.yaml up --build
+```
+
+The full image includes immutable upstream resources, PowerShell 7.5.3, Node 24,
+lockfile-installed specialist environments, and two scoped converters:
+Markdown to DOCX and DOT to PNG. Image builds run actual bundle, PowerShell
+bridge, dependency and converter smoke tests. The server image also carries
+the same verified upstream bundle. Deploy the server and sandbox as a matching
+pair; do not replace the runtime revision while a run is active.
+
+Enable the remote pipeline and durable run-state store as well as the memory
+settings above. The first upstream run pauses for explicit user Init. The user
+confirms the profile, naming `skip`, approval channel `in-chat`, and one of:
+ranked (fit-first), economy (eligible implementation discounts), or manual
+(one offered available model ID). Every mode retains model floors, independent
+review, human gates and scoped storage. Missing required capabilities halt
+instead of being silently skipped.
+
+Local binary publication additionally requires the server's existing Blob
+storage/render configuration (`SQUAD_MCP_ENABLE_RENDER_PPTX=true` and the storage
+account/container settings). The sandbox never receives the storage credential.
+Canonical `.artifact.json` metadata carries output hashes and byte counts;
+authenticated `squad_history` reads can retrieve short-lived downloads or
+bounded base64 chunks with `binaryOffset`. Verify complete SHA-256 and byte
+counts after reconstruction. Binary export is not proof of visual accessibility.
+
+Installed dependencies are not blanket execution authority. Only named script
+operations and the two converters are callable. External authenticated
+connectors remain explicitly deferred; Windows automation is unsupported.
 
 ## Sub-agent fan-out
 

@@ -1,0 +1,6 @@
+services:
+  copilot-sandbox:
+    build:
+      context: ../..
+      dockerfile: host/sandbox/FullContainerfile
+    image: hve-squad-copilot-sandbox:upstream

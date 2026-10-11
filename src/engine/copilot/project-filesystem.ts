@@ -61,7 +61,7 @@ export interface ProjectWrite {
   origin: "file_tool" | "submit_artifact" | "sandbox_disk";
 }
 
-export const PROJECT_TEXT_EXTENSIONS = /\.(md|json|csv|txt|ya?ml)$/i;
+export const PROJECT_TEXT_EXTENSIONS = /\.(md|json|csv|txt|ya?ml|dot)$/i;
 const MAX_LISTED = 500;
 
 function sha256(content: string): string {
@@ -163,7 +163,7 @@ export class ProjectFileSystem implements SessionFsProviderPort {
     if (!this.canWrite(rel)) {
       const scope = JSON.stringify(this.options.writeScope);
       this.refusals.push(`Write outside the stage write scope refused: ${rel}`);
-      throw fsError("EACCES", `${rel} is outside this stage's write scope ${scope} or is not a text artifact (.md, .json, .csv, .txt, .yaml).`);
+      throw fsError("EACCES", `${rel} is outside this stage's write scope ${scope} or is not a text artifact (.md, .json, .csv, .txt, .yaml, .dot).`);
     }
     if (content.length > ARTIFACT_MAX_CHARS) throw fsError("EFBIG", `${rel} exceeds ${ARTIFACT_MAX_CHARS} characters.`);
     const { tenantId, project, store } = this.options;

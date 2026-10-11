@@ -348,6 +348,10 @@ const SQUAD_HISTORY_DESCRIPTOR = {
         minimum: 0,
         description: "For op='read' only: UTF-16 character offset. Start at 0 for exact bounded pages, then use nextOffset. Preserve content verbatim and verify the assembled UTF-8 sha256 and totalBytes.",
       },
+      binaryOffset: {
+        type: "integer", minimum: 0,
+        description: "For op='read' of a .artifact.json binary metadata path: retrieve authenticated base64 bytes in bounded chunks. Start at 0, continue at nextOffset until null, verify totalBytes and sha256. Do not combine with text offset.",
+      },
     },
   },
 };
@@ -649,6 +653,8 @@ export interface HttpMcpHandlerDeps {
   memoryStore?: SquadMemoryStore;
   /** Whether the squad ledger is enabled, which is what `squad_history` reads. */
   artifactsEnabled?: boolean;
+  localArtifactReference?: (tenantId: string, project: string, metadataPath: string) => Promise<{downloadUrl:string;expiresAt:string;sha256:string;mediaType:string} | undefined>;
+  localArtifactChunk?: (tenantId: string, project: string, metadataPath: string, offset: number) => Promise<{base64:string;offset:number;nextOffset:number|null;totalBytes:number;sha256:string;mediaType:string} | undefined>;
   /**
    * Whether the business-facing tools (`squad_business_plan`, `squad_backlog`) are
    * served. Default FALSE. They are advisory (one embedded dispatch, no impactful
@@ -695,9 +701,13 @@ export class HttpMcpHandler {
    * tree to browse, and advertising the tool would promise an empty answer.
    */
   private readonly history?: SquadHistory;
+  private readonly localArtifactReference?: HttpMcpHandlerDeps["localArtifactReference"];
+  private readonly localArtifactChunk?: HttpMcpHandlerDeps["localArtifactChunk"];
 
   constructor(deps: HttpMcpHandlerDeps) {
     this.router = deps.router;
+    this.localArtifactReference = deps.localArtifactReference;
+    this.localArtifactChunk = deps.localArtifactChunk;
     this.authenticator = deps.authenticator;
     this.embedded = deps.embedded;
     this.sessions = deps.sessions;
@@ -1352,6 +1362,15 @@ export class HttpMcpHandler {
         }
         const op = typeof record.op === "string" ? record.op : "index";
         try {
+          if (record.binaryOffset !== undefined) {
+            if (op !== "read" || record.offset !== undefined || !path.endsWith(".artifact.json") ||
+                typeof record.binaryOffset !== "number" || !Number.isSafeInteger(record.binaryOffset) || record.binaryOffset < 0) {
+              throw new HistoryReadRangeError();
+            }
+            const binary = await this.localArtifactChunk?.(auth.tenantId, project, path, record.binaryOffset);
+            return { status: 200, headers: baseHeaders,
+              body: rpcResult(message.id, structuredToolResult({ project, path, found: Boolean(binary), ...(binary ? { binary } : {}) })) };
+          }
           if (record.offset !== undefined &&
             (op !== "read" || typeof record.offset !== "number" ||
               !Number.isSafeInteger(record.offset) || record.offset < 0)) {
@@ -1369,6 +1388,8 @@ export class HttpMcpHandler {
           }
           if (op === "read") {
             const artifact = await this.history.read(auth.tenantId, project, path);
+            const download = artifact && path.endsWith(".artifact.json")
+              ? await this.localArtifactReference?.(auth.tenantId, project, path) : undefined;
             return {
               status: 200,
               headers: baseHeaders,
@@ -1380,6 +1401,7 @@ export class HttpMcpHandler {
                         project,
                         path: artifact.path,
                         updatedAt: artifact.updatedAt,
+                        ...(download ? {download} : {}),
                       },
                       artifact.content,
                     ),
