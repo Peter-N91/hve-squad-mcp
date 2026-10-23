@@ -8,15 +8,15 @@
           "clientId": "<ENTRA_CLIENT_ID>",
           "redirectMode": "Global",
           "scopes": [
-            "api://<ENTRA_CLIENT_ID>/Squad.Research",
-            "api://<ENTRA_CLIENT_ID>/Squad.Plan",
-            "api://<ENTRA_CLIENT_ID>/Squad.Review",
-            "api://<ENTRA_CLIENT_ID>/Squad.Architect",
+            "<ENTRA_RESOURCE_URI>/Squad.Research",
+            "<ENTRA_RESOURCE_URI>/Squad.Plan",
+            "<ENTRA_RESOURCE_URI>/Squad.Review",
+            "<ENTRA_RESOURCE_URI>/Squad.Architect",
             "offline_access"
           ],
           "properties": {
             "IsFirstParty": "False",
-            "AzureActiveDirectoryResourceId": "api://<ENTRA_CLIENT_ID>",
+            "AzureActiveDirectoryResourceId": "<ENTRA_RESOURCE_URI>",
             "IsOnbehalfofLoginSupported": false
           },
           "customParameters": {
@@ -27,7 +27,7 @@
               "value": "<ENTRA_TENANT_ID>"
             },
             "resourceUri": {
-              "value": "api://<ENTRA_CLIENT_ID>"
+              "value": "<ENTRA_RESOURCE_URI>"
             },
             "enableOnbehalfOfLogin": {
               "value": "false"

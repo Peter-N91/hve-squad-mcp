@@ -1,10 +1,46 @@
+# ============================================================================
+# DEPRECATED — DO NOT COPY. Superseded by the real, in-repo pipeline:
+#     .github/workflows/infra-validate.yml   (lint + gated what-if)
+#     .github/workflows/infra-deploy.yml     (verified-SHA resolve, approval
+#                                              gate, digest-pinned build/deploy)
+# This file CANNOT run from this repository (the `.workflow.yml` suffix keeps
+# it out of `.github/workflows/`) and is kept only as a corrected, clearly
+# labeled historical reference — it is NOT scanned as a live workflow, and its
+# own patterns below are exactly what the two real workflows above replace.
+#
+# Insecure patterns in THIS file that the real pipeline does not repeat — do
+# not copy any of them into a new workflow:
+#   1. `azure/login@v2` — an UNPINNED, floating major-version tag. The real
+#      pipeline pins `azure/login` to an exact commit SHA
+#      (a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0).
+#   2. `secrets.AZURE_CLIENT_ID` / `secrets.AZURE_TENANT_ID` /
+#      `secrets.AZURE_SUBSCRIPTION_ID` — a client id, tenant id, and
+#      subscription id are NOT secrets; storing them as GitHub secrets hides
+#      non-sensitive configuration from the audit trail available to GitHub
+#      variables. The real pipeline reads these as repository/environment
+#      `vars.*` (GitHub variable/secret naming convention, coordinator
+#      decision D2) and reserves `secrets.*` for the one true secret
+#      (`RUN_ENCRYPTION_KEY`).
+#   3. `squad-mcp/`-prefixed build and deploy paths (`squad-mcp/host/...`) —
+#      these do not exist in THIS repository's own layout (there is no
+#      `squad-mcp/` subdirectory here); they describe a different consumer
+#      repo's folder layout, not this one.
+#   4. `${{ github.event.inputs.imageTag }}` interpolated DIRECTLY inside a
+#      `run:` block (the `az acr build`/`az deployment` steps below) — a
+#      template-injection-prone pattern. The real pipeline passes every value
+#      through `env:` and never interpolates `${{ }}` inside `run:`.
+#
+# ----------------------------------------------------------------------------
+# Original scope note (unchanged; still accurate for what this file IS):
+#
 # Deploy hve-squad MCP to Azure Container Apps — REFERENCE TEMPLATE (not an active workflow here)
 #
 # Scope
 #   Documentation-only reference workflow. It does NOT run from this repo (the
 #   `.workflow.yml` suffix keeps it out of `.github/workflows/`). To activate it,
 #   copy to your consumer repo's `.github/workflows/deploy-aca.yml`, replace every
-#   <PLACEHOLDER>, review, and commit.
+#   <PLACEHOLDER>, review, and commit — but first read the insecure-patterns list
+#   above and fix each one; do not copy this file verbatim.
 #
 # Identity
 #   Authenticates with Entra workload-identity federation via azure/login@v2 (OIDC)
@@ -12,6 +48,10 @@
 #   AZURE_SUBSCRIPTION_ID with the azure-scaffold Setup-AzureOidc script (see
 #   host/oidc/README.md). The image is built in ACR (no local Docker needed) and
 #   the Container App is deployed from host/infra/main.bicep.
+#
+#   For THIS repository, use host/infra/bootstrap/bootstrap.bicep (Step 1 of
+#   host/RUNBOOK.md) to provision the two real CI identities instead — see
+#   host/oidc/README.md.
 
 name: Deploy hve-squad MCP (ACA)
 

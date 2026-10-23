@@ -1,6 +1,9 @@
 using './main.bicep'
 
-// Replace every <PLACEHOLDER> with your tenant's values before deploying.
+// Local / manual-deploy template. Replace every <PLACEHOLDER> with your tenant's
+// values before deploying (copy to an uncommitted main.local.bicepparam). CI/CD
+// deploys use environments/prod.bicepparam, which reads every value from
+// environment variables instead (see environments/README.md).
 // No secret belongs here — the model token comes from managed identity at runtime.
 
 param containerImage = '<REGISTRY>.azurecr.io/hve-squad-mcp:latest'
@@ -9,7 +12,12 @@ param authClientId = '<ENTRA_CLIENT_ID>'
 param authOpenIdIssuer = 'https://login.microsoftonline.com/<ENTRA_TENANT_ID>/v2.0'
 
 param squad = {
-  audience: 'api://<ENTRA_CLIENT_ID>'
+  // v2 access tokens (bootstrap/entra-app.bicep sets requestedAccessTokenVersion 2)
+  // carry the app's client id GUID in `aud`, and the server compares `aud` by exact
+  // match (src/auth/entra.ts). So the audience is the bare appId GUID — the
+  // entra-app `tokenAudience` output. An environment still on a v1-token app
+  // registration keeps its own 'api://<ENTRA_CLIENT_ID>' value here.
+  audience: '<ENTRA_CLIENT_ID>'
   allowedOrigins: 'https://copilotstudio.microsoft.com'
   allowedIssuers: 'https://login.microsoftonline.com/<ENTRA_TENANT_ID>/v2.0'
   allowedTenants: '<ENTRA_TENANT_ID>'
@@ -25,7 +33,13 @@ param squad = {
 param minReplicas = 0
 param maxReplicas = 5
 param budgetAmountUsd = 500
-param budgetStartDate = '2026-07-01'
+// Budget start date. Leave unset for the FIRST deployment (defaults to the first
+// day of the current UTC month). Azure rejects any change to an existing budget's
+// start date, so after the first deployment pin the date it was created with:
+//   az resource show --ids <rg-id>/providers/Microsoft.Consumption/budgets/<namePrefix>-budget \
+//     --query properties.timePeriod.startDate -o tsv    # e.g. 2026-07-01T00:00:00Z
+// An environment first deployed from an earlier version of this file pins '2026-07-01'.
+// param budgetStartDate = '<YYYY-MM>-01'
 param budgetAlertEmails = [
   '<ALERT_EMAIL>'
 ]
@@ -61,3 +75,25 @@ param memoryDefaultProject = 'default'
 
 // The business-facing tools (squad_business_plan, squad_backlog).
 param enableBusinessTools = false
+
+// Role assignments this template can manage for the app identity. Both default
+// false so an environment that already granted them by hand sees NO new role
+// assignment. A NEW environment sets both true (and sets containerRegistryResourceId
+// / openAiAccountName). An EXISTING environment follows the RUNBOOK migration:
+// delete the manual grant first, then flip the flag.
+param manageAcrPullAssignment = false
+param manageOpenAiRoleAssignment = false
+// param containerRegistryResourceId = '/subscriptions/<SUB_ID>/resourceGroups/<ACR_RG>/providers/Microsoft.ContainerRegistry/registries/<REGISTRY>'
+// param openAiAccountName = '<AOAI_RESOURCE>'
+// param openAiResourceGroupName = '<AOAI_RG>'
+
+// Azure OpenAI: 'existing' keeps squad.modelEndpoint / squad.modelDeployment as-is
+// (no new resource, no spend). 'create' provisions the account + deployments —
+// real per-token spend (K1: indicative default GlobalStandard, capacity 10; the
+// $500 budget above may not cover it). See tests/fixtures/create.bicepparam.
+param openAiMode = 'existing'
+
+// The run-encryption key is NEVER set here. CI supplies it from a secret, e.g.
+//   --parameters runEncryptionKeyBase64="$SQUAD_INFRA_RUN_ENCRYPTION_KEY_B64"
+// or an uncommitted *.local.bicepparam uses
+//   param runEncryptionKeyBase64 = readEnvironmentVariable('SQUAD_INFRA_RUN_ENCRYPTION_KEY_B64', '')
