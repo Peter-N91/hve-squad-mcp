@@ -22,7 +22,7 @@ type SquadConfig = {
   allowedOrigins: string
   @description('Comma-separated permitted Entra issuers.')
   allowedIssuers: string
-  @description('Comma-separated permitted tenant ids (empty = any validated tenant).')
+  @description('Comma-separated permitted tenant ids. Per-user mode requires exactly ONE entry matching linkEntraTenantId. Empty permits any validated tenant only in legacy non-per-user mode.')
   allowedTenants: string
   @description('JWKS endpoint used to validate Entra tokens.')
   jwksUri: string
@@ -77,7 +77,7 @@ param maxReplicas int = 5
 param budgetAmountUsd int = 500
 
 @description('First day of the budget month (YYYY-MM-01).')
-param budgetStartDate string = '2026-07-01'
+param budgetStartDate string = utcNow('yyyy-MM-01')
 
 @description('Email addresses that receive the 70/90/100% budget alerts (COST-2).')
 param budgetAlertEmails array
@@ -99,6 +99,69 @@ param runTableName string = 'squadruns'
 @description('Base64-encoded 32-byte key for AES-256-GCM encryption of request/context at rest (MEDIUM-3). Empty = platform-only at-rest encryption.')
 @secure()
 param runEncryptionKeyBase64 string = ''
+
+@description('Optional Key Vault secret URI for the run/artifact encryption key. Prefer this over supplying the secure key parameter. Grant the app identity Secrets User on that vault.')
+param runEncryptionKeySecretUri string = ''
+
+@description('Additional accepted audience aliases of the SAME resource app. Both ACA and application validation use this list.')
+param additionalAudiences string[] = []
+
+@description('JSON object mapping EVERY accepted audience to its allowed client ids. Required in per-user mode. No wildcard or omitted audience.')
+param allowedClientsJson string = ''
+
+@description('Opt-in per-user GitHub. Requires copilot executor, durable pipeline + worker, table memory + auto-memory + artifacts, tenant/issuer/client restrictions and distinct encryption keys. No Graph backend.')
+param enablePerUserGithub bool = false
+
+@description('Public https origin (no path). Empty uses the ACA app domain. Register callbacks for this exact origin.')
+param publicBaseUrl string = ''
+param githubClientId string = ''
+param githubWebBaseUrl string = 'https://github.com'
+param githubApiBaseUrl string = 'https://api.github.com'
+param linkEntraClientId string = ''
+@description('Tenant-specific browser sign-in authority, never common or organizations. Per-user mode requires exactly one squad.allowedTenants entry matching this tenant, with its issuer/JWKS. Broader host auth-config reach does not enable multi-tenant linking.')
+param linkEntraTenantId string = ''
+@description('Key Vault secret URIs, not secret values. The managed identity needs Secrets User on each source vault. Versioned URIs allow controlled rollout and rollback.')
+param githubClientSecretUri string = ''
+param linkEntraClientSecretUri string = ''
+param githubLinkKeySecretUri string = ''
+@description('Current credential/flow encryption key ID. Retain old keys during rotation until all grants and flows are re-encrypted or expire.')
+param githubLinkKeyId string = 'current'
+@description('Optional Key Vault secret URI containing a JSON object of previous key IDs to base64 keys. Never put that JSON in parameters.')
+param githubLinkOldKeysSecretUri string = ''
+param githubLinkTableName string = 'squadgithublinks'
+param githubLinkFlowTableName string = 'squadgithublinkflows'
+
+@allowed(['builtin', 'copilot'])
+@description('Stage execution backend. Default preserves the built-in executor. Copilot requires the separately deployed authenticated headless runtime.')
+param stageExecutor string = 'builtin'
+param copilotCliUrl string = ''
+@description('REQUIRED for a Copilot worker: a DISTINCT headless runtime endpoint owned only by that worker execution. Never point web and worker at one SDK filesystem owner.')
+param workerCopilotCliUrl string = ''
+@description('Copilot worker schedule, separate from the builtin worker. Must exceed workerReplicaTimeoutSeconds plus runtime cleanup; never overlap owners.')
+param copilotWorkerCron string = '0 * * * *'
+@description('Worker execution timeout. Minimum 2700s (45min) leaves cleanup headroom above the 2100s upstream deadline and 2400s server lease. Schedule and manual executions must not overlap one runtime owner.')
+@minValue(2700)
+param workerReplicaTimeoutSeconds int = 2700
+param copilotConnectionTokenSecretUri string = ''
+@description('Legacy shared GitHub identity for non-per-user copilot mode ONLY. Not used or emitted in per-user mode.')
+param copilotGithubTokenSecretUri string = ''
+param copilotModel string = ''
+@allowed(['off', 'economy'])
+param copilotRouting string = 'off'
+param upstreamRuntimeEnabled bool = true
+param copilotTools string = ''
+param copilotSubagents bool = true
+param copilotAllowShell bool = true
+param copilotAllowedHosts string = ''
+param copilotSandboxWorkspace string = '/workspace'
+@minValue(30000)
+@maxValue(3600000)
+param copilotIdentityReverifyMs int = 600000
+@description('Durable Azure Files mount for broker session snapshots. The external Copilot runtime needs its own durable workspace/session volume as well.')
+param copilotSessionStateDir string = '/mnt/copilot-sessions'
+@description('EXISTING AzureFile storage binding in this ACA environment, registered separately by an operator. Required when stageExecutor=copilot (including per-user). ACA rejects deployment if the binding does not exist. This template never handles storage account keys.')
+@minLength(1)
+param copilotSessionStorageName string = 'copilot-sessions'
 
 @description('Cron schedule for the worker ACA Job drain pass (default every 5 minutes).')
 param workerCron string = '*/5 * * * *'
@@ -180,10 +243,13 @@ var storageBlobDataContributorRoleId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
 // Table: async run state (WI-06) and/or the table-backed memory broker.
 // Blob:  rendered decks and/or the memory overflow channel (WI-03).
 var enableMemoryTable = enableMemory && memoryBackend == 'table'
-var enableTableStorage = enableRemotePipeline || enableMemoryTable
+var enableTableStorage = enableRemotePipeline || enableMemoryTable || enablePerUserGithub
 var enableBlobStorage = enableRenderPptx || enableMemoryOverflow
+var enableCopilot = stageExecutor == 'copilot'
 var enableStorage = enableTableStorage || enableBlobStorage
 var storageAccountName = toLower(take('${namePrefix}st${uniqueString(resourceGroup().id)}', 24))
+var allAudiences = union([squad.audience], additionalAudiences)
+var hasRunEncryption = !empty(runEncryptionKeySecretUri) || !empty(runEncryptionKeyBase64)
 
 // The storage account name is a single env entry shared by the run-state store,
 // the memory broker, the render tool, and the overflow channel — emitted once so
@@ -203,10 +269,24 @@ var pipelineEnv = enableRemotePipeline
   : []
 
 // Encryption key passed as an ACA secret (never a plain env value).
-var encryptionSecrets = !empty(runEncryptionKeyBase64)
-  ? [ { name: 'run-encryption-key', value: runEncryptionKeyBase64 } ]
-  : []
-var encryptionEnv = (enableRemotePipeline && !empty(runEncryptionKeyBase64))
+var encryptionSecrets = concat(
+  hasRunEncryption ? [{
+    name: 'run-encryption-key'
+    keyVaultUrl: !empty(runEncryptionKeySecretUri) ? runEncryptionKeySecretUri : runEncryptionSecret!.properties.secretUriWithVersion
+    identity: identity.id
+  }] : [],
+  enablePerUserGithub ? [
+    { name: 'github-client-secret', keyVaultUrl: githubClientSecretUri, identity: identity.id }
+    { name: 'link-entra-client-secret', keyVaultUrl: linkEntraClientSecretUri, identity: identity.id }
+    { name: 'github-link-key', keyVaultUrl: githubLinkKeySecretUri, identity: identity.id }
+  ] : [],
+  (enablePerUserGithub && !empty(githubLinkOldKeysSecretUri)) ? [
+    { name: 'github-link-old-keys', keyVaultUrl: githubLinkOldKeysSecretUri, identity: identity.id }
+  ] : [],
+  enableCopilot ? [{ name: 'copilot-connection-token', keyVaultUrl: copilotConnectionTokenSecretUri, identity: identity.id }] : [],
+  (enableCopilot && !enablePerUserGithub) ? [{ name: 'copilot-github-token', keyVaultUrl: copilotGithubTokenSecretUri, identity: identity.id }] : []
+)
+var encryptionEnv = (enableRemotePipeline && hasRunEncryption)
   // checkov:skip=CKV_SECRET_6:The high-entropy match is the NAME of an environment variable, not a secret. Its value is a secretRef into the Container App secret store, which is the pattern this check exists to encourage.
   ? [ { name: 'SQUAD_MCP_RUN_ENCRYPTION_KEY_B64', secretRef: 'run-encryption-key' } ]
   : []
@@ -275,7 +355,7 @@ var advisoryAutopilotEnv = (enableRemotePipeline && enableAdvisoryAutopilot)
 
 // The memory broker shares the run-state encryption key: on the table backend it
 // encrypts `content` at rest exactly as the run store protects request/context.
-var memoryEncryptionEnv = (enableMemory && !enableRemotePipeline && !empty(runEncryptionKeyBase64))
+var memoryEncryptionEnv = (enableMemory && !enableRemotePipeline && hasRunEncryption)
   ? [ { name: 'SQUAD_MCP_RUN_ENCRYPTION_KEY_B64', secretRef: 'run-encryption-key' } ]
   : []
 
@@ -285,10 +365,76 @@ var businessEnv = enableBusinessTools
   ? [ { name: 'SQUAD_MCP_ENABLE_BUSINESS_TOOLS', value: 'true' } ]
   : []
 
+var perUserEnv = enablePerUserGithub ? concat([
+  { name: 'SQUAD_MCP_PER_USER_GITHUB_ENABLED', value: 'true' }
+  { name: 'SQUAD_MCP_PUBLIC_BASE_URL', value: !empty(publicBaseUrl) ? publicBaseUrl : 'https://${namePrefix}-app.${environment.properties.defaultDomain}' }
+  { name: 'SQUAD_MCP_GITHUB_CLIENT_ID', value: githubClientId }
+  { name: 'SQUAD_MCP_GITHUB_CLIENT_SECRET', secretRef: 'github-client-secret' }
+  { name: 'SQUAD_MCP_GITHUB_WEB_URL', value: githubWebBaseUrl }
+  { name: 'SQUAD_MCP_GITHUB_API_URL', value: githubApiBaseUrl }
+  { name: 'SQUAD_MCP_LINK_ENTRA_CLIENT_ID', value: linkEntraClientId }
+  { name: 'SQUAD_MCP_LINK_ENTRA_CLIENT_SECRET', secretRef: 'link-entra-client-secret' }
+  { name: 'SQUAD_MCP_LINK_ENTRA_TENANT_ID', value: linkEntraTenantId }
+  { name: 'SQUAD_MCP_GITHUB_LINK_KEY_B64', secretRef: 'github-link-key' }
+  { name: 'SQUAD_MCP_GITHUB_LINK_KEY_ID', value: githubLinkKeyId }
+  { name: 'SQUAD_MCP_GITHUB_LINK_STORE', value: 'table' }
+  { name: 'SQUAD_MCP_GITHUB_LINK_TABLE', value: githubLinkTableName }
+  { name: 'SQUAD_MCP_GITHUB_LINK_FLOW_TABLE', value: githubLinkFlowTableName }
+], !empty(githubLinkOldKeysSecretUri) ? [
+  { name: 'SQUAD_MCP_GITHUB_LINK_OLD_KEYS', secretRef: 'github-link-old-keys' }
+] : []) : []
+var runtimeEnv = concat([
+  { name: 'SQUAD_MCP_STAGE_EXECUTOR', value: stageExecutor }
+], enableCopilot ? [
+  { name: 'SQUAD_MCP_COPILOT_CONNECTION_TOKEN', secretRef: 'copilot-connection-token' }
+  { name: 'SQUAD_MCP_COPILOT_MODEL', value: copilotModel }
+  { name: 'SQUAD_MCP_COPILOT_ROUTING', value: copilotRouting }
+  { name: 'SQUAD_MCP_UPSTREAM_RUNTIME_ENABLED', value: string(upstreamRuntimeEnabled) }
+  { name: 'SQUAD_MCP_COPILOT_TOOLS', value: copilotTools }
+  { name: 'SQUAD_MCP_COPILOT_SUBAGENTS', value: string(copilotSubagents) }
+  { name: 'SQUAD_MCP_COPILOT_ALLOW_SHELL', value: string(copilotAllowShell) }
+  { name: 'SQUAD_MCP_COPILOT_ALLOWED_HOSTS', value: copilotAllowedHosts }
+  { name: 'SQUAD_MCP_COPILOT_SANDBOX_WORKSPACE', value: copilotSandboxWorkspace }
+  { name: 'SQUAD_MCP_COPILOT_IDENTITY_REVERIFY_MS', value: string(copilotIdentityReverifyMs) }
+  { name: 'SQUAD_MCP_COPILOT_SESSION_STATE_DIR', value: copilotSessionStateDir }
+] : [], (enableCopilot && !enablePerUserGithub) ? [
+  { name: 'SQUAD_MCP_COPILOT_GITHUB_TOKEN_SOURCE', value: 'env' }
+  { name: 'SQUAD_MCP_COPILOT_GITHUB_TOKEN', secretRef: 'copilot-github-token' }
+] : [])
+var webRuntimeEndpointEnv = enableCopilot ? [
+  { name: 'SQUAD_MCP_COPILOT_CLI_URL', value: copilotCliUrl }
+] : []
+var workerRuntimeEndpointEnv = enableCopilot ? [
+  // An identical endpoint must fail startup validation, not connect two owners.
+  { name: 'SQUAD_MCP_COPILOT_CLI_URL', value: workerCopilotCliUrl != copilotCliUrl ? workerCopilotCliUrl : '' }
+] : []
+var clientAllowListEnv = !empty(allowedClientsJson) ? [
+  { name: 'SQUAD_MCP_ALLOWED_CLIENTS', value: allowedClientsJson }
+] : []
+var copilotServerProbes = enableCopilot ? [
+  {
+    type: 'Readiness'
+    httpGet: {
+      path: '/readyz'
+      port: 3000
+    }
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  }
+] : []
+var sessionVolumes = enableCopilot ? [
+  { name: 'copilot-sessions', storageType: 'AzureFile', storageName: copilotSessionStorageName }
+] : []
+var sessionMounts = enableCopilot ? [
+  { volumeName: 'copilot-sessions', mountPath: copilotSessionStateDir }
+] : []
+
 // Base web-app env; pipeline + encryption env are concatenated onto it below.
 var webBaseEnv = [
   { name: 'PORT', value: '3000' }
-  { name: 'SQUAD_MCP_AUDIENCE', value: squad.audience }
+  { name: 'SQUAD_MCP_AUDIENCE', value: join(allAudiences, ',') }
   { name: 'SQUAD_MCP_ALLOWED_ORIGINS', value: squad.allowedOrigins }
   { name: 'SQUAD_MCP_ALLOWED_ISSUERS', value: squad.allowedIssuers }
   { name: 'SQUAD_MCP_ALLOWED_TENANTS', value: squad.allowedTenants }
@@ -347,6 +493,14 @@ resource keyVaultSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01
   }
 }
 
+// Compatibility for callers supplying the secure run key parameter: it still
+// reaches ACA only by a managed-identity Key Vault reference.
+resource runEncryptionSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(runEncryptionKeyBase64) && empty(runEncryptionKeySecretUri)) {
+  parent: keyVault
+  name: 'run-encryption-key'
+  properties: { value: runEncryptionKeyBase64 }
+}
+
 resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
   name: '${namePrefix}-env'
   location: location
@@ -364,6 +518,9 @@ resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
 resource app 'Microsoft.App/containerApps@2024-03-01' = {
   name: '${namePrefix}-app'
   location: location
+  dependsOn: [
+    keyVaultSecretsUser
+  ]
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {
@@ -390,6 +547,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
       ]
     }
     template: {
+      volumes: sessionVolumes
       containers: [
         {
           name: 'hve-squad-mcp'
@@ -398,13 +556,17 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             cpu: json('0.5')
             memory: '1Gi'
           }
-          env: concat(webBaseEnv, storageEnv, pipelineEnv, encryptionEnv, memoryEncryptionEnv, renderEnv, memoryEnv, businessEnv, artifactsEnv, advisoryAutopilotEnv)
+          volumeMounts: sessionMounts
+          env: concat(webBaseEnv, storageEnv, pipelineEnv, encryptionEnv, memoryEncryptionEnv, renderEnv, memoryEnv, businessEnv, artifactsEnv, advisoryAutopilotEnv, perUserEnv, runtimeEnv, webRuntimeEndpointEnv, clientAllowListEnv)
+          probes: copilotServerProbes
         }
       ]
       scale: {
         // COST-3 / ARCH-2: scale-to-zero with HTTP-driven scale-out.
-        minReplicas: minReplicas
-        maxReplicas: maxReplicas
+        // One SDK client owns each external runtime filesystem. Shared Table
+        // state alone does not make a shared Copilot endpoint multi-replica safe.
+        minReplicas: enableCopilot ? min(minReplicas, 1) : minReplicas
+        maxReplicas: enableCopilot ? 1 : maxReplicas
         rules: [
           {
             name: 'http-concurrency'
@@ -432,6 +594,12 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-03-01' = {
     }
     globalValidation: {
       unauthenticatedClientAction: 'Return401'
+      excludedPaths: enablePerUserGithub ? [
+        '/github/link/start'
+        '/github/link/entra-callback'
+        '/github/link/callback'
+        '/github/link/confirm'
+      ] : []
     }
     identityProviders: {
       azureActiveDirectory: {
@@ -441,9 +609,7 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-03-01' = {
           clientId: authClientId
         }
         validation: {
-          allowedAudiences: [
-            squad.audience
-          ]
+          allowedAudiences: allAudiences
         }
       }
     }
@@ -474,6 +640,15 @@ resource tableService 'Microsoft.Storage/storageAccounts/tableServices@2023-05-0
 resource runTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-05-01' = if (enableRemotePipeline) {
   parent: tableService
   name: runTableName
+}
+
+resource githubLinkTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-05-01' = if (enablePerUserGithub) {
+  parent: tableService
+  name: githubLinkTableName
+}
+resource githubLinkFlowTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-05-01' = if (enablePerUserGithub) {
+  parent: tableService
+  name: githubLinkFlowTableName
 }
 
 // Shared-state memory broker table. Separate from the run table: a memory entry is
@@ -539,6 +714,9 @@ resource storageBlobRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
 resource workerJob 'Microsoft.App/jobs@2024-03-01' = if (enableWorker) {
   name: '${namePrefix}-worker'
   location: location
+  dependsOn: [
+    keyVaultSecretsUser
+  ]
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {
@@ -549,11 +727,11 @@ resource workerJob 'Microsoft.App/jobs@2024-03-01' = if (enableWorker) {
     environmentId: environment.id
     configuration: {
       triggerType: 'Schedule'
-      replicaTimeout: 1800
-      replicaRetryLimit: 1
+      replicaTimeout: workerReplicaTimeoutSeconds
+      replicaRetryLimit: enableCopilot ? 0 : 1
       secrets: encryptionSecrets
       scheduleTriggerConfig: {
-        cronExpression: workerCron
+        cronExpression: enableCopilot ? copilotWorkerCron : workerCron
         parallelism: 1
         replicaCompletionCount: 1
       }
@@ -565,6 +743,7 @@ resource workerJob 'Microsoft.App/jobs@2024-03-01' = if (enableWorker) {
       ]
     }
     template: {
+      volumes: sessionVolumes
       containers: [
         {
           name: 'hve-squad-mcp-worker'
@@ -574,7 +753,8 @@ resource workerJob 'Microsoft.App/jobs@2024-03-01' = if (enableWorker) {
             cpu: json('0.5')
             memory: '1Gi'
           }
-          env: concat(webBaseEnv, storageEnv, pipelineEnv, encryptionEnv, memoryEncryptionEnv, memoryEnv, artifactsEnv, advisoryAutopilotEnv, [
+          volumeMounts: sessionMounts
+          env: concat(webBaseEnv, storageEnv, pipelineEnv, encryptionEnv, memoryEncryptionEnv, renderEnv, memoryEnv, businessEnv, artifactsEnv, advisoryAutopilotEnv, perUserEnv, runtimeEnv, workerRuntimeEndpointEnv, clientAllowListEnv, [
             { name: 'SQUAD_MCP_WORKER_ONCE', value: 'true' }
           ])
         }

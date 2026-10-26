@@ -37,6 +37,8 @@ export interface TenantQuotaOptions {
   monthlyCeilingUsd: number;
   /** Clock injection for testing the month rollover (default `Date.now`). */
   now?: () => number;
+  userConcurrency?: number;
+  userMonthlyCeilingUsd?: number;
 }
 
 /** The result of attempting to admit a new dispatch under a tenant's quota. */
@@ -56,11 +58,29 @@ export class TenantQuotaTracker {
   private readonly monthlyCeilingUsd: number;
   private readonly now: () => number;
   private readonly usage = new Map<string, TenantUsage>();
+  private readonly parents = new Map<string, string>();
+  private readonly users: TenantQuotaTracker | undefined;
 
   constructor(options: TenantQuotaOptions) {
     this.concurrency = options.concurrency;
     this.monthlyCeilingUsd = options.monthlyCeilingUsd;
     this.now = options.now ?? Date.now;
+    this.users = options.userConcurrency === undefined ? undefined : new TenantQuotaTracker({
+      concurrency: options.userConcurrency,
+      monthlyCeilingUsd: options.userMonthlyCeilingUsd ?? options.monthlyCeilingUsd,
+      now: options.now,
+    });
+  }
+
+  /** Bind only from verified request claims or a server-persisted run owner. */
+  bindUserPartition(partition: string, authority: string): void {
+    if (!partition || !authority || partition === authority || this.parents.has(authority)) {
+      throw new Error("Invalid quota authority binding.");
+    }
+    const existing = this.parents.get(partition);
+    if (existing && existing !== authority) throw new Error("Quota authority mismatch.");
+    if (!existing && this.parents.size >= 10_000) throw new Error("Quota identity capacity reached.");
+    this.parents.set(partition, authority);
   }
 
   private usageFor(tenantId: string): TenantUsage {
@@ -85,6 +105,14 @@ export class TenantQuotaTracker {
    * when at the cost ceiling (COST-2) or the concurrency cap (SEC-9 / COST-1).
    */
   acquire(tenantId: string): AdmitResult {
+    const parent = this.parents.get(tenantId);
+    if (parent) {
+      const root = this.acquire(parent);
+      if (!root.ok) return root;
+      const user = this.users?.acquire(tenantId);
+      if (user && !user.ok) { root.release(); return user; }
+      return { ok: true, release: () => { root.release(); if (user?.ok) user.release(); } };
+    }
     const usage = this.usageFor(tenantId);
     if (usage.spentUsd >= this.monthlyCeilingUsd) {
       return { ok: false, reason: "cost_ceiling" };
@@ -108,6 +136,12 @@ export class TenantQuotaTracker {
 
   /** Record a configured inference-cost estimate for the process-local ceiling (COST-2). */
   recordCostUsd(tenantId: string, usd: number): void {
+    const parent = this.parents.get(tenantId);
+    if (parent) {
+      this.recordCostUsd(parent, usd);
+      this.users?.recordCostUsd(tenantId, usd);
+      return;
+    }
     if (usd <= 0) {
       return;
     }
@@ -116,11 +150,19 @@ export class TenantQuotaTracker {
 
   /** Current month's spend for a tenant. */
   spentUsd(tenantId: string): number {
+    const parent = this.parents.get(tenantId);
+    if (parent) return this.users?.spentUsd(tenantId) ?? this.spentUsd(parent);
     return this.usageFor(tenantId).spentUsd;
   }
 
   /** Re-check between bounded tool/worker completions without acquiring another slot. */
   checkCost(tenantId: string): void {
+    const parent = this.parents.get(tenantId);
+    if (parent) {
+      this.checkCost(parent);
+      this.users?.checkCost(tenantId);
+      return;
+    }
     if (this.usageFor(tenantId).spentUsd >= this.monthlyCeilingUsd) {
       throw new Error("Tenant model cost ceiling reached.");
     }
@@ -128,6 +170,8 @@ export class TenantQuotaTracker {
 
   /** Current in-flight dispatch count for a tenant. */
   activeCount(tenantId: string): number {
+    const parent = this.parents.get(tenantId);
+    if (parent) return this.users?.activeCount(tenantId) ?? this.activeCount(parent);
     return this.usageFor(tenantId).active;
   }
 }

@@ -2,7 +2,7 @@
  * Copilot Studio connector generator (Step 1.6 — PROD-1, PROD-2, PROD-3, PROD-4).
  *
  * Projects the Copilot Studio MCP connector from the one authored catalog,
- * exposing ONLY the hero tools. It is a build artifact, not a hand-maintained
+ * including advisory, lifecycle and optional identity tools. It is a build artifact, not a hand-maintained
  * file — regenerate it, never edit `generated/copilot-studio-connector/` by hand.
  *
  *   * PROD-1 — the remotely-exposed tools are projected: the four synchronous
@@ -12,8 +12,8 @@
  *   * PROD-2 — the fidelity claim is locked to "squad-guided / embedded" (the
  *     same banner the runtime uses), never "squad-executed"; the generator
  *     refuses to emit copy that contains the forbidden phrase.
- *   * PROD-3 / PROD-4 — only the `copilot-studio` target is produced. No M365 /
- *     Agent 365 and no Cowork manifest is generated or promised here.
+ * This generator produces the Studio target. The separate Cowork generator
+ * consumes connectorTools so both hosts include the same normal-user capabilities.
  *
  * Additive: this is a NEW generator beside `build-manifests.ts`; it does not edit
  * the Phase 0 generator.
@@ -35,6 +35,15 @@ import {
 } from "../src/auth/scopes.js";
 import { SQUAD_GUIDED_BANNER } from "../src/engine/render-embedded.js";
 import { toRemoteToolDescription } from "../src/transports/remote-tool-metadata.js";
+import {
+  SQUAD_APPROVE_DESCRIPTOR,
+  SQUAD_RESPOND_DESCRIPTOR,
+  SQUAD_HISTORY_DESCRIPTOR,
+  SQUAD_MEMORY_SYNC_DESCRIPTOR,
+  SQUAD_GITHUB_STATUS_DESCRIPTOR,
+  SQUAD_GITHUB_CONNECT_DESCRIPTOR,
+  SQUAD_GITHUB_DISCONNECT_DESCRIPTOR,
+} from "../src/transports/http-core.js";
 import { packageRoot } from "../src/paths.js";
 
 const FORBIDDEN_CLAIM = "squad-executed";
@@ -55,6 +64,7 @@ export interface ConnectorHeroTool {
   title: string;
   description: string;
   scope: string | undefined;
+  inputSchema?: Record<string, unknown>;
 }
 
 /**
@@ -175,8 +185,33 @@ export interface ConnectorManifest {  /** The single surface this thin slice tar
   protocol: string;
   /** The tools exposed over the remote boundary (Phase 1b.4). */
   tools: ConnectorHeroTool[];
+  /** Opt-in account tools, separate to preserve the existing advisory manifest contract. */
+  identityTools: ConnectorHeroTool[];
+  /** Non-operator run lifecycle and artifact utilities, from live descriptor authority. */
+  lifecycleTools: ConnectorHeroTool[];
+  /** Documented separately; never added to normal host scopes or tool inventories. */
+  operatorTools: ConnectorHeroTool[];
   /** Explicitly recorded non-targets (PROD-3, PROD-4). */
   deferredTargets: string[];
+}
+
+function projectUtility(descriptor: {
+  name: string; title: string; description: string; inputSchema: Record<string, unknown>;
+}): ConnectorHeroTool {
+  return {
+    name: descriptor.name,
+    title: descriptor.title,
+    description: toRemoteToolDescription(descriptor.name, descriptor.description),
+    inputSchema: descriptor.inputSchema,
+    scope: requiredScopeFor(descriptor.name),
+  };
+}
+
+/** Optional identity tools are included in every projection, but disabled on the server by default. */
+function identityConnectorTools(): ConnectorHeroTool[] {
+  return [
+    SQUAD_GITHUB_STATUS_DESCRIPTOR, SQUAD_GITHUB_CONNECT_DESCRIPTOR, SQUAD_GITHUB_DISCONNECT_DESCRIPTOR,
+  ].map(projectUtility);
 }
 
 /** Build the deterministic connector manifest (the testable summary artifact). */
@@ -205,7 +240,12 @@ export function buildConnectorManifest(catalog: ToolCatalog): ConnectorManifest 
     fidelityClaim: SQUAD_GUIDED_BANNER,
     protocol: PROTOCOL,
     tools,
-    deferredTargets: ["m365", "agent-365", "cowork"],
+    identityTools: identityConnectorTools(),
+    lifecycleTools: [
+      SQUAD_RESPOND_DESCRIPTOR, SQUAD_HISTORY_DESCRIPTOR, SQUAD_MEMORY_SYNC_DESCRIPTOR,
+    ].map(projectUtility),
+    operatorTools: [projectUtility(SQUAD_APPROVE_DESCRIPTOR)],
+    deferredTargets: ["m365", "agent-365"],
   };
 
   // PROD-2: refuse to emit a connector that claims execution rather than guidance.
@@ -215,7 +255,7 @@ export function buildConnectorManifest(catalog: ToolCatalog): ConnectorManifest 
   }
   // PROD-2 / MINOR-1: the embedded connector must not carry the Phase 0 delegated
   // execution copy — that would tell a maker the calling host runs the loop.
-  for (const tool of manifest.tools) {
+  for (const tool of connectorTools(manifest)) {
     if (tool.description.toLowerCase().includes(DELEGATED_PHRASE)) {
       throw new Error(
         `Tool "${tool.name}" still carries delegated-execution copy; ` +
@@ -226,6 +266,20 @@ export function buildConnectorManifest(catalog: ToolCatalog): ConnectorManifest 
   return manifest;
 }
 
+/** Normal host capabilities include lifecycle tools, but never operator approval. */
+export function connectorTools(manifest: ConnectorManifest): ConnectorHeroTool[] {
+  return [...manifest.tools, ...manifest.identityTools, ...manifest.lifecycleTools];
+}
+
+const RESOURCE_URI_PLACEHOLDER = "api://<SQUAD_RESOURCE_CLIENT_ID>";
+
+/** Resource-qualified delegated permissions, never application roles. */
+export function connectorRequestedScopes(manifest: ConnectorManifest): string[] {
+  return [
+    ...new Set(connectorTools(manifest).map((tool) => tool.scope).filter((scope): scope is string => Boolean(scope))),
+  ].map((scope) => `${RESOURCE_URI_PLACEHOLDER}/${scope}`).concat("offline_access");
+}
+
 /** Build the Swagger 2.0 definition Copilot Studio imports as a custom connector. */
 export function buildSwagger(manifest: ConnectorManifest): Record<string, unknown> {
   return {
@@ -234,8 +288,9 @@ export function buildSwagger(manifest: ConnectorManifest): Record<string, unknow
       title: "hve-squad (squad-guided / embedded)",
       description:
         `Calls the hve-squad MCP server (${manifest.fidelityClaim}). The squad runs server-side ` +
-        "under its gates and methodology; this connector exposes " +
-        `${manifest.tools.map((tool) => tool.name).join(", ")}.`,
+        "under its gates and methodology; this connector documents " +
+        `${connectorTools(manifest).map((tool) => tool.name).join(", ")}. ` +
+        "Optional tools are served only when enabled by the operator; live tools/list is authoritative.",
       version: "1.0",
     },
     host: "<SQUAD_MCP_HOST>",
@@ -261,7 +316,7 @@ export function buildSwagger(manifest: ConnectorManifest): Record<string, unknow
         authorizationUrl: "https://login.microsoftonline.com/<ENTRA_TENANT_ID>/oauth2/v2.0/authorize",
         tokenUrl: "https://login.microsoftonline.com/<ENTRA_TENANT_ID>/oauth2/v2.0/token",
         scopes: Object.fromEntries(
-          manifest.tools
+          connectorTools(manifest)
             .filter((tool) => typeof tool.scope === "string")
             .map((tool) => [tool.scope as string, `Invoke ${tool.name}`]),
         ),
@@ -279,16 +334,18 @@ export function buildApiProperties(manifest: ConnectorManifest): Record<string, 
         token: {
           type: "oauthSetting",
           oAuthSettings: {
-            identityProvider: "aadcertificate",
-            clientId: "<ENTRA_CLIENT_ID>",
-            scopes: [
-              ...new Set(
-                manifest.tools.map((tool) => tool.scope).filter((scope): scope is string => Boolean(scope)),
-              ),
-            ],
+            identityProvider: "aad",
+            clientId: "<ENTRA_CONNECTOR_CLIENT_ID>",
+            redirectMode: "Global",
+            scopes: connectorRequestedScopes(manifest),
             properties: {
-              IsFirstParty: "false",
-              AzureActiveDirectoryResourceId: "<SQUAD_MCP_AUDIENCE>",
+              IsFirstParty: "False",
+              AzureActiveDirectoryResourceId: RESOURCE_URI_PLACEHOLDER,
+            },
+            customParameters: {
+              loginUri: { value: "https://login.microsoftonline.com" },
+              tenantId: { value: "<ENTRA_TENANT_ID>" },
+              resourceUri: { value: RESOURCE_URI_PLACEHOLDER },
             },
           },
         },
@@ -301,7 +358,7 @@ export function buildApiProperties(manifest: ConnectorManifest): Record<string, 
 }
 
 function buildReadme(manifest: ConnectorManifest): string {
-  const toolList = manifest.tools
+  const toolList = connectorTools(manifest)
     .map((tool) => `- \`${tool.name}\` — ${tool.title} (scope: \`${tool.scope ?? "n/a"}\`)`)
     .join("\n");
   return [
@@ -315,7 +372,7 @@ function buildReadme(manifest: ConnectorManifest): string {
     "This connector is a **generated build artifact**. Regenerate it with",
     "`npm run generate:connector`; do not edit by hand.",
     "",
-    "## Exposed tools (Phase 1b.4)",
+    "## Normal-user capability inventory",
     "",
     toolList,
     "",
@@ -324,20 +381,78 @@ function buildReadme(manifest: ConnectorManifest): string {
     "> out-of-band approval and to retrieve the finished artifact. `squad_plan` and",
     "> `squad_architect` are synchronous advisory tools (single-stage, no impactful action).",
     "",
-    "## Not targeted in the thin slice",
+    "## Feature availability and identity",
+    "",
+    "The list is a capability inventory, not a promise that every optional tool is enabled.",
+    "`squad_github_status`, `squad_github_connect` and `squad_github_disconnect` require",
+    "`SQUAD_MCP_PER_USER_GITHUB_ENABLED=true` (off by default). The live `tools/list` is authoritative.",
+    "Render, memory, business tools and the remote pipeline also require their operator feature flags.",
+    "",
+    "Use **end-user credentials** for the tool connection in Copilot Studio. Each participant",
+    "must sign in on their own connection. Never use maker-provided/shared credentials: that",
+    "would bind every participant to the maker's Entra identity and GitHub connection.",
+    "The stable owner key is the validated Entra `(tid, oid)`, not email, host or token audience.",
+    "The first production per-user deployment supports one Entra tenant only: exactly one",
+    "allowed tenant matching the browser linking tenant. Guests use their resource-tenant oid.",
+    "Broader host auth-config organization reach does not enable multi-tenant linking.",
+    "Runs pin a stable link generation preserved by normal token refresh;",
+    "disconnect/relink requires new work, even for the same GitHub account.",
+    "An identity failure before execution leaves an eligible run resumable with a five-minute",
+    "retry lease (a poll may report `identity_retry_pending`), not a busy worker loop.",
+    "Identity loss during execution aborts and fails closed, with no automatic replay.",
+    "Not every runtime outage is resumable. New per-user async runs have a seven-day TTL;",
+    "artifact retention is separate.",
+    "Unlink is immediate locally. If GitHub revocation fails, follow the returned manual",
+    "GitHub revoke guidance. Cancellation cannot undo an operation already started.",
+    "",
+    "## Run lifecycle and artifacts",
+    "",
+    "Full upstream `squad_run` pauses for actual Init or a human clarification.",
+    "Poll `squad_status`, show the returned question unchanged and collect the user's answer.",
+    "Call `squad_respond` with that saved `runId`, `questionId` and the human's answer;",
+    "then poll the same run. Responding needs `Squad.Run`, not operator approval.",
+    "Retrieve persisted output with `squad_history` (`Squad.Memory`), enabled with",
+    "memory and artifacts. Use index/list/read; follow exact text or binary page receipts.",
+    "`squad_memory_sync` is a separate batch write requiring `Squad.MemoryWrite`.",
+    "",
+    "## Operator approval (separate, not requested by this connector)",
+    "",
+    ...manifest.operatorTools.map((tool) => `- \`${tool.name}\`: ${tool.description} (operator permission: \`${tool.scope}\`)`),
+    "",
+    "Normal connector scopes and the Cowork inventory intentionally exclude operator approval.",
+    "An authorized operator uses the separately governed approval channel; `squad_respond`",
+    "never approves a held run. Manual MCP onboarding can dynamically discover the authorized",
+    "live surface. The generated `/mcp` protocol route supports both lifecycle tools too.",
+    "",
+    "## Requested delegated scopes",
+    "",
+    ...connectorRequestedScopes(manifest).map((scope) => `- \`${scope}\``),
+    "",
+    "Expose these Squad.* delegated permissions on the resource app and grant consent.",
+    "Application roles are not a substitute for delegated `scp`. No downstream Entra OBO",
+    "exchange is implemented: inbound delegated SSO and separate GitHub OAuth are distinct.",
+    "",
+    "## Other packages",
     "",
     "- M365 / Agent 365 (deferred to Phase 1b — PROD-4)",
-    "- Microsoft Cowork (deferred to Phase 1b pending verification — PROD-3)",
+    "- Cowork uses `generated/cowork-package/`, generated from this same tool inventory.",
     "",
     "## Import",
     "",
-    "1. Replace `<SQUAD_MCP_HOST>`, `<ENTRA_TENANT_ID>`, `<ENTRA_CLIENT_ID>`, and",
-    "   `<SQUAD_MCP_AUDIENCE>` in `apiDefinition.swagger.json` / `apiProperties.json`.",
+    "1. Copy the output to a private operator workspace. Replace `<SQUAD_MCP_HOST>`,",
+    "   `<ENTRA_TENANT_ID>`, `<ENTRA_CONNECTOR_CLIENT_ID>` and `<SQUAD_RESOURCE_CLIENT_ID>`.",
     "2. In Copilot Studio, add a custom connector from the OpenAPI file (or use the MCP",
     "   onboarding wizard) and complete the Entra OAuth 2.0 connection.",
     "3. Enable generative orchestration on the agent so it can call the MCP tools.",
+    "4. The `aad` provider is the custom connector Azure AD OAuth provider, not `aadcertificate`.",
+    "   Set the client secret only in the connector Security UI or secret store, never JSON.",
+    "   Save the connector and register its exact displayed redirect URL on the connector",
+    "   client's Web platform in the target tenant. Do not guess a callback URL.",
+    "5. Set tool authentication to **end-user credentials**, consent as two different test",
+    "   users, and verify distinct `(tid, oid)` ownership before making the agent available.",
     "",
     "See `host/RUNBOOK.md` for the full deploy + import steps and where real spend begins.",
+    "See `docs/reference/per-user-github.md` for both-host prerequisites, validation and rollback.",
     "",
   ].join("\n");
 }
@@ -353,7 +468,7 @@ function buildReadme(manifest: ConnectorManifest): string {
  * them in step with the projected tool list instead of drifting in prose.
  */
 function buildAgentInstructions(manifest: ConnectorManifest): string {
-  const names = new Set(manifest.tools.map((tool) => tool.name));
+  const names = new Set(connectorTools(manifest).map((tool) => tool.name));
   const lines: string[] = [
     "<!-- markdownlint-disable-file -->",
     "# Copilot Studio agent instructions (generated)",
@@ -371,8 +486,39 @@ function buildAgentInstructions(manifest: ConnectorManifest): string {
     "```text",
     "You help business and delivery teams turn ideas into plans and backlogs using the",
     "hve-squad tools. Speak plainly; assume the user is not technical.",
+    "Use the signed-in end user's connection, never maker-provided/shared credentials.",
+    "",
+    "## Optional GitHub connection",
+    "",
+    "These tools exist only when the operator enables per-user GitHub (off by default).",
+    "If a tool returns github_connection_required, call squad_github_connect and show the",
+    "returned browser link unchanged. Tell the user to open it, sign in with their work",
+    "account and authorize GitHub. Then stop. Never ask for tokens or passwords, retry",
+    "execution, or use another tool to bypass the connection requirement.",
+    "Use squad_github_status for a connection check. Use squad_github_disconnect only",
+    "when the user explicitly asks to remove their stored connection.",
+    "After disconnect/relink, start new work: old runs cannot adopt the new link, even",
+    "for the same GitHub account. Normal credential refresh does not change that generation.",
+    "If identity fails before execution, an eligible run may retry after its five-minute",
+    "lease; a poll may report identity_retry_pending. Do not busy-poll or start duplicate work.",
+    "Identity loss during execution aborts with no automatic replay. Do not promise that",
+    "every runtime outage is resumable. Started actions are not undone.",
+    "New per-user async runs expire after seven days; artifact retention is separate.",
+    "Report provider revocation warnings and manual revoke guidance exactly as returned.",
+    "",
+    "## Init, questions and saved artifacts",
+    "",
+    "Full upstream squad_run pauses for actual Init. Poll squad_status and show its",
+    "pending question unchanged. Ask the human; never invent an answer. Call squad_respond",
+    "with the saved runId, questionId and their answer, then poll the SAME run.",
+    "A response is not operator approval. Never call squad_approve on the user's behalf.",
+    "For saved output use squad_history (requires Squad.Memory and enabled artifacts):",
+    "index or list the project, then read returned paths. For exact text pages start offset=0",
+    "and follow nextOffset while keeping etag/sha256 consistent. For binary metadata use",
+    "binaryOffset instead, assemble chunks and verify totalBytes and sha256.",
     "",
     "## Choosing a tool",
+    "",
     "- Business idea, opportunity, or \"write me a business case\" -> squad_business_plan.",
     "- \"Turn this into a backlog / epics / user stories / work items\" -> squad_backlog.",
     "- Investigate or gather evidence -> squad_research.",
@@ -431,7 +577,7 @@ function buildAgentInstructions(manifest: ConnectorManifest): string {
       "   the same project, path='state', the updated summary, and expectedEtag set to",
       "   the etag from step 1. If it reports a conflict, read again and re-apply.",
       "4. To persist several entries at once, use squad_memory_sync instead.",
-      "Memory is scoped to your organization automatically. Never ask the user for a",
+      "Memory is scoped automatically, privately to the owner in per-user mode. Never ask the user for a",
       "tenant, and never put credentials or personal data into memory.",
     );
   }
@@ -515,13 +661,13 @@ export function runCli(argv: string[] = []): number {
       return 1;
     }
     process.stderr.write(
-      `[build-copilot-studio-connector] generated output is current (${manifest.tools.length} tools).\n`,
+      `[build-copilot-studio-connector] generated output is current (${connectorTools(manifest).length} normal capability entries; operator approval separate; live discovery remains authoritative).\n`,
     );
     return 0;
   }
 
   process.stderr.write(
-    `[build-copilot-studio-connector] wrote ${outDir} (${manifest.tools.length} tools; target=${manifest.targets.join(",")}).\n`,
+    `[build-copilot-studio-connector] wrote ${outDir} (${connectorTools(manifest).length} normal capability entries; operator approval separate; target=${manifest.targets.join(",")}).\n`,
   );
   return 0;
 }

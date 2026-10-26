@@ -51,6 +51,10 @@ export class SessionStore {
   /** Create a new session bound to the caller's identity, with a CSPRNG id. */
   create(auth: AuthContext): SessionRecord {
     const now = this.now();
+    for (const [id, session] of this.sessions) {
+      if (now - session.lastSeen > this.idleMs) this.sessions.delete(id);
+    }
+    if (this.sessions.size >= 10_000) throw new Error("MCP session capacity reached.");
     const record: SessionRecord = {
       id: randomBytes(32).toString("base64url"),
       identityKey: identityKeyOf(auth),

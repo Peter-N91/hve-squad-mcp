@@ -199,6 +199,7 @@ export class DurableRunStateStore implements RunStateStore {
       createdAt: now,
       updatedAt: now,
       expiresAt: init.ttlMs !== undefined ? now + init.ttlMs : undefined,
+      ...(init.owner ? { owner: { ...init.owner } } : {}),
     };
     this.writeRun(run);
     return Promise.resolve(run);
@@ -211,7 +212,7 @@ export class DurableRunStateStore implements RunStateStore {
 
   update(
     runId: string,
-    patch: Partial<Omit<RunState, "runId" | "tenantId" | "toolId" | "createdAt">>,
+    patch: Partial<Omit<RunState, "runId" | "tenantId" | "toolId" | "createdAt" | "owner">>,
   ): Promise<RunState | undefined> {
     const existing = this.readRaw(runId);
     if (!existing) {

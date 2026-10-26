@@ -14,15 +14,23 @@ This is the end-to-end sequence the connector README, `host/infra/main.bicep`, a
 the connector generator all point at. It stands up the scale-to-zero Azure
 Container Apps (ACA) app that serves the Streamable HTTP `/mcp` endpoint with
 Entra authentication and managed-identity secrets, then imports the generated
-Copilot Studio connector.
+Copilot Studio connector. Cowork uses the separate generated manifest 1.28 package.
+For the opt-in per-user GitHub deployment, read
+[`docs/reference/per-user-github.md`](../docs/reference/per-user-github.md) first.
+It is the authoritative both-host prerequisite, validation and rollback checklist.
+The default remains the built-in executor with per-user GitHub disabled.
 
-The remote surface exposes six tools: four **synchronous advisory tools**
+The base remote surface has four **synchronous advisory tools**
 `squad_research`, `squad_review`, `squad_plan`, and `squad_architect` (each runs a
 single-stage embedded advisory dispatch and lands no impactful action), plus the
 gated **async advisory pipeline** `squad_run` and the `squad_status` poll utility.
 `squad_run` is exposed but **safe by construction** — it returns a run id and holds
 at the Human Gate, never auto-releasing; `squad_status` advances the run only after
-an out-of-band approval.
+an out-of-band approval. Federation and optional memory, render, business and
+GitHub connection tools are listed in the generated capability inventory.
+The live `tools/list`, feature flags and granted delegated scopes determine
+availability. Both host packages include the three `squad_github_*` tools,
+but those tools are not served until per-user GitHub is explicitly enabled.
 
 ## Where real (small) spend begins
 
@@ -37,6 +45,10 @@ an out-of-band approval.
 The `main.bicep` deployment also provisions a **monthly budget with 70 / 90 / 100%
 alerts** (COST-2). Set `budgetAmountUsd` and `budgetAlertEmails` so you are notified
 before spend grows.
+
+Opt-in Copilot execution also incurs the separately provisioned headless runtime,
+worker, durable session share and Table/Key Vault operation costs. Web scale-to-zero
+does not turn those resources off or make the full deployment free.
 
 ## Prerequisites
 
@@ -306,15 +318,22 @@ The connector files are generated under
 1. In `apiDefinition.swagger.json` and `apiProperties.json`, replace:
    - `<SQUAD_MCP_HOST>` → your `mcpFqdn` from Step 6 (host only, no scheme),
    - `<ENTRA_TENANT_ID>` → your tenant id,
-   - `<ENTRA_CLIENT_ID>` → the `APP_ID` from Step 2,
-   - `<SQUAD_MCP_AUDIENCE>` → `api://<ENTRA_CLIENT_ID>`.
+   - `<SQUAD_RESOURCE_CLIENT_ID>` → the resource `APP_ID` from Step 2,
+   - `<ENTRA_CONNECTOR_CLIENT_ID>` → the Studio OAuth client registration.
+   Work on private copies, never commit filled-in files. The OAuth client and
+   resource app are different roles, even if an operator chooses one registration.
 2. In **Copilot Studio**, add a **custom connector** from the OpenAPI file (or use
    the MCP onboarding wizard). The connector advertises the
    `x-ms-agentic-protocol: mcp-streamable-1.0` `/mcp` operation and the four
-   remotely-exposed tools (`squad_research`, `squad_review`, `squad_run`,
-   `squad_status`).
-3. Complete the **Entra OAuth 2.0** connection, consenting to the `Squad.Research`,
-   `Squad.Review`, and `Squad.Run` scopes from Step 2.
+   live tool surface; the generated inventory also documents optional capabilities.
+3. Use the **`aad` OAuth provider**, not `aadcertificate`. Expose and consent
+   every resource-qualified delegated scope listed in the generated README.
+   The connector requests `offline_access` for refresh. Supply the client secret
+   only through the connector Security UI/secret store, not generated JSON.
+   Save it, copy its exact redirect URL from the Security page and register that
+   Web redirect URI on the connector client's app in the target tenant.
+   Configure the tool connection as **end-user credentials**, never
+   maker-provided/shared credentials. Each user must authenticate as themselves.
 4. **Enable generative orchestration** on the agent so it can call the MCP tools.
 5. Test the synchronous path: ask the agent to "research X with the squad". The
    call should reach `/mcp`, the server runs the hero tool server-side under its
@@ -324,6 +343,17 @@ The connector files are generated under
    operator approval (below), a `squad_status` poll with that run id advances the
    run and returns the finished artifact. The gate never auto-releases across the
    remote boundary.
+
+For the full upstream runtime, the first pause is actual Init, not an invented
+intake summary. Poll `squad_status`, show its pending question and collect the
+human's answer. Call `squad_respond` with the returned `runId` and `questionId`
+and that answer, then poll the same run. This needs `Squad.Run`, not
+`Squad.Operate`. Use `squad_history` (`Squad.Memory`, enabled memory/artifacts)
+to retrieve the persisted output. Batch `squad_memory_sync` additionally needs
+`Squad.MemoryWrite`. The generated Studio protocol route and Cowork inventory
+cover these lifecycle utilities; manual MCP onboarding supports dynamic discovery.
+Operator `squad_approve` is documented separately and is not in normal requested
+scopes. Do not treat an answer or tool consent as operator approval.
 
 ### Releasing a held run (operator action)
 
@@ -350,25 +380,43 @@ route — never by the caller or the model (SEC-6):
   (`SQUAD_MCP_REMOTE_PIPELINE_ENABLED=true`); otherwise it returns 404. It is NOT
   an MCP tool and is not advertised in the connector.
 
+#### Operator-token troubleshooting in strict per-user mode
+
+A human operator uses a delegated **access token** carrying `scp` and `oid`
+plus the assigned `Squad.Operate` app role. An app-only operator access token
+must also carry `idtyp: 'app'`. Configure **idtyp as an access-token optional
+claim** on the relevant Entra registration; configuring an ID-token claim is
+not sufficient.
+
+Roles-only, oid-less tokens without the app-only marker and ID-token-shaped
+credentials are rejected even when they contain Operate. Check access-token
+type/claims, role assignment and the existing audience/client/tenant policy,
+without logging complete tokens. Do not admit ID tokens or broaden the default
+Studio/Cowork consent: `Squad.Operate` remains separate. Token acceptance does
+not waive run ownership or approval checks. Legacy service mode is unchanged.
+
 ### Enabling the pipeline: single-replica vs multi-replica + worker
 
 The async pipeline has two run-state backends, selected by `SQUAD_MCP_RUN_STATE_BACKEND`:
 
 - **`file`** (default) — a local directory (`SQUAD_MCP_RUN_STATE_DIR`). Durable across
-  restarts but **single-replica**: an approval recorded on one replica is not visible
+  restarts only when explicitly on a persistent volume, and **single-replica**: an approval recorded on one replica is not visible
   to others. Keep `minReplicas`/`maxReplicas` at 1 for this backend.
 - **`table`** — **Azure Table Storage**, the cross-replica backend (WI-06). Run records
   are partitioned by tenant; a held→running transition uses an ETag `If-Match`
   compare-and-swap, so exactly one replica drives a run. Approval is stored ON the run
   record, so `POST /admin/approve` on any replica releases the run for all. This is the
-  backend for a **multi-replica / scale-to-zero** deployment.
+  backend for cross-replica state. This does NOT make a shared external Copilot
+  runtime multi-replica safe. The template pins the Copilot web app to one replica
+  and requires a distinct worker runtime endpoint, with no overlapping worker
+  executions. See the per-user deployment checklist before enabling Copilot.
 
 Deploy the pipeline (Table backend) with the IaC parameters:
 
 ```bicep
 enableRemotePipeline: true          // creates the Storage account + table + RBAC, sets SQUAD_MCP_* env
 enableWorker: true                  // deploys the worker ACA Job (below)
-runEncryptionKeyBase64: '<base64 32-byte key>'  // optional: AES-256-GCM encrypt request/context at rest (MEDIUM-3)
+runEncryptionKeySecretUri: '<KEY_VAULT_RUN_KEY_SECRET_URI>' // secret reference, never a literal key
 ```
 
 The app's managed identity is granted **Storage Table Data Contributor** on the account;
@@ -382,7 +430,83 @@ becomes **read-only** and a scheduled **worker ACA Job** (`<prefix>-worker`, def
 (`node dist/src/worker-main.js`), the same managed identity, and the same Table store; it
 only ever picks up runs the store reports claimable (an approved held run, or a `running`
 run whose lease lapsed) and CAS-claims each first, so the gate stays non-bypassable and two
-workers never double-execute a run.
+workers never double-execute a run. For Copilot execution the schedule defaults
+to hourly, retries are disabled and the worker CLI endpoint is distinct from the
+web endpoint. Do not manually trigger overlapping workers or run two active web
+revisions against one runtime. Shared stores are replica-safe; the SDK runtime
+filesystem owner is not.
+
+`workerReplicaTimeoutSeconds` defaults to 2700 seconds (45 minutes) and cannot be
+set lower. The full upstream runtime deadline is 2,100,000ms (35 minutes), with a
+40-minute server lease, so the worker must not be killed by the old 1800-second
+timeout. Keep the schedule longer than the configured timeout plus cleanup.
+The worker receives the same render/binary-artifact environment as the web app,
+including its Blob destination and SAS settings, so upstream specialists retain
+their configured artifact output path.
+
+### Optional: per-user GitHub on Studio and Cowork
+
+[`per-user-github.md`](../docs/reference/per-user-github.md) covers the full
+sequence, including callback registrations, Key Vault references, durable sessions,
+single-owner runtimes, client allowlists and two-user verification on both hosts.
+The deployment parameter map is in `host/infra/main.bicepparam`.
+
+The template wires `stageExecutor`, authenticated `copilotCliUrl`, separate
+`workerCopilotCliUrl`, model, routing, upstream execution, tools, shell/host
+policy, sandbox workspace and durable session directory into the correct web
+and worker environments. Connection tokens and OAuth/encryption secrets reach
+containers only through managed-identity Key Vault-backed ACA `secretRef`s.
+An existing AzureFile environment binding is mounted at `copilotSessionStateDir`
+on both services. The external headless runtimes and their persistent workspaces
+are separate operator prerequisites, not resources provisioned by this template.
+
+In per-user mode validated Entra `(tid, oid)` is the authority. The original tenant
+is retained as `authorityTenantId`; internal storage uses
+`user-` plus SHA-256 of `JSON.stringify([tid, oid])`. This isolates memory, history,
+resources, projects, binary artifacts and runs across users, not merely across
+hosts. The same user on either host sees the same namespace. Cross-user project
+sharing is not supported, and legacy ownerless records are not adopted.
+
+The first production per-user scope is one Entra tenant: `allowedTenants.length`
+must equal one and its entry must match `linkEntraTenantId`. Browser linking uses
+that tenant's issuer and JWKS. Both hosts share the resource-tenant `(tid, oid)`;
+guests use their resource-tenant object ID. An auth config set to Any Microsoft
+365 Organization does not enable multi-tenant linking or override this restriction.
+
+GitHub authorization is a separate browser OAuth flow. No downstream Entra OBO
+exchange is implemented. Managed-identity Graph storage is application access,
+not the user's delegated OneDrive, and is disabled in per-user mode.
+Local quota counters are process-local: the authority tenant cap and per-user
+concurrency of one are enforced within each process, with each user's ceiling
+equal to the tenant ceiling divided by tenant concurrency. They are NOT a
+distributed billing or rate-limiting ledger; web and worker have separate
+counters and restarts reset them. Use a shared external control plane for a
+hard deployment-wide cap.
+
+Runs pin a stable link generation, preserved by normal token refresh.
+Disconnect/relink never lets an old run adopt the new link, even with the same
+numeric GitHub user. Start new work after relinking. Identity failures before
+execution leave an eligible run resumable with a five-minute retry lease, avoiding
+a busy worker loop; polls may report `identity_retry_pending`. This is not a
+general promise of runtime-outage recovery. Identity loss during execution aborts
+and fails closed, with no automatic replay. New per-user async runs have a
+seven-day TTL; artifact retention is separate.
+Local unlink is immediate, but provider revocation may partially fail; report and
+follow the returned manual GitHub revoke guidance. Production per-user entitlement
+verification has no cache (`verifyCacheMs: 0`). Run status asynchronously verifies
+the saved principal, account and link generation rather than cached latest status.
+Session guards recheck before each model turn, tool action and server command,
+and every 15 seconds during a turn. The broker reads the persisted credential
+source and refreshes it when needed on each check. An authoritative quota endpoint
+401 is not overridden by a stale successful models-list result. Cancellation does
+not undo operations already started.
+
+Before rollback or any identity-mode change, drain and stop the worker and
+preserve private records. Service mode refuses queued user-owned runs with
+`failureReason: per_user_identity_disabled`, never a shared-credential fallback.
+Per-user mode refuses legacy ownerless queued work with
+`legacy_run_requires_owner_migration`; no automatic owner adoption or migration
+occurs. Ordinary service-owned records remain supported in service mode.
 
 ### Optional: the deterministic PowerPoint render tool (`squad_render_pptx`)
 
@@ -485,6 +609,11 @@ else. It is a narrowing of the gate, not an override:
 Leave it off if you want every pipeline run reviewed by an operator first.
 
 ### Optional: persist memory to SharePoint or OneDrive (`SQUAD_MCP_MEMORY_BACKEND=graph`)
+
+**Legacy/non-per-user mode only.** This backend uses the app's managed identity,
+not delegated user credentials. It is prohibited in per-user mode, including
+Graph destinations in `SQUAD_MCP_MEMORY_TARGETS`. Entra inbound SSO does not make
+Graph calls run on behalf of the caller.
 
 Set `enableMemory=true` and `memoryBackend='graph'` in `main.bicepparam`, plus
 `memoryGraphDriveId`. The template projects these environment variables:
@@ -689,20 +818,22 @@ Entra-authenticated `/mcp` endpoint.
 
 ## What this deployment intentionally does NOT do
 
-- **No shell / process execution** over the remote boundary; the embedded engine
-  does inference plus contained file I/O only (SEC-7).
+- The built-in executor does inference plus contained file I/O. The opt-in
+  Copilot runtime can use its screened sandbox tools and shell according to
+  operator policy; it is a separate authenticated runtime, not arbitrary code
+  execution in the MCP ingress process.
 - `squad_run` **is** exposed as a gated async pipeline, but a long run beyond the
   240s ACA ingress timeout needs a **background worker / ACA Job** to drive
-  execution off the status-poll path; that worker is not deployed here, so keep
-  runs short.
-- **No M365 / Agent 365 (PROD-4) and no Microsoft Cowork (PROD-3)** targets yet.
+  execution off the status-poll path. Set `enableWorker=true` to deploy it.
+- Cowork now has a separate generated manifest 1.28 package; package/schema
+  validation is offline evidence, not proof of upload, consent or live SSO.
 - Widening the remote surface to `squad_run` / `squad_status` reopens the
   council-gated PROD-1 boundary; a **security re-gate** is required before
   production use, even though the gate is safe by construction (holds, never
   auto-releases, cross-tenant denied).
-- Durable resumable run-state **is** realized for the async pipeline
-  (`DurableRunStateStore`); the production store targets Azure Storage / Key Vault
-  (a follow-up) rather than the local file store used here.
+- Table run state, link/flow tables and Key Vault-backed secrets are wired by this
+  template. External Copilot runtimes and the existing AzureFile session binding
+  must be provisioned separately. No downstream Entra OBO flow is implemented.
 
 ## Optional Copilot economy routing
 

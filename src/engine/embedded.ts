@@ -45,7 +45,7 @@ import { runPipeline } from "./dispatch-loop.js";
 import { AdvisoryStageFailure, runAdvisoryPipeline, type AdvisoryLedgerSink, type AdvisoryStagePlan } from "./advisory-pipeline.js";
 import { StoreAdvisoryPersistence } from "./advisory-run-store.js";
 import type { PersonaRecord } from "./persona-loader.js";
-import { EphemeralRunStateStore, type HumanInputRequest, type RunState, type RunStateStore, type RunStatus } from "./run-state.js";
+import { EphemeralRunStateStore, type HumanInputRequest, type RunOwnerRecord, type RunState, type RunStateStore, type RunStatus } from "./run-state.js";
 import {
   GateKeeper,
   InMemoryApprovalChannel,
@@ -70,7 +70,7 @@ import { responsibleAiBlocker, type ResponsibleAiBlocker } from "./responsible-a
 import { modelFailureDiagnostics, readModelFailure, type ModelFailureDiagnostics } from "./model-backend.js";
 import type { CatalogTool } from "../catalog/catalog.js";
 import type { CoordinatorRequest, MatchedRouting } from "./coordinator-engine.js";
-import type { AuthContext } from "../auth/entra.js";
+import { userPrincipalOf, type AuthContext } from "../auth/entra.js";
 import type { WorkspaceManager } from "./workspace.js";
 import type { RedactingLogger } from "../observability/logger.js";
 import { parseBrdReview } from "./brd-review.js";
@@ -83,6 +83,25 @@ import type { Workspace } from "./workspace.js";
 export interface EmbeddedContext {
   /** The resolved caller identity — the single root for downstream authorization (SEC-3). */
   auth: AuthContext;
+  /**
+   * The verified per-user identity a new run is pinned to. Set by the transport
+   * after the user's GitHub link and Copilot access were proven; absent when
+   * per-user identity is off.
+   */
+  owner?: RunOwnerRecord;
+}
+
+/**
+ * Whether the caller may read or drive a run. The tenant always has to match.
+ * A run with an owner then also needs the same signed-in user; a run without
+ * one (started before per-user identity, or per-user identity is off) stays
+ * visible tenant-wide, so enabling the feature does not strand existing runs.
+ * Operator approval is a separate scope and deliberately not routed through here.
+ */
+export function callerMayAccessRun(run: Pick<RunState, "tenantId" | "owner">, auth: AuthContext): boolean {
+  if (run.tenantId !== auth.tenantId) return false;
+  if (!run.owner) return true;
+  return userPrincipalOf(auth)?.objectId === run.owner.objectId;
 }
 
 export type EmbeddedOutcome = "completed" | "held" | "denied";
@@ -168,6 +187,11 @@ export interface EmbeddedCoordinatorDeps {
     runId: string,
     options?: Pick<ResearchRuntimeOptions, "allowHumanInput" | "continuation" | "deadlineMs" | "onCompletion">,
   ) => AdvisoryStageExecutor;
+  /**
+   * Per-user identity guard run when an owned run is claimed for execution. A
+   * failure leaves the run resumable instead of failing it (see executeRunningRun).
+   */
+  runPreflight?: (run: RunState) => Promise<{ ok: true } | { ok: false; code: string; reason: string }>;
   logger?: RedactingLogger;
 }
 
@@ -224,6 +248,9 @@ const EMPTY_ROUTING: MatchedRouting = {
 
 /** Server-side embedded execution for the hero tool(s). Runs one model dispatch per call. */
 export class EmbeddedCoordinator {
+  bindUserQuota(auth: AuthContext): void {
+    if (auth.authorityTenantId) this.quota.bindUserPartition(auth.tenantId, auth.authorityTenantId);
+  }
   readonly mode = "embedded" as const;
   private readonly backend: ModelBackend;
   private readonly workspaceManager: WorkspaceManager;
@@ -243,6 +270,7 @@ export class EmbeddedCoordinator {
   private readonly runRecorder?: SquadRunRecorder;
   private readonly researchArtifacts?: SquadArtifactStore;
   private readonly stageExecutorFactory?: EmbeddedCoordinatorDeps["stageExecutorFactory"];
+  private readonly runPreflight?: EmbeddedCoordinatorDeps["runPreflight"];
   private readonly upstreamRun?: EmbeddedCoordinatorDeps["upstreamRun"];
   private readonly logger?: RedactingLogger;
   /** Outstanding held runs per tenant, started via startHttpRun (MEDIUM-2). */
@@ -265,6 +293,7 @@ export class EmbeddedCoordinator {
     this.runRecorder = deps.runRecorder;
     this.researchArtifacts = deps.researchArtifacts;
     this.stageExecutorFactory = deps.stageExecutorFactory;
+    this.runPreflight = deps.runPreflight;
     this.logger = deps.logger;
     this.upstreamRun = deps.upstreamRun;
   }
@@ -448,7 +477,7 @@ export class EmbeddedCoordinator {
     (Pick<CoordinatorRequest, "project" | "projectContext"> & { createdAt: number }) | undefined
   > {
     const run = await this.runStateStore.get(runId);
-    if (!run || run.tenantId !== ctx.auth.tenantId) {
+    if (!run || !callerMayAccessRun(run, ctx.auth)) {
       return undefined;
     }
     const params = decodeRunParams(run.params);
@@ -532,7 +561,7 @@ export class EmbeddedCoordinator {
         advisoryOnly: this.resolveAdvisoryOnly(request),
       });
       if (gate.kind === "hold") {
-        const run = await this.runStateStore.create({ tenantId, toolId: tool.id });
+        const run = await this.runStateStore.create({ tenantId, toolId: tool.id, owner: ctx.owner });
         await this.runStateStore.update(run.runId, { status: "held", holdReason: gate.reason });
         return {
           kind: "embedded",
@@ -555,7 +584,7 @@ export class EmbeddedCoordinator {
         };
       }
 
-      const run = await this.runStateStore.create({ tenantId, toolId: tool.id });
+      const run = await this.runStateStore.create({ tenantId, toolId: tool.id, owner: ctx.owner });
       // SEC-4 — server-allocated, per-tenant, isolated workspace with guaranteed teardown.
       const workspace = await this.workspaceManager.allocate(tenantId);
       try {
@@ -657,7 +686,7 @@ export class EmbeddedCoordinator {
         return { kind: "embedded", outcome: "denied", matchedRouting, reason: "role_not_resolvable" };
       }
 
-      const run = await this.runStateStore.create({ tenantId, toolId: tool.id });
+      const run = await this.runStateStore.create({ tenantId, toolId: tool.id, owner: ctx.owner });
       // SEC-4 — server-allocated, per-tenant, isolated workspace with guaranteed teardown.
       const workspace = await this.workspaceManager.allocate(tenantId);
       try {
@@ -761,7 +790,7 @@ export class EmbeddedCoordinator {
         charter: deployed?.charter ? `${deployed.charter}\n\n${spec.charter}` : spec.charter,
       };
 
-      const run = await this.runStateStore.create({ tenantId, toolId: spec.toolId });
+      const run = await this.runStateStore.create({ tenantId, toolId: spec.toolId, owner: ctx.owner });
       const workspace = await this.workspaceManager.allocate(tenantId);
       try {
         const { request: framed, project } = await this.withMemory(tenantId, request);
@@ -833,7 +862,7 @@ export class EmbeddedCoordinator {
   ): Promise<EmbeddedResult> {
     const matchedRouting = toMatchedRouting(tool);
     const tenantId = ctx.auth.tenantId;
-    const run = await this.runStateStore.create({ tenantId, toolId: tool.id });
+    const run = await this.runStateStore.create({ tenantId, toolId: tool.id, owner: ctx.owner });
     const core = await this.runPipelineCore(tenantId, run.runId, request, personaRoots);
     if (core.outcome === "denied") {
       await this.runStateStore.update(run.runId, { status: "failed" });
@@ -860,7 +889,7 @@ export class EmbeddedCoordinator {
    */
   startRun(tool: CatalogTool, ctx: EmbeddedContext): Promise<{ runId: string }> {
     return this.runStateStore
-      .create({ tenantId: ctx.auth.tenantId, toolId: tool.id })
+      .create({ tenantId: ctx.auth.tenantId, toolId: tool.id, owner: ctx.owner })
       .then((run) => ({ runId: run.runId }));
   }
 
@@ -877,7 +906,7 @@ export class EmbeddedCoordinator {
     personaRoots?: string[],
   ): Promise<EmbeddedResult> {
     const run = await this.runStateStore.get(runId);
-    if (!run || run.tenantId !== ctx.auth.tenantId) {
+    if (!run || !callerMayAccessRun(run, ctx.auth)) {
       return {
         kind: "embedded",
         outcome: "denied",
@@ -916,7 +945,7 @@ export class EmbeddedCoordinator {
     ctx: EmbeddedContext,
   ): Promise<{ status: RunStatus; artifact?: string } | undefined> {
     const run = await this.runStateStore.get(runId);
-    if (!run || run.tenantId !== ctx.auth.tenantId) {
+    if (!run || !callerMayAccessRun(run, ctx.auth)) {
       return undefined;
     }
     return { status: run.status, artifact: run.artifact };
@@ -938,7 +967,7 @@ export class EmbeddedCoordinator {
     personaRoots?: string[],
   ): Promise<EmbeddedResult> {
     const run = await this.runStateStore.get(runId);
-    if (!run || run.tenantId !== ctx.auth.tenantId) {
+    if (!run || !callerMayAccessRun(run, ctx.auth)) {
       return {
         kind: "embedded",
         outcome: "denied",
@@ -1020,7 +1049,7 @@ export class EmbeddedCoordinator {
         if (held >= this.maxHeldRunsPerTenant) {
           return { kind: "embedded", outcome: "denied", matchedRouting, reason: "held_run_cap" };
         }
-        const run = await this.runStateStore.create({ tenantId, toolId: tool.id, ttlMs: this.runTtlMs });
+        const run = await this.runStateStore.create({ tenantId, toolId: tool.id, ttlMs: this.runTtlMs, owner: ctx.owner });
         await this.runStateStore.update(run.runId, {
           status: "held",
           holdReason: gate.reason,
@@ -1039,7 +1068,7 @@ export class EmbeddedCoordinator {
         };
       }
       // Non-gated remote tool: persist running; execution driven by the poll.
-      const run = await this.runStateStore.create({ tenantId, toolId: tool.id, ttlMs: this.runTtlMs });
+      const run = await this.runStateStore.create({ tenantId, toolId: tool.id, ttlMs: this.runTtlMs, owner: ctx.owner });
       await this.runStateStore.update(run.runId, {
         status: "running",
         request: request.request,
@@ -1075,7 +1104,7 @@ export class EmbeddedCoordinator {
    */
   async pollRun(runId: string, ctx: EmbeddedContext): Promise<EmbeddedResult> {
     const run = await this.runStateStore.get(runId);
-    if (!run || run.tenantId !== ctx.auth.tenantId) {
+    if (!run || !callerMayAccessRun(run, ctx.auth)) {
       return {
         kind: "embedded",
         outcome: "denied",
@@ -1110,6 +1139,22 @@ export class EmbeddedCoordinator {
       };
     }
     if (run.humanInput && !run.humanInput.response) return this.awaitingInput(run);
+    if (run.holdReason?.startsWith("identity:") && this.runPreflight) {
+      const checked = await this.runPreflight(run);
+      if (!checked.ok) {
+        return {
+          kind: "embedded", outcome: "held", matchedRouting: EMPTY_ROUTING,
+          reason: checked.code, approvalRequest: checked.reason, runId,
+        };
+      }
+      if ((run.leaseExpiresAt ?? 0) > Date.now()) {
+        return {
+          kind: "embedded", outcome: "held", matchedRouting: EMPTY_ROUTING, runId,
+          reason: "identity_retry_pending",
+          approvalRequest: `Connection verified. The run can be retried after ${new Date(run.leaseExpiresAt!).toISOString()}.`,
+        };
+      }
+    }
     // A queued running record has already passed server gate classification.
     // Only an actual held record requires an operator's approval.
     if (run.status === "held" && !(await this.approvals.isApproved(runId))) {
@@ -1206,6 +1251,49 @@ export class EmbeddedCoordinator {
    * spike two-stage pipeline. Both persist the compiled artifact + `complete`.
    */
   private async executeRunningRun(run: RunState): Promise<EmbeddedResult> {
+    if (run.owner && !this.runPreflight) {
+      await this.runStateStore.update(run.runId, {
+        status: "failed", failureReason: "per_user_identity_disabled",
+      });
+      return {
+        kind: "embedded", outcome: "denied", matchedRouting: EMPTY_ROUTING, runId: run.runId,
+        reason: "per_user_identity_disabled",
+      };
+    }
+    if (this.runPreflight && !run.owner) {
+      await this.runStateStore.update(run.runId, {
+        status: "failed", failureReason: "legacy_run_requires_owner_migration",
+      });
+      return {
+        kind: "embedded", outcome: "denied", matchedRouting: EMPTY_ROUTING, runId: run.runId,
+        reason: "legacy_run_requires_owner_migration",
+      };
+    }
+    // Per-user identity guard. A missing, revoked or switched GitHub link must not
+    // kill a run the user can still fix: put it back to immediately claimable and
+    // say why, exactly as a transient quota denial leaves a run resumable.
+    if (this.runPreflight) {
+      const check = await this.runPreflight(run);
+      if (!check.ok) {
+        await this.runStateStore.update(run.runId, {
+          status: "running", leaseExpiresAt: Date.now() + 5 * 60_000,
+          holdReason: `identity:${check.code}: ${check.reason}`,
+        });
+        return {
+          kind: "embedded",
+          outcome: "held",
+          matchedRouting: EMPTY_ROUTING,
+          reason: check.code,
+          approvalRequest: check.code === "github_identity_changed"
+            ? check.reason
+            : `${check.reason} Token refresh and temporary runtime outages can resume this run. A disconnected or relinked connection requires a new run.`,
+          runId: run.runId,
+        };
+      }
+      if (run.holdReason?.startsWith("identity:")) {
+        await this.runStateStore.update(run.runId, { holdReason: undefined });
+      }
+    }
     if (run.toolId === "squad_run") {
       return this.executeAdvisoryRun(run);
     }
@@ -1389,7 +1477,7 @@ export class EmbeddedCoordinator {
     const denied = (reason: string) => ({ accepted: false, runId, questionId, reason });
     if (!answer.trim() || answer.length > 16_000 || !ctx.auth.subject) return denied("invalid_human_response");
     const run = await this.runStateStore.get(runId);
-    if (!run || run.tenantId !== ctx.auth.tenantId) return denied("run_not_found_or_cross_tenant");
+    if (!run || !callerMayAccessRun(run, ctx.auth)) return denied("run_not_found_or_cross_tenant");
     const projectId = decodeRunParams(run.params).projectContext?.projectId;
     if (binding && projectId?.toLowerCase() !== binding.projectId?.toLowerCase()) return denied("project_identity_conflict");
     if (!run.humanInput || run.humanInput.questionId !== questionId) return denied("human_question_not_current");
@@ -1444,6 +1532,9 @@ export class EmbeddedCoordinator {
     if (!claimed) {
       return undefined;
     }
+    if (claimed.owner?.authorityTenantId) {
+      this.quota.bindUserPartition(claimed.tenantId, claimed.owner.authorityTenantId);
+    }
     const admit = this.quota.acquire(claimed.tenantId);
     if (!admit.ok) {
       // Leave the run running with its lease; it becomes reclaimable after the
@@ -1482,7 +1573,8 @@ export class EmbeddedCoordinator {
     binding?: { projectId?: string },
   ): Promise<{ ok: true; record: ApprovalRecord } | { ok: false; reason: string }> {
     return this.runStateStore.get(runId).then(async (run) => {
-      if (!run || run.tenantId !== ctx.auth.tenantId) {
+      const authority = ctx.auth.authorityTenantId ?? ctx.auth.tenantId;
+      if (!run || (run.owner?.authorityTenantId ?? run.tenantId) !== authority) {
         return { ok: false as const, reason: "run_not_found_or_cross_tenant" };
       }
       const projectId = decodeRunParams(run.params).projectContext?.projectId;

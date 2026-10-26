@@ -242,7 +242,7 @@ test("the identity source is mandatory for the Copilot executor and its token ne
     try {
       const prepared = await runtime.readiness.prepare();
       assert.deepEqual({ ready: prepared.ready, identity: prepared.checks.copilotIdentity.ok }, { ready: true, identity: true });
-    } finally { runtime.credentials.stopMonitoring(); }
+    } finally { runtime.credentials!.stopMonitoring(); }
 
     const economyConfig = loadOperatorConfig({
       ...base, SQUAD_MCP_COPILOT_GITHUB_TOKEN: TOKEN_A, SQUAD_MCP_COPILOT_ROUTING: "economy",
@@ -253,8 +253,8 @@ test("the identity source is mandatory for the Copilot executor and its token ne
     assert.ok(economyRuntime);
     try {
       assert.equal((await economyRuntime.readiness.prepare()).ready, true);
-      assert.deepEqual(economyRuntime.credentials.status().modelIds, ["claude-sonnet-5"]);
-    } finally { economyRuntime.credentials.stopMonitoring(); }
+      assert.deepEqual(economyRuntime.credentials!.status().modelIds, ["claude-sonnet-5"]);
+    } finally { economyRuntime.credentials!.stopMonitoring(); }
 
     const unavailableRuntime = buildCopilotRuntime(economyConfig,
       { memoryStore: new FileSquadMemoryStore({ baseDir: join(root, "memory") }) },
@@ -268,9 +268,9 @@ test("the identity source is mandatory for the Copilot executor and its token ne
     assert.ok(unavailableRuntime);
     try {
       assert.equal((await unavailableRuntime.readiness.prepare()).ready, false);
-      assert.match(unavailableRuntime.credentials.status().reason, /no available catalog model/);
-      assert.equal(unavailableRuntime.credentials.status().modelIds, undefined);
-    } finally { unavailableRuntime.credentials.stopMonitoring(); }
+      assert.match(unavailableRuntime.credentials!.status().reason, /no available catalog model/);
+      assert.equal(unavailableRuntime.credentials!.status().modelIds, undefined);
+    } finally { unavailableRuntime.credentials!.stopMonitoring(); }
 
     const upstreamConfig = loadOperatorConfig({
       ...base, SQUAD_MCP_COPILOT_GITHUB_TOKEN: TOKEN_A, SQUAD_MCP_UPSTREAM_RUNTIME_ENABLED: undefined,
@@ -297,7 +297,7 @@ test("the identity source is mandatory for the Copilot executor and its token ne
       assert.ok(result?.humanInput?.choices?.some(choice => choice.includes('"mode":"ranked"')));
       assert.ok(result?.humanInput?.choices?.some(choice => choice.includes('"mode":"economy"')));
       assert.equal((await runs.get(pending.runId))?.status, "held");
-    } finally { upstream.credentials.stopMonitoring(); }
+    } finally { upstream.credentials!.stopMonitoring(); }
 
     const captured: CopilotSessionConfig[] = [];
     const restricted = buildCopilotRuntime(upstreamConfig, memory, {
@@ -318,6 +318,6 @@ test("the identity source is mandatory for the Copilot executor and its token ne
         { toolId: "squad_run", request: "Report current findings." }, undefined, "developer"), /Native session captured/);
       assert.ok(captured.length);
       assert.ok(!captured[0].availableTools.some(tool => ["builtin:bash", "builtin:glob", "builtin:grep"].includes(tool)));
-    } finally { restricted.credentials.stopMonitoring(); }
+    } finally { restricted.credentials!.stopMonitoring(); }
   } finally { await rm(root, { recursive: true, force: true }); }
 });

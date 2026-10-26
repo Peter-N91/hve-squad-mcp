@@ -30,10 +30,17 @@ export interface JoseVerifierOptions {
  * returned verifier is safe to reuse across requests.
  */
 export function createJoseVerifier(options: JoseVerifierOptions): JwtVerifier {
-  const jwks = createRemoteJWKSet(new URL(options.jwksUri));
+  const uri = new URL(options.jwksUri);
+  if ((uri.protocol !== "https:" && !(uri.protocol === "http:" &&
+      ["127.0.0.1", "localhost", "[::1]"].includes(uri.hostname))) || uri.username || uri.password || uri.hash) {
+    throw new Error("JWKS discovery requires HTTPS, except for explicit loopback tests.");
+  }
+  const jwks = createRemoteJWKSet(uri);
   return {
     async verify(token: string): Promise<JwtClaims> {
       const { payload } = await jwtVerify(token, jwks, {
+        algorithms: ["RS256"],
+        requiredClaims: ["iss", "aud", "exp"],
         issuer: options.issuer,
         clockTolerance: options.clockToleranceSec ?? 60,
       });

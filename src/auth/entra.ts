@@ -41,6 +41,8 @@ export interface JwtClaims {
   /** App roles (application permissions). */
   roles?: string[];
   appid?: string;
+  azp?: string;
+  idtyp?: string;
   [key: string]: unknown;
 }
 
@@ -73,6 +75,26 @@ export interface AuthContext {
   scopes: string[];
   /** The audience the token was actually bound to (one of the configured set). */
   audience: string;
+  objectId?: string;
+  tokenKind?: "delegated" | "app";
+  clientAppId?: string;
+  roles?: string[];
+  /** Original verified Entra tenant when tenantId is an internal user storage partition. */
+  authorityTenantId?: string;
+}
+
+export interface UserPrincipal { tenantId: string; objectId: string }
+
+export function userPrincipalOf(auth: AuthContext): UserPrincipal | undefined {
+  return auth.tokenKind === "delegated" && auth.objectId
+    ? { tenantId: (auth.authorityTenantId ?? auth.tenantId).toLowerCase(), objectId: auth.objectId.toLowerCase() } : undefined;
+}
+
+export function principalKeyOf(principal: UserPrincipal): string {
+  if (!/^[A-Za-z0-9._-]{1,128}$/.test(principal.tenantId) || !/^[A-Za-z0-9-]{1,64}$/.test(principal.objectId)) {
+    throw new Error("Invalid user principal.");
+  }
+  return `${principal.tenantId}|${principal.objectId}`;
 }
 
 /** A failed authentication/authorization, carrying the HTTP status to return. */
@@ -98,6 +120,8 @@ export interface EntraAuthenticatorOptions {
   allowedIssuers?: string[];
   /** Permitted tenants; empty = any tenant whose token validates. */
   allowedTenants?: string[];
+  allowedClientsByAudience?: Readonly<Record<string, readonly string[]>>;
+  requireDelegatedUser?: boolean;
   /** The cryptographic verifier (signature + issuer + expiry). */
   verifier: JwtVerifier;
   /** Logger used to register the token as a secret (SEC-10). */
@@ -123,7 +147,7 @@ function matchAudience(
   return expected.find((candidate) => presented.includes(candidate));
 }
 
-function parseScopes(claims: JwtClaims): string[] {
+function parseScopes(claims: JwtClaims, includeRoles: boolean): string[] {
   const scopes = new Set<string>();
   if (typeof claims.scp === "string") {
     for (const scope of claims.scp.split(/\s+/)) {
@@ -132,7 +156,7 @@ function parseScopes(claims: JwtClaims): string[] {
       }
     }
   }
-  if (Array.isArray(claims.roles)) {
+  if (includeRoles && Array.isArray(claims.roles)) {
     for (const role of claims.roles) {
       if (typeof role === "string" && role.length > 0) {
         scopes.add(role);
@@ -153,6 +177,7 @@ export function extractBearerToken(authorizationHeader: string | undefined): str
 
 /** Authenticates and authorizes remote callers against Entra/OAuth tokens. */
 export class EntraAuthenticator {
+  private readonly policy: EntraAuthenticatorOptions;
   private readonly audiences: readonly string[];
   private readonly allowedIssuers: Set<string>;
   private readonly allowedTenants: Set<string>;
@@ -160,6 +185,11 @@ export class EntraAuthenticator {
   private readonly logger: RedactingLogger;
 
   constructor(options: EntraAuthenticatorOptions) {
+    this.policy = options;
+    if (options.requireDelegatedUser && (!options.allowedTenants?.length || !options.allowedIssuers?.length ||
+        options.audiences.some(audience => !options.allowedClientsByAudience?.[audience]?.length))) {
+      throw new Error("Per-user identity requires issuer, tenant and per-audience calling-client restrictions.");
+    }
     // Fail fast rather than admit nothing: an empty set would reject every token
     // with `wrong_audience`, which reads as a token problem instead of a config one.
     if (options.audiences.length === 0) {
@@ -217,6 +247,18 @@ export class EntraAuthenticator {
       throw new AuthError("Tenant is not permitted.", 403, "tenant_not_allowed");
     }
 
+    const clientAppId = typeof claims.azp === "string" ? claims.azp : typeof claims.appid === "string" ? claims.appid : undefined;
+    const clients = this.policy.allowedClientsByAudience?.[audience];
+    if (clients && (!clientAppId || !clients.includes(clientAppId))) {
+      throw new AuthError("Calling client is not permitted.", 403, "client_not_allowed");
+    }
+    const delegated = claims.idtyp !== "app" && typeof claims.scp === "string" && claims.scp.trim().length > 0;
+    const objectId = typeof claims.oid === "string" && claims.oid.length > 0 ? claims.oid : undefined;
+    // App-only operators can approve; they still cannot access a user credential.
+    if (this.policy.requireDelegatedUser && (!delegated || !objectId) &&
+        !(claims.idtyp === "app" && Array.isArray(claims.roles) && claims.roles.includes(OPERATOR_APPROVAL_SCOPE))) {
+      throw new AuthError("A delegated user access token with oid is required.", 403, "delegated_user_required");
+    }
     const subject =
       (typeof claims.oid === "string" && claims.oid) ||
       (typeof claims.sub === "string" && claims.sub) ||
@@ -228,8 +270,12 @@ export class EntraAuthenticator {
     return {
       tenantId,
       subject,
-      scopes: parseScopes(claims),
+      scopes: parseScopes(claims, !this.policy.requireDelegatedUser),
       audience,
+      tokenKind: delegated ? "delegated" : "app",
+      ...(delegated && objectId ? { objectId } : {}),
+      ...(clientAppId ? { clientAppId } : {}),
+      roles: Array.isArray(claims.roles) ? claims.roles.filter((role): role is string => typeof role === "string") : [],
     };
   }
 
@@ -239,6 +285,10 @@ export class EntraAuthenticator {
    * cannot influence this decision — the required scope is fixed per tool.
    */
   authorizeTool(context: AuthContext, toolId: string): void {
+    if (toolId === "squad_approve") return this.authorizeApproval(context);
+    if (this.policy.requireDelegatedUser && !userPrincipalOf(context)) {
+      throw new AuthError("A delegated user is required.", 403, "delegated_user_required");
+    }
     const scope = requiredScopeFor(toolId);
     if (!scope) {
       throw new AuthError(`Unknown tool: ${toolId}`, 403, "unknown_tool");
@@ -258,7 +308,8 @@ export class EntraAuthenticator {
    * grant authority to invoke the approval action.
    */
   authorizeApproval(context: AuthContext): void {
-    if (!context.scopes.includes(OPERATOR_APPROVAL_SCOPE)) {
+    const grants = this.policy.requireDelegatedUser ? context.roles ?? [] : [...context.scopes, ...(context.roles ?? [])];
+    if (!grants.includes(OPERATOR_APPROVAL_SCOPE)) {
       throw new AuthError("Missing operator approval scope.", 403, "missing_operator_scope");
     }
   }

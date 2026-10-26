@@ -10,6 +10,29 @@ This is the outbound inverse of the squad's existing inbound MCP template (`squa
 
 **Documentation:** <https://peter-n91.github.io/hve-squad-mcp/> · **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md) · **License:** [MIT](LICENSE) · <a href="https://m8ven.ai/mcp/peter-n91-hve-squad-mcp-5uglug"><img src="https://m8ven.ai/badge/mcp/peter-n91-hve-squad-mcp-5uglug" alt="m8ven badge"></a>
 
+## Per-user GitHub Copilot in Cowork and Copilot Studio
+
+The remote server can authenticate both hosts with delegated Entra access tokens
+and use the same `tid + oid` principal for GitHub account linking. Credentials are
+encrypted in server-owned storage, not written to Entra directory attributes.
+GitHub authorization is a separate browser consent flow. No organization-wide
+GitHub credential or ambient sandbox login is used in this mode.
+
+Enable it explicitly with `SQUAD_MCP_PER_USER_GITHUB_ENABLED=true` after completing
+the [production setup and validation guide](docs/reference/per-user-github.md).
+The guide covers the Entra client/audience restrictions, GitHub App, encrypted
+shared stores, persistent session storage, both generated host packages and rollback.
+The first deployment supports one Entra tenant and private per-user projects.
+It does not add delegated Graph file access. Existing local and explicitly
+configured service-identity modes remain available with the feature disabled.
+
+The source is tenant-portable, not an automatically provisioned multi-tenant
+service. Each operator deploys a separate server against their existing tenant
+and supplies their own registrations, endpoint, storage and Key Vault secrets.
+Installing the package does not create a Microsoft tenant or Azure deployment.
+Keep filled-in parameters and host packages in a private workspace outside this
+repository; the committed packages contain placeholders, not a live connection.
+
 ## Status — what works today (read this first)
 
 This server has **two execution modes**, at different maturity levels. Be precise about which one a claim refers to.

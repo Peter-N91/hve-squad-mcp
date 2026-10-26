@@ -20,6 +20,7 @@
     "tools.catalog.yml",
     "generated/mcp-tools.schema.json",
     "generated/copilot-studio-connector",
+    "generated/cowork-package",
     "README.md",
     "NOTICE"
   ],
@@ -31,6 +32,8 @@
     "generate:check": "tsx generators/build-manifests.ts --check",
     "generate:connector": "tsx generators/build-copilot-studio-connector.ts",
     "generate:connector:check": "tsx generators/build-copilot-studio-connector.ts --check",
+    "generate:cowork": "tsx generators/build-cowork-package.ts",
+    "generate:cowork:check": "tsx generators/build-cowork-package.ts --check",
     "snapshot:cast": "tsx host/snapshot-cast.ts",
     "snapshot:cast:check": "tsx host/snapshot-cast.ts --check",
     "snapshot:upstream": "tsx host/snapshot-upstream.ts",

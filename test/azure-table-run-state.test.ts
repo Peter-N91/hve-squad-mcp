@@ -718,6 +718,29 @@ test("Azure Table store encrypts advisory stages + verdict at rest", async () =>
   assert.equal(read?.councilVerdict?.rendered, "SECRET-TABLE-RENDERED");
 });
 
+test("Azure Table store keeps the run owner and hold reason across replicas, with no credential on the row", async () => {
+  const table = new FakeTable();
+  const key = randomBytes(32);
+  const a = storeOn(table, new AesGcmFieldCipher(key));
+  const run = await a.create({
+    tenantId: "t", toolId: "squad_run",
+    owner: { objectId: "oid-alice", githubUserId: 111, credentialVersion: 3 },
+  });
+  await a.update(run.runId, { status: "running", leaseExpiresAt: 0, holdReason: "github_identity_changed: reconnect" });
+
+  const read = await storeOn(table, new AesGcmFieldCipher(key)).get(run.runId);
+  assert.deepEqual(read?.owner, { objectId: "oid-alice", githubUserId: 111, credentialVersion: 3 });
+  assert.equal(read?.holdReason, "github_identity_changed: reconnect", "a hold reason must survive a read from the table");
+  assert.equal(read?.tenantId, "t");
+  const serialized = JSON.stringify(table.raw(run.runId));
+  assert.doesNotMatch(serialized, /gh[uor]_/, "an owner record never carries a credential");
+
+  // A run without an owner reads back without inventing one.
+  const plain = await a.create({ tenantId: "t", toolId: "squad_run" });
+  assert.equal((await a.get(plain.runId))?.owner, undefined);
+  assert.equal("owner" in ((await a.get(plain.runId)) ?? {}), false);
+});
+
 test("Azure Table store multi-replica: a verdict written by one instance is visible to a second", async () => {
   // One shared fake table = shared storage; both replicas share the data key.
   const table = new FakeTable();

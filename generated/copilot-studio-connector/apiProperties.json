@@ -4,24 +4,37 @@
       "token": {
         "type": "oauthSetting",
         "oAuthSettings": {
-          "identityProvider": "aadcertificate",
-          "clientId": "<ENTRA_CLIENT_ID>",
+          "identityProvider": "aad",
+          "clientId": "<ENTRA_CONNECTOR_CLIENT_ID>",
+          "redirectMode": "Global",
           "scopes": [
-            "Squad.Research",
-            "Squad.Plan",
-            "Squad.Review",
-            "Squad.Architect",
-            "Squad.Run",
-            "Squad.Federate",
-            "Squad.Render",
-            "Squad.Memory",
-            "Squad.MemoryWrite",
-            "Squad.Business",
-            "Squad.Backlog"
+            "api://<SQUAD_RESOURCE_CLIENT_ID>/Squad.Research",
+            "api://<SQUAD_RESOURCE_CLIENT_ID>/Squad.Plan",
+            "api://<SQUAD_RESOURCE_CLIENT_ID>/Squad.Review",
+            "api://<SQUAD_RESOURCE_CLIENT_ID>/Squad.Architect",
+            "api://<SQUAD_RESOURCE_CLIENT_ID>/Squad.Run",
+            "api://<SQUAD_RESOURCE_CLIENT_ID>/Squad.Federate",
+            "api://<SQUAD_RESOURCE_CLIENT_ID>/Squad.Render",
+            "api://<SQUAD_RESOURCE_CLIENT_ID>/Squad.Memory",
+            "api://<SQUAD_RESOURCE_CLIENT_ID>/Squad.MemoryWrite",
+            "api://<SQUAD_RESOURCE_CLIENT_ID>/Squad.Business",
+            "api://<SQUAD_RESOURCE_CLIENT_ID>/Squad.Backlog",
+            "offline_access"
           ],
           "properties": {
-            "IsFirstParty": "false",
-            "AzureActiveDirectoryResourceId": "<SQUAD_MCP_AUDIENCE>"
+            "IsFirstParty": "False",
+            "AzureActiveDirectoryResourceId": "api://<SQUAD_RESOURCE_CLIENT_ID>"
+          },
+          "customParameters": {
+            "loginUri": {
+              "value": "https://login.microsoftonline.com"
+            },
+            "tenantId": {
+              "value": "<ENTRA_TENANT_ID>"
+            },
+            "resourceUri": {
+              "value": "api://<SQUAD_RESOURCE_CLIENT_ID>"
+            }
           }
         }
       }

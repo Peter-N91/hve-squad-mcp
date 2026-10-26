@@ -69,6 +69,18 @@ export class CommandCredentialSource implements GitHubCredentialSource {
   }
 }
 
+/**
+ * True when an SDK error means GitHub rejected the credential itself (revoked,
+ * expired or invalid), as opposed to a missing license or an unreachable runtime.
+ * Shapes captured from the live runtime:
+ *   models.list, same process:  served from the runtime's cache, so NOT a liveness check
+ *   account.getQuota:           `Failed to fetch Copilot user info: 401 Unauthorized: {"message":"Bad credentials"}`
+ *   models.list, fresh runtime: `GenericFailure, {"kind":"http","status":401,...,"body":"unauthorized: token authentication failed"}`
+ */
+export function isCredentialRejection(text: string): boolean {
+  return /\b401\b|bad credentials|token authentication failed|token (has )?(expired|been revoked)/i.test(text);
+}
+
 /** Proves a token can use Copilot; throws with a reason when it cannot. */
 export interface CopilotEntitlementVerifier {
   verify(token: string): Promise<{ models: string[]; premiumRemainingPercent?: number }>;

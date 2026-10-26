@@ -15,6 +15,7 @@ spike/
 host/infra/main.json
 
 .copilot-tracking/
+.playwright-mcp/
 
 # ---------------------------------------------------------------------------
 # Deployment-specific and secret material. THIS REPOSITORY IS PUBLIC — never

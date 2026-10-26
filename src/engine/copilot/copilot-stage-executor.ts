@@ -160,7 +160,7 @@ export interface CopilotSessionConfig {
   fileSystem: SessionFsProviderPort;
   gitHubToken?: string;
   /** Per-session identity callback, re-invoked by the runtime before the token expires. */
-  gitHubTokenProvider?: (args: { reason?: string }) => Promise<GitHubTokenProviderResult>;
+  gitHubTokenProvider?: (args: { reason?: string; host?: string; sessionId?: string }) => Promise<GitHubTokenProviderResult>;
   workingDirectory: string;
   streaming: false;
 }
@@ -216,7 +216,7 @@ export interface CopilotStageExecutorOptions {
   /** Per-session GitHub identity; omitted = the identity the sandbox runtime was started with. */
   gitHubToken?: string;
   /** Preferred over {@link gitHubToken}: the server-owned identity, refreshed on demand. */
-  gitHubTokenProvider?: (args: { reason?: string }) => Promise<GitHubTokenProviderResult>;
+  gitHubTokenProvider?: (args: { reason?: string; host?: string; sessionId?: string }) => Promise<GitHubTokenProviderResult>;
   /** Current identity verification; a stage never starts while it is not ready. */
   identityStatus?: () => CopilotIdentityStatus;
   /** Absolute POSIX mount point of the project inside the sandbox. */
@@ -387,6 +387,11 @@ export class CopilotStageExecutor implements AdvisoryStageExecutor {
     if (identity && !identity.ready) {
       throw new StageBlockedError("copilot_identity_unavailable",
         `The server's GitHub Copilot identity is not available (${identity.reason}). An operator must restore it before agentic stages can run.`);
+    }
+    if (this.options.routing !== "economy" && this.options.model && identity?.modelIds &&
+        !identity.modelIds.includes(this.options.model)) {
+      throw new StageBlockedError("copilot_model_unavailable",
+        "The configured model is not available to this GitHub account. Select an available model; no fallback was used.");
     }
     const reportOnly = executionMode === "text-only-report";
     const state = this.stageState(persona, request, roleKey, reportOnly);

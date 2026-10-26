@@ -1,0 +1,1430 @@
+{
+  "tools": [
+    {
+      "name": "squad_research",
+      "title": "Squad Research",
+      "description": "Run the squad's research stage on a question or codebase. Routes to the Squad Researcher (squad `researcher` role) at the `auto`, parallel-eligible tier to investigate, explore, and gather evidence before any plan or change. Embedded execution (squad-guided / embedded): the server runs this squad stage under its gates and methodology and returns the finished artifact. Use for \"research\", \"investigate\", \"explore\", or \"find out\" requests.",
+      "annotations": {
+        "title": "Squad Research"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The research question or topic for the squad this turn."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "default",
+              "full",
+              "security",
+              "design",
+              "architecture",
+              "azure",
+              "product",
+              "brd"
+            ],
+            "description": "Optional squad profile to seed when the project has no squad yet."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "default"
+            ],
+            "description": "Optional model-tier hint overriding the coordinator's cost-first default."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Optional Member Name from team.md to pick a specific named member."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "autonomous",
+              "autopilot"
+            ],
+            "description": "Optional autonomy mode for the turn (autonomous validator loop or autopilot pipeline)."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional free-form context (files, constraints, prior findings) to frame the request."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Project label or server-acknowledged partition. With projectContext schema 2, immutable projectId determines storage identity. Never overload squad with a project id."
+          },
+          "projectContext": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schemaVersion",
+              "projectId",
+              "revision",
+              "sequence"
+            ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 2
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "storage"
+                  ],
+                  "properties": {
+                    "storage": {
+                      "required": [
+                        "provider",
+                        "driveId",
+                        "folderItemId"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "schemaVersion": {
+                "type": "integer",
+                "enum": [
+                  1,
+                  2
+                ]
+              },
+              "projectId": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sequence": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{64}$"
+              },
+              "trackingRoot": {
+                "type": "string",
+                "const": ".copilot-tracking"
+              },
+              "storage": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "provider"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "onedrive",
+                      "sharepoint"
+                    ]
+                  },
+                  "driveId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "folderItemId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "displayPath": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional federation sub-squad to target (state under .copilot-tracking/squad/members/<name>/); omit outside a federation."
+          }
+        }
+      }
+    },
+    {
+      "name": "squad_plan",
+      "title": "Squad Plan",
+      "description": "Run the squad's planning stage. Routes to the Squad Lead (squad `lead` role) at the `confirm` tier to break a task down, sequence the work, and produce an implementation-ready plan. Planning is non-parallel and lands no change without confirmation. Embedded execution (squad-guided / embedded): the server runs this squad stage under its gates and methodology and returns the finished artifact. Use for \"plan\", \"break down\", \"sequence\", or \"design plan\" requests.",
+      "annotations": {
+        "title": "Squad Plan"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The work to plan this turn."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "default",
+              "full",
+              "security",
+              "design",
+              "architecture",
+              "azure",
+              "product",
+              "brd"
+            ],
+            "description": "Optional squad profile to seed when the project has no squad yet."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "default"
+            ],
+            "description": "Optional model-tier hint overriding the coordinator's cost-first default."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Optional Member Name from team.md to pick a specific named member."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "autonomous",
+              "autopilot"
+            ],
+            "description": "Optional autonomy mode for the turn."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional free-form context (research artifacts, constraints) to frame the plan."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Project label or server-acknowledged partition. With projectContext schema 2, immutable projectId determines storage identity. Never overload squad with a project id."
+          },
+          "projectContext": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schemaVersion",
+              "projectId",
+              "revision",
+              "sequence"
+            ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 2
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "storage"
+                  ],
+                  "properties": {
+                    "storage": {
+                      "required": [
+                        "provider",
+                        "driveId",
+                        "folderItemId"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "schemaVersion": {
+                "type": "integer",
+                "enum": [
+                  1,
+                  2
+                ]
+              },
+              "projectId": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sequence": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{64}$"
+              },
+              "trackingRoot": {
+                "type": "string",
+                "const": ".copilot-tracking"
+              },
+              "storage": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "provider"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "onedrive",
+                      "sharepoint"
+                    ]
+                  },
+                  "driveId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "folderItemId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "displayPath": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional federation sub-squad to target (state under .copilot-tracking/squad/members/<name>/); omit outside a federation."
+          }
+        }
+      }
+    },
+    {
+      "name": "squad_review",
+      "title": "Squad Review",
+      "description": "Run the squad's review stage. Routes to the Squad Reviewer (squad `tester` role) at the `auto` tier for quality, correctness, and standards review. When the request asks for a pre-implementation go/no-go or crosses two or more council domains, it engages the council row (architect, security, cost-manager, product-owner, and optionally rai) at the `confirm` tier. Embedded execution (squad-guided / embedded): the server runs the review stage under the squad's gates and methodology and returns a finished reviewer artifact (a single reviewer pass, not a convened council verdict). Use for \"review\", \"validate\", \"check quality\", \"council\", or \"go/no-go\" requests.",
+      "annotations": {
+        "title": "Squad Review"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "What to review, validate, or take to council this turn."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "default",
+              "full",
+              "security",
+              "design",
+              "architecture",
+              "azure",
+              "product",
+              "brd"
+            ],
+            "description": "Optional squad profile to seed when the project has no squad yet."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "default"
+            ],
+            "description": "Optional model-tier hint overriding the coordinator's cost-first default."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Optional Member Name from team.md to pick a specific named member."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "autonomous",
+              "autopilot"
+            ],
+            "description": "Optional autonomy mode for the turn."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional free-form context (the change, plan, or design under review)."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Project label or server-acknowledged partition. With projectContext schema 2, immutable projectId determines storage identity. Never overload squad with a project id."
+          },
+          "projectContext": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schemaVersion",
+              "projectId",
+              "revision",
+              "sequence"
+            ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 2
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "storage"
+                  ],
+                  "properties": {
+                    "storage": {
+                      "required": [
+                        "provider",
+                        "driveId",
+                        "folderItemId"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "schemaVersion": {
+                "type": "integer",
+                "enum": [
+                  1,
+                  2
+                ]
+              },
+              "projectId": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sequence": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{64}$"
+              },
+              "trackingRoot": {
+                "type": "string",
+                "const": ".copilot-tracking"
+              },
+              "storage": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "provider"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "onedrive",
+                      "sharepoint"
+                    ]
+                  },
+                  "driveId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "folderItemId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "displayPath": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional federation sub-squad to target (state under .copilot-tracking/squad/members/<name>/); omit outside a federation."
+          }
+        }
+      }
+    },
+    {
+      "name": "squad_architect",
+      "title": "Squad Architect",
+      "description": "Run the squad's architecture stage. Routes to the System Architecture Reviewer (squad `architect` role) at the `auto`, parallel-eligible tier to review system design, component boundaries, and design tradeoffs (the Squad Azure Architect authors Azure HLD/LLD as the alternate). Embedded execution (squad-guided / embedded): the server runs this squad stage under its gates and methodology and returns the finished artifact. Use for \"architecture\", \"system design\", or \"components\" requests.",
+      "annotations": {
+        "title": "Squad Architect"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The architecture or system-design question this turn."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "default",
+              "full",
+              "security",
+              "design",
+              "architecture",
+              "azure",
+              "product",
+              "brd"
+            ],
+            "description": "Optional squad profile to seed when the project has no squad yet."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "default"
+            ],
+            "description": "Optional model-tier hint overriding the coordinator's cost-first default."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Optional Member Name from team.md to pick a specific named member."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "autonomous",
+              "autopilot"
+            ],
+            "description": "Optional autonomy mode for the turn."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional free-form context (existing design, constraints, IaC) to frame the review."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Project label or server-acknowledged partition. With projectContext schema 2, immutable projectId determines storage identity. Never overload squad with a project id."
+          },
+          "projectContext": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schemaVersion",
+              "projectId",
+              "revision",
+              "sequence"
+            ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 2
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "storage"
+                  ],
+                  "properties": {
+                    "storage": {
+                      "required": [
+                        "provider",
+                        "driveId",
+                        "folderItemId"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "schemaVersion": {
+                "type": "integer",
+                "enum": [
+                  1,
+                  2
+                ]
+              },
+              "projectId": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sequence": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{64}$"
+              },
+              "trackingRoot": {
+                "type": "string",
+                "const": ".copilot-tracking"
+              },
+              "storage": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "provider"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "onedrive",
+                      "sharepoint"
+                    ]
+                  },
+                  "driveId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "folderItemId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "displayPath": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional federation sub-squad to target (state under .copilot-tracking/squad/members/<name>/); omit outside a federation."
+          }
+        }
+      }
+    },
+    {
+      "name": "squad_run",
+      "title": "Squad Run",
+      "description": "Run the full squad pipeline for any request. Hands the request to the Squad Coordinator, which classifies it against the routing table and dispatches the matched roles through Research -> Plan -> Council -> Review -> Backlog handoff, carrying the council Implementation Gate, the autopilot/autonomous Human Gates, and the notification approval contract unchanged. This is the catch-all entry point and runs at the `confirm` tier with gates. Set `mode=autonomous` for the bounded validator loop or `mode=autopilot` for the full gated pipeline. Embedded execution (squad-guided / embedded): the server runs the full advisory pipeline server-side under its gates and methodology. Because the pipeline is gated, the call returns immediately with a run id and PAUSES at the Human Gate; an authorized operator can submit explicit human approval through squad_approve or /admin/approve, then poll squad_status for the same run.",
+      "annotations": {
+        "title": "Squad Run"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The work for the squad this turn (any intent; the Coordinator classifies it)."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "default",
+              "full",
+              "security",
+              "design",
+              "architecture",
+              "azure",
+              "product",
+              "brd"
+            ],
+            "description": "Optional squad profile to seed when the project has no squad yet."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "default"
+            ],
+            "description": "Optional model-tier hint overriding the coordinator's cost-first default."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Optional Member Name from team.md to pick a specific named member."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "autonomous",
+              "autopilot"
+            ],
+            "description": "Optional autonomy mode: autonomous (bounded validator loop) or autopilot (full gated pipeline)."
+          },
+          "discovery": {
+            "type": "string",
+            "enum": [
+              "quick",
+              "standard",
+              "deep",
+              "skip"
+            ],
+            "description": "Optional discovery-gate depth for a request that states a goal with no requirement artifact behind it: quick (analyst), standard (designer then analyst), deep (designer, then challenger and experimenter, then analyst), or skip. An explicit depth beats the coordinator's one-time offer. Ignored on an unattended run, which has nobody for the gate to interview."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional free-form context to frame the pipeline."
+          },
+          "review": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "targetPath",
+              "targetSha256",
+              "document",
+              "sources"
+            ],
+            "description": "Explicit independent BRD review-only route. Uses the registered BRD Quality Reviewer without authoring/research/planning or roster mutation. All source hashes are verified before inference; source content is optional exact inline evidence. Document identity is caller-declared and checked against present frontmatter. Refresh tools/list after deployment.",
+            "properties": {
+              "kind": {
+                "const": "brd"
+              },
+              "targetPath": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              },
+              "targetSha256": {
+                "type": "string",
+                "pattern": "^[a-fA-F0-9]{64}$"
+              },
+              "document": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "version",
+                  "phase"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  },
+                  "version": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  },
+                  "phase": {
+                    "enum": [
+                      "Define",
+                      "Govern"
+                    ]
+                  }
+                }
+              },
+              "sources": {
+                "type": "array",
+                "maxItems": 16,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "path",
+                    "sha256"
+                  ],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4000
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[a-fA-F0-9]{64}$"
+                    },
+                    "content": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64000
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Project label or server-acknowledged partition. With projectContext schema 2, immutable projectId determines storage identity. Never overload squad with a project id."
+          },
+          "projectContext": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schemaVersion",
+              "projectId",
+              "revision",
+              "sequence"
+            ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 2
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "storage"
+                  ],
+                  "properties": {
+                    "storage": {
+                      "required": [
+                        "provider",
+                        "driveId",
+                        "folderItemId"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "schemaVersion": {
+                "type": "integer",
+                "enum": [
+                  1,
+                  2
+                ]
+              },
+              "projectId": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sequence": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{64}$"
+              },
+              "trackingRoot": {
+                "type": "string",
+                "const": ".copilot-tracking"
+              },
+              "storage": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "provider"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "onedrive",
+                      "sharepoint"
+                    ]
+                  },
+                  "driveId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "folderItemId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "displayPath": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional federation sub-squad to target (state under .copilot-tracking/squad/members/<name>/); omit outside a federation."
+          }
+        }
+      }
+    },
+    {
+      "name": "squad_federate",
+      "title": "Squad Federate",
+      "description": "Run the squad **federation** meta layer for a repository that hosts several named sub-squads (for example a `product` sub-squad for the business team and an `azure` sub-squad for the architects). Hands the request to the Squad Federation Coordinator, which reads the federation registry (`federation.md`) and meta-routing (`meta-routing.md`), selects the target sub-squad(s) — or honors an explicit `squad=<name>` — and runs each sub-squad's normal per-turn protocol scoped to `.copilot-tracking/squad/members/<name>/`. Set `init` to build a federation (propose → confirm → create) on a fresh project, or `promote` to adopt an existing single squad (a top-level `team.md`) into a federation as its first sub-squad, relocating its state intact. This is the catch-all federation entry point and runs at the `confirm` tier with gates. Embedded execution (squad-guided / embedded): the server runs the federation meta layer server-side under its gates and methodology. Because the federation layer is gated, the call returns immediately with a run id and PAUSES at the Human Gate; an authorized operator can submit explicit human approval through squad_approve or /admin/approve, then poll squad_status for the same run. Use for cross-sub-squad requests, an explicit sub-squad target, or federation setup.",
+      "annotations": {
+        "title": "Squad Federate"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The work for the federation this turn (routed to one or more sub-squads)."
+          },
+          "squad": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Optional sub-squad name to target directly, overriding meta-routing."
+          },
+          "init": {
+            "type": "boolean",
+            "description": "When true, run Federation Init Mode (propose → confirm → create) on a fresh project, or Federation Expansion Mode (add a new sub-squad and register it) when a federation already exists, before routing."
+          },
+          "promote": {
+            "type": "boolean",
+            "description": "When true on an existing single-squad project (a top-level team.md, no federation.md), run Federation Promotion Mode: adopt the existing squad into a federation as its first sub-squad, relocating its state intact, before routing."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "default",
+              "full",
+              "security",
+              "design",
+              "architecture",
+              "azure",
+              "product",
+              "brd"
+            ],
+            "description": "Optional profile hint forwarded to a sub-squad's Init when it has no squad yet."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "default"
+            ],
+            "description": "Optional model-tier hint forwarded to the selected sub-squad's run."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Optional Member Name forwarded to the selected sub-squad's run."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "autonomous",
+              "autopilot"
+            ],
+            "description": "Optional autonomy mode. With a single sub-squad target it is forwarded to that sub-squad's run; with mode=autopilot and no squad= target the Federation Coordinator runs the federation-level autopilot meta-pipeline (ordered sub-squad autopilot runs, aggregated federation gates, one consolidated final-outcome validation)."
+          },
+          "discovery": {
+            "type": "string",
+            "enum": [
+              "quick",
+              "standard",
+              "deep",
+              "skip"
+            ],
+            "description": "Optional discovery-gate depth, asked once at the federation level and applied per qualifying sub-squad: quick (analyst), standard (designer then analyst), deep (designer, then challenger and experimenter, then analyst), or skip. Each qualifying sub-squad runs its own session and writes its own brief and verdict under its own root. Ignored on an unattended run."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional free-form context to frame the federation turn."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Project label or server-acknowledged partition. With projectContext schema 2, immutable projectId determines storage identity. Never overload squad with a project id."
+          },
+          "projectContext": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schemaVersion",
+              "projectId",
+              "revision",
+              "sequence"
+            ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 2
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "storage"
+                  ],
+                  "properties": {
+                    "storage": {
+                      "required": [
+                        "provider",
+                        "driveId",
+                        "folderItemId"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "schemaVersion": {
+                "type": "integer",
+                "enum": [
+                  1,
+                  2
+                ]
+              },
+              "projectId": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sequence": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{64}$"
+              },
+              "trackingRoot": {
+                "type": "string",
+                "const": ".copilot-tracking"
+              },
+              "storage": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "provider"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "onedrive",
+                      "sharepoint"
+                    ]
+                  },
+                  "driveId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "folderItemId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "displayPath": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "squad_status",
+      "title": "Squad Status",
+      "description": "Poll an async squad run by its run id (squad-guided / embedded). Returns the run status; when the run is complete, returns the finished squad-guided artifact. A held run stays paused until an operator approves it out-of-band — the squad never auto-releases a gate.",
+      "annotations": {
+        "title": "Squad Status",
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runId"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string",
+            "description": "The server-allocated run id returned by squad_run."
+          }
+        }
+      }
+    },
+    {
+      "name": "squad_render_pptx",
+      "title": "Squad Render PPTX",
+      "description": "Render a PowerPoint deck from content YAML and style YAML and return a short-lived download link to the generated .pptx file. Deterministic file output: no model call and no impactful action. Served only when the operator has enabled the render feature.",
+      "annotations": {
+        "title": "Squad Render PPTX"
+      },
+      "inputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "name": "squad_memory_read",
+      "title": "Squad Memory Read",
+      "description": "Read one entry of the project's own squad memory (its `.copilot-tracking/squad/` state, decisions, or per-agent history) and return its content and etag — the etag to pass as expectedEtag on a subsequent write. Deterministic read: no model call and no impactful action. Served only when the operator has enabled the shared-state memory broker.",
+      "annotations": {
+        "title": "Squad Memory Read",
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "name": "squad_memory_write",
+      "title": "Squad Memory Write",
+      "description": "Write (create or replace) one entry of the project's own squad memory under compare-and-swap and return the new etag; pass the prior etag as expectedEtag to avoid clobbering a concurrent writer, or omit it for a first write. Deterministic write-back to the project's own memory: no model call and no impactful squad action. Served only when the operator has enabled the shared-state memory broker.",
+      "annotations": {
+        "title": "Squad Memory Write",
+        "destructiveHint": true
+      },
+      "inputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "name": "squad_business_plan",
+      "title": "Squad Business Plan",
+      "description": "Turn an idea, brief, or opportunity into a decision-ready business plan (squad-guided / embedded) written in plain language for a non-technical stakeholder: summary, problem and customer, proposed solution, value and success measures, scope, go-to-market, cost outline, risks, milestones, and open questions. Advisory text only — nothing is created or changed in any system. Served only when the operator has enabled the business tools.",
+      "annotations": {
+        "title": "Squad Business Plan"
+      },
+      "inputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "name": "squad_backlog",
+      "title": "Squad Backlog",
+      "description": "Turn a request, business plan, or requirements document into a structured delivery backlog (squad-guided / embedded) returned as JSON: epics, user stories with Given/When/Then acceptance criteria, and tasks, plus a flattened 'workItems' array with stable 'ref'/'parentRef' ids. Create the items by calling the Azure DevOps or Jira connector once per element of 'workItems', parents first, linking children by 'parentRef'. This tool only plans — it writes nothing to Azure DevOps or Jira. Served only when the operator has enabled the business tools.",
+      "annotations": {
+        "title": "Squad Backlog"
+      },
+      "inputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "name": "squad_github_status",
+      "title": "GitHub Connection Status",
+      "description": "Report whether your own GitHub account is connected for squad runs and whether it has GitHub Copilot access. Never returns a token.",
+      "annotations": {
+        "title": "GitHub Connection Status",
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "name": "squad_github_connect",
+      "title": "Connect GitHub",
+      "description": "Start connecting your own GitHub account. Returns a single-use link to open in a browser; sign in with your work account there, then authorize GitHub. Runs use your own GitHub Copilot access once connected.",
+      "annotations": {
+        "title": "Connect GitHub"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "name": "squad_github_disconnect",
+      "title": "Disconnect GitHub",
+      "description": "Remove your stored GitHub connection. Existing runs cannot adopt a later link; start new work after reconnecting.",
+      "annotations": {
+        "title": "Disconnect GitHub",
+        "destructiveHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "name": "squad_respond",
+      "title": "Respond to Squad Question",
+      "description": "Submit the human's answer to the current clarification or confirmation on an existing run. Requires Squad.Run, not Squad.Operate. Use the runId and questionId returned by squad_status; do not invent an answer or use this as operator approval. Returns a persisted response receipt; poll squad_status to continue the same run. Optional projectContext must match the saved run.",
+      "annotations": {
+        "title": "Respond to Squad Question",
+        "destructiveHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runId",
+          "questionId",
+          "answer"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "questionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "answer": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16000,
+            "pattern": "\\S"
+          },
+          "projectContext": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schemaVersion",
+              "projectId",
+              "revision",
+              "sequence"
+            ],
+            "properties": {
+              "schemaVersion": {
+                "type": "integer",
+                "enum": [
+                  1,
+                  2
+                ]
+              },
+              "projectId": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sequence": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "trackingRoot": {
+                "type": "string",
+                "const": ".copilot-tracking"
+              },
+              "storage": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "provider"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "onedrive",
+                      "sharepoint"
+                    ]
+                  },
+                  "driveId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "folderItemId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "displayPath": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 2
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "storage"
+                  ],
+                  "properties": {
+                    "storage": {
+                      "type": "object",
+                      "required": [
+                        "provider",
+                        "driveId",
+                        "folderItemId"
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "squad_history",
+      "title": "Squad History",
+      "description": "Browse and open what previous squad runs produced for a project: the squad state, each role's deliverables, and the per-agent history. Use op='index' for a compact picture of what exists, op='list' to enumerate a directory, and op='read' to open one artifact. Set offset=0 for exact JSON pages with UTF-8 SHA-256 receipts; continue at nextOffset until null, requiring the same etag and sha256 across pages. Without offset, reads are bounded previews. Deterministic: no model call, no impactful action.",
+      "annotations": {
+        "title": "Squad History",
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project"
+        ],
+        "properties": {
+          "project": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "The project namespace within your tenant (lowercase dns-ish label)."
+          },
+          "op": {
+            "type": "string",
+            "enum": [
+              "index",
+              "list",
+              "read"
+            ],
+            "description": "index (default) summarizes; list enumerates a prefix; read opens one path."
+          },
+          "prefix": {
+            "type": "string",
+            "description": "For op='list': a directory such as '.copilot-tracking/plans'."
+          },
+          "path": {
+            "type": "string",
+            "description": "For op='read': the artifact path from a list result."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "For op='read' only: UTF-16 character offset. Start at 0 for exact bounded pages, then use nextOffset. Preserve content verbatim and verify the assembled UTF-8 sha256 and totalBytes."
+          },
+          "binaryOffset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "For op='read' of a .artifact.json binary metadata path: retrieve authenticated base64 bytes in bounded chunks. Start at 0, continue at nextOffset until null, verify totalBytes and sha256. Do not combine with text offset."
+          }
+        }
+      }
+    },
+    {
+      "name": "squad_memory_sync",
+      "title": "Squad Memory Sync",
+      "description": "Flush a batch of the project's own squad-memory entries in one call. Each item is written under its own compare-and-swap; pass the prior etag as expectedEtag to guard against clobbering a concurrent writer (omit it for a first write). A stale expectedEtag on one item is reported as a conflict in the results without aborting the others. Returns a per-item result array. Deterministic: no model call, no impactful action.",
+      "annotations": {
+        "title": "Squad Memory Sync",
+        "destructiveHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project",
+          "items"
+        ],
+        "properties": {
+          "project": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "The project namespace within your tenant (lowercase dns-ish label)."
+          },
+          "items": {
+            "type": "array",
+            "description": "The batch of memory entries to write; each is applied under its own CAS.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "content"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "The logical memory path (e.g. 'state', 'decisions', 'history/<agent>')."
+                },
+                "content": {
+                  "type": "string",
+                  "description": "The full new content to persist at 'path'."
+                },
+                "expectedEtag": {
+                  "type": "string",
+                  "description": "The etag from the prior read/write; this item applies only if it still matches."
+                }
+              }
+            }
+          },
+          "target": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+            "description": "Optional operator-declared storage destination to use (for example a SharePoint library). Omit to use the deployment's default destination."
+          }
+        }
+      }
+    }
+  ]
+}

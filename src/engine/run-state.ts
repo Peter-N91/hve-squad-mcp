@@ -21,6 +21,20 @@ import type { ResponsibleAiBlocker } from "./responsible-ai.js";
 
 export type RunStatus = "running" | "held" | "complete" | "failed";
 
+/** Who a run belongs to. `githubUserId` pins the GitHub account for resume. */
+export interface RunOwnerRecord {
+  /** Verified Entra tenant, distinct from the private storage partition. */
+  authorityTenantId?: string;
+  /** Entra object id of the signed-in user (never the pairwise `sub`). */
+  objectId: string;
+  /** Immutable numeric GitHub user id the run started with. */
+  githubUserId?: number;
+  /** Credential version the run started with, for audit. */
+  credentialVersion?: number;
+  /** Stable across token refresh, replaced by a browser-confirmed relink. */
+  linkGeneration?: string;
+}
+
 /** Default worker lease (ms): a `running` run past its lease is reclaimable. */
 export const DEFAULT_LEASE_MS = 10 * 60 * 1000;
 
@@ -90,6 +104,12 @@ export interface RunState {
   readonly runId: string;
   /** The owning tenant — the isolation key. */
   readonly tenantId: string;
+  /**
+   * The user the run belongs to and the GitHub account it was started with.
+   * Identifiers only, never a credential. Absent on runs from before per-user
+   * identity, and on runs started with an app-only token.
+   */
+  readonly owner?: RunOwnerRecord;
   /** The tool this run is executing. */
   readonly toolId: string;
   status: RunStatus;
@@ -181,6 +201,8 @@ export interface CreateRunInit {
   toolId: string;
   /** WI-06 — optional TTL (ms from creation) after which the run expires. */
   ttlMs?: number;
+  /** The signed-in user the run belongs to, pinned when per-user GitHub identity is on. */
+  owner?: RunOwnerRecord;
 }
 
 /** Options for an atomic {@link RunStateStore.claim} compare-and-transition. */
@@ -204,7 +226,7 @@ export interface RunStateStore {
   readonly kind: "ephemeral" | "durable";
   create(init: CreateRunInit): Promise<RunState>;
   get(runId: string): Promise<RunState | undefined>;
-  update(runId: string, patch: Partial<Omit<RunState, "runId" | "tenantId" | "toolId" | "createdAt">>): Promise<RunState | undefined>;
+  update(runId: string, patch: Partial<Omit<RunState, "runId" | "tenantId" | "toolId" | "createdAt" | "owner">>): Promise<RunState | undefined>;
   delete(runId: string): Promise<void>;
   /**
    * Atomically answer the current unanswered question on an unexpired held run
@@ -323,6 +345,7 @@ export class EphemeralRunStateStore implements RunStateStore {
       createdAt: now,
       updatedAt: now,
       expiresAt: init.ttlMs !== undefined ? now + init.ttlMs : undefined,
+      ...(init.owner ? { owner: { ...init.owner } } : {}),
     };
     this.runs.set(run.runId, run);
     return Promise.resolve(run);
@@ -334,7 +357,7 @@ export class EphemeralRunStateStore implements RunStateStore {
 
   update(
     runId: string,
-    patch: Partial<Omit<RunState, "runId" | "tenantId" | "toolId" | "createdAt">>,
+    patch: Partial<Omit<RunState, "runId" | "tenantId" | "toolId" | "createdAt" | "owner">>,
   ): Promise<RunState | undefined> {
     const existing = this.peek(runId);
     if (!existing) {

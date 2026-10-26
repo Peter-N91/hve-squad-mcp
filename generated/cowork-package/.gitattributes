@@ -1,0 +1,3 @@
+# Binary outputs must override the root generated/** text rule.
+*.png binary
+*.zip binary
