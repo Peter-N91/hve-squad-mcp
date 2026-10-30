@@ -1,0 +1,313 @@
+# Lint, contract-diff, and a gated what-if for every deploy-affecting change.
+#
+# cicd bicep-cicd-pipeline (federation autopilot inner run bicep-cicd-2026-09-27).
+# Plan: .copilot-tracking/squad/members/cicd/plans/2026-09-28-bicep-cicd-pipeline-plan.md
+# Council conditions this file satisfies (see the plan's "Council Conditions
+# Traceability" table for the full mapping): security C3/C4/C8/C11/C13,
+# supply-chain R4/R6/R7/R8, deployer DC1/DC3/DC5/DC6/DC11/DC12/DC13.
+#
+# Dispatch boundary. This workflow never authenticates as `ciDeployIdentity`
+# and never declares `environment: prod`. Its `what-if` job authenticates as
+# `ciPlanIdentity` (federated-credential subjects: `pull_request` and
+# `ref:refs/heads/main` — host/infra/bootstrap/modules/ci-identities.bicep),
+# which holds ONLY a read-only what-if/validate custom role
+# (`squad-ci-plan-reader`). A fork pull request never reaches the `what-if`
+# job at all (D4): the `if:` guard below requires
+# `github.event.pull_request.head.repo.full_name == github.repository`.
+#
+# Trusted-tooling boundary (security C3). The `what-if` job checks out TWO
+# things, into two directories: `.github/scripts/whatif-gate.mjs` and
+# `host/infra/tests/check-no-placeholders.mjs` — the scripts that decide
+# whether a diff is safe — from `github.workflow_sha` (`ci/`, this workflow's
+# OWN trusted commit), never from the commit under review. The Bicep
+# templates and `prod.bicepparam` being validated come from the PR head SHA /
+# push SHA (`target/`). A change to the gate scripts themselves cannot use
+# its own modified copy to approve itself in the same run that introduces it.
+#
+# Concurrency: one run per ref, and a newer push/PR update cancels a stale one
+# in flight (this is the validate side; `infra-deploy.yml`'s own concurrency
+# group is a DIFFERENT, singleton group — see that file's header comment).
+name: Infra validate
+
+on:
+  pull_request:
+    paths:
+      - "host/infra/**"
+      - "host/Containerfile"
+      - "host/cast/**"
+      - "host/render/**"
+      - "src/**"
+      - "generators/**"
+      - "generated/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tools.catalog.yml"
+      - "tsconfig.json"
+      - ".dockerignore"
+      - ".github/workflows/infra-*.yml"
+      - ".github/scripts/**"
+  push:
+    branches: [main]
+    paths:
+      - "host/infra/**"
+      - "host/Containerfile"
+      - "host/cast/**"
+      - "host/render/**"
+      - "src/**"
+      - "generators/**"
+      - "generated/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tools.catalog.yml"
+      - "tsconfig.json"
+      - ".dockerignore"
+      - ".github/workflows/infra-*.yml"
+      - ".github/scripts/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  # Shared Bicep CLI pin (supply-chain R4, deployer DC12) — the same value
+  # infra's own changes record validated against (Bicep CLI 0.43.8).
+  BICEP_CLI_VERSION: v0.43.8
+  # Forces the Azure CLI to install and use ITS OWN managed Bicep binary
+  # (never the runner's preinstalled `bicep`), so `az bicep install --version
+  # "$BICEP_CLI_VERSION"` below actually takes effect. Azure CLI's own
+  # `bicep.use_binary_from_path` default is `if_found_in_ci`, which — on a
+  # GitHub-hosted runner (already CI) — silently prefers whatever `bicep` the
+  # image ships, ignoring the pin entirely (deployer DC12/R4). Every job that
+  # compiles Bicep also runs `az config set bicep.use_binary_from_path=false`
+  # itself, and this env var is a second, independent enforcement of the
+  # same setting (environment variables take priority over `az config` in
+  # Azure CLI's own precedence order).
+  AZURE_BICEP_USE_BINARY_FROM_PATH: "false"
+
+jobs:
+  validate:
+    name: Lint, build-params, and contract diff (credential-free)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Pin and log the Bicep CLI
+        run: |
+          set -euo pipefail
+          az config set bicep.use_binary_from_path=false
+          az bicep install --version "$BICEP_CLI_VERSION"
+          INSTALLED_VERSION=$(az bicep version)
+          EXPECTED_VERSION="${BICEP_CLI_VERSION#v}"
+          if ! echo "$INSTALLED_VERSION" | grep -qF "Bicep CLI version $EXPECTED_VERSION "; then
+            echo "::error::az bicep version did not report the pinned $EXPECTED_VERSION (deployer DC12/R4) — got: $INSTALLED_VERSION"
+            exit 1
+          fi
+          {
+            echo "### Bicep CLI"
+            echo '```'
+            az version
+            echo "$INSTALLED_VERSION"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Resolve the baseline ref for the contract diff
+        id: baseline
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          REF="${PR_BASE_SHA:-$PUSH_BEFORE_SHA}"
+          if [ -z "$REF" ] || [ "$REF" = "0000000000000000000000000000000000000000" ]; then
+            echo "::notice::no usable baseline SHA (first push to a new branch) — validating against HEAD only"
+            REF=""
+          fi
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+      - name: node host/infra/tests/validate.mjs (lint, build-params, contract diff)
+        env:
+          BASELINE_REF: ${{ steps.baseline.outputs.ref }}
+        run: |
+          set -euo pipefail
+          if [ -n "$BASELINE_REF" ]; then
+            node host/infra/tests/validate.mjs --baseline-ref "$BASELINE_REF"
+          else
+            node host/infra/tests/validate.mjs
+          fi
+
+      - name: whatif-gate.mjs self-test (security C13's re-scan; keeps the gate script itself proven on every validate run)
+        run: node .github/scripts/whatif-gate.mjs --self-test
+
+  what-if:
+    name: What-if (ciPlanIdentity, credential-free for a fork PR)
+    needs: validate
+    # D4: never a fork PR, never pull_request_target. A same-repo PR or any
+    # push to main satisfies this; a fork PR simply never reaches this job —
+    # it stays visible in the PR's checks as "skipped", not "failed".
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    # No `environment:` key on this job (S6): ciPlanIdentity's federated
+    # subjects (`pull_request`, `ref:refs/heads/main`) both resolve without an
+    # environment claim, and this job must never force the prod Environment's
+    # approval pause.
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      CONTAINER_REGISTRY_SERVER: ${{ vars.SQUAD_INFRA_CONTAINER_REGISTRY_SERVER }}
+    steps:
+      - name: Skip notice when ciPlanIdentity is not yet configured (security C11)
+        id: configured
+        env:
+          CI_PLAN_CLIENT_ID: ${{ vars.CI_PLAN_CLIENT_ID }}
+        run: |
+          if [ -z "$CI_PLAN_CLIENT_ID" ]; then
+            echo "::notice::vars.CI_PLAN_CLIENT_ID is not set — ciPlanIdentity has not been bootstrapped yet. Skipping the what-if job cleanly (see host/RUNBOOK.md Step 1)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # --- Trusted-commit checkout: the gating tooling only (security C3) ---
+      - name: Checkout gating tooling (trusted commit)
+        if: steps.configured.outputs.skip == 'false'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: ci
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            host/infra/tests/check-no-placeholders.mjs
+          sparse-checkout-cone-mode: false
+
+      # --- Target-commit checkout: the Bicep/parameter content under review ---
+      - name: Checkout target content (PR head / push SHA)
+        if: steps.configured.outputs.skip == 'false'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: target
+          persist-credentials: false
+
+      - name: Trusted checkout exists
+        if: steps.configured.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          test -f ci/.github/scripts/whatif-gate.mjs
+          test -f ci/host/infra/tests/check-no-placeholders.mjs
+          test -f target/host/infra/main.bicep
+          test -f target/host/infra/environments/prod.bicepparam
+
+      - name: Pin and log the Bicep CLI
+        if: steps.configured.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          az config set bicep.use_binary_from_path=false
+          az bicep install --version "$BICEP_CLI_VERSION"
+          INSTALLED_VERSION=$(az bicep version)
+          EXPECTED_VERSION="${BICEP_CLI_VERSION#v}"
+          if ! echo "$INSTALLED_VERSION" | grep -qF "Bicep CLI version $EXPECTED_VERSION "; then
+            echo "::error::az bicep version did not report the pinned $EXPECTED_VERSION (deployer DC12/R4) — got: $INSTALLED_VERSION"
+            exit 1
+          fi
+          {
+            echo "### Bicep CLI (what-if job)"
+            echo '```'
+            az version
+            echo "$INSTALLED_VERSION"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Azure login (ciPlanIdentity, OIDC)
+        if: steps.configured.outputs.skip == 'false'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.CI_PLAN_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Export SQUAD_INFRA_* variables (only non-empty; never an empty-string override of a default)
+        if: steps.configured.outputs.skip == 'false'
+        env:
+          VARS_JSON: ${{ toJSON(vars) }}
+        run: node ci/.github/scripts/export-infra-vars.mjs
+
+      - name: Resolve budgetStartDate (read-only; DC13 — pin after the first deploy, else current-month default)
+        if: steps.configured.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          BUDGET_NAME="${SQUAD_INFRA_NAME_PREFIX:-squadmcp}-budget"
+          BUDGET_ID="/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.Consumption/budgets/${BUDGET_NAME}"
+          set +e
+          START_DATE=$(az resource show --ids "$BUDGET_ID" --api-version 2023-11-01 --query properties.timePeriod.startDate -o tsv 2>/tmp/budget-lookup.err)
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            if grep -qi "ResourceNotFound" /tmp/budget-lookup.err; then
+              START_DATE=""
+              echo "::notice::budget resource not found yet — using main.bicep's own first-deploy default (current UTC month)"
+            else
+              echo "::error::budget lookup failed for a reason other than ResourceNotFound"
+              cat /tmp/budget-lookup.err >&2
+              exit 1
+            fi
+          fi
+          # Validate BEFORE writing to $GITHUB_ENV: empty, or YYYY-MM-DD (optionally with a time suffix).
+          if [ -n "$START_DATE" ] && ! [[ "$START_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ].*)?$ ]]; then
+            echo "::error::budgetStartDate did not resolve to an expected date shape"
+            exit 1
+          fi
+          echo "SQUAD_INFRA_BUDGET_START_DATE=$START_DATE" >> "$GITHUB_ENV"
+
+      - name: Placeholder preflight (deployer DC1; runs key-less by construction — this job has no secret)
+        if: steps.configured.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          az bicep build-params --file target/host/infra/environments/prod.bicepparam --outfile "$RUNNER_TEMP/prod.parameters.json"
+          node ci/host/infra/tests/check-no-placeholders.mjs "$RUNNER_TEMP/prod.parameters.json"
+
+      - name: Set the placeholder container image (this job never builds one)
+        if: steps.configured.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          PLACEHOLDER_DIGEST="0000000000000000000000000000000000000000000000000000000000000000"
+          PLACEHOLDER_DIGEST="${PLACEHOLDER_DIGEST:0:64}"
+          echo "SQUAD_INFRA_CONTAINER_IMAGE=${CONTAINER_REGISTRY_SERVER}/hve-squad-mcp@sha256:${PLACEHOLDER_DIGEST}" >> "$GITHUB_ENV"
+
+      - name: What-if against host/infra/environments/prod.bicepparam
+        if: steps.configured.outputs.skip == 'false'
+        id: whatif
+        # Security C6: when the resolved SQUAD_INFRA_ENABLE_REMOTE_PIPELINE is
+        # "true", a FIXED, obviously-fake 44-character base64 placeholder key
+        # (32 zero bytes) is supplied here — step-level only, never job-level
+        # or $GITHUB_ENV — purely so the ARM diff's conditional shape
+        # (whether the encryptionEnv entry appears) matches what `deploy`
+        # will actually apply; this job never touches the real secret, which
+        # has no `environment: prod` to be issued from in the first place.
+        env:
+          SQUAD_INFRA_RUN_ENCRYPTION_KEY_B64: ${{ (vars.SQUAD_INFRA_ENABLE_REMOTE_PIPELINE == 'true') && 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' || '' }}
+        run: |
+          set -euo pipefail
+          az deployment group what-if \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file target/host/infra/main.bicep \
+            --parameters target/host/infra/environments/prod.bicepparam \
+            --name main --mode Incremental --validation-level ProviderNoRbac \
+            --result-format FullResourcePayloads --no-pretty-print --only-show-errors \
+            -o json > "$RUNNER_TEMP/whatif.json"
+
+      - name: Gate the what-if result (whatif-gate.mjs)
+        if: steps.configured.outputs.skip == 'false'
+        run: node ci/.github/scripts/whatif-gate.mjs "$RUNNER_TEMP/whatif.json"
