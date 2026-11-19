@@ -92,9 +92,24 @@
     <strong>Le mode distant n'exécute jamais cette étape.</strong> Une exécution intégrée n'a personne à interroger : cette étape n'est donc pas proposée et un paramètre <code>discovery</code> explicite est ignoré plutôt qu'appliqué — la charge utile de l'appelant sert alors d'entrée au contrôle à l'entrée. Une exécution sans surveillance est soumise à une validation, et non à une démarche d'idéation.
   </p>
 
-  <h3>Routage des modèles</h3>
+  <h3>Routage des modèles et contrôles de flux</h3>
   <p>
-    Les deux outils généralistes acceptent aussi un mode <code>routing</code> facultatif, <code>off</code>, <code>ranked</code> ou <code>manual</code>, qui reprend l'argument ajouté par <code>hve-squad@0.18.0</code> aux invites <code>/squad</code> et <code>/squad-federation</code>. Le coordinateur l'enregistre dans la ligne <code>Model routing:</code> de <code>team.md</code> jusqu'à sa prochaine modification. <code>ranked</code> choisit le modèle de chaque rôle selon son adéquation, d'après le catalogue de modèles de l'équipe ; <code>manual</code> vous demande de choisir parmi les modèles que votre hôte peut exécuter ; <code>off</code> invoque les rôles sans paramètre de modèle. Omettez-le pour conserver le mode enregistré. Le mode distant l'ignore, car une exécution intégrée utilise le modèle configuré par l'opérateur.
+    Les deux outils généralistes acceptent aussi un mode <code>routing</code> facultatif, <code>off</code>,
+    <code>ranked</code>, <code>economy</code> ou <code>manual</code>, qui reprend l'argument ajouté par
+    <code>hve-squad@0.18.0</code> aux invites <code>/squad</code> et <code>/squad-federation</code>. Le coordinateur
+    l'enregistre dans la ligne <code>Model routing:</code> de <code>team.md</code> jusqu'à sa prochaine modification.
+    <code>ranked</code> choisit d'abord le modèle de chaque rôle selon sa capacité dans le catalogue de modèles de
+    l'équipe ; <code>economy</code> sélectionne le modèle qualifié le moins coûteux dans le plancher de chaque rôle
+    après consentement ; <code>manual</code> vous demande de choisir parmi les modèles que votre hôte peut exécuter ;
+    <code>off</code> invoque les rôles sans paramètre de modèle. Omettez-le pour conserver le mode enregistré. Le mode
+    distant l'ignore, car une exécution intégrée utilise le modèle configuré par l'opérateur.
+  </p>
+  <p>
+    En mode supervisé, les deux outils généralistes transmettent également la profondeur par tour <code>depth</code>
+    (<code>quick</code> ou <code>standard</code>, qui ajuste la quantité de travail exécutée sans changer de modèle ni
+    omettre aucun contrôle), les extensions <code>pack</code> superposées au profil et le choix de connecteur après
+    classification <code>execution</code> (<code>original</code>, <code>connector:&lt;binding-id&gt;</code> ou
+    <code>both</code>). Le mode distant ignore ces trois paramètres et consigne leur mise à l'écart dans les journaux.
   </p>
 
   <h2>Outils utilitaires</h2>

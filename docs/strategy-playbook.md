@@ -40,7 +40,7 @@ routing, tenant resolution, quotas, and gates happen before prompt composition.
 The remote advisory router has two broad outcomes:
 
 1. A request that matches only research language (`research`, `investigate`,
-   `explore`, or `find out`) becomes one Task Researcher stage.
+   `explore`, or `find out`) becomes one Squad Researcher stage.
 2. Any broader request becomes research -> plan -> optional council -> review ->
    backlog handoff.
 
@@ -81,10 +81,10 @@ cost, product requirements, and responsible-AI risks, and produce a go/no-go."
 | Property | Behavior |
 | --- | --- |
 | Scope | `Squad.Research` over HTTP |
-| Persona | Task Researcher |
-| Canonical charter | `host/cast/.github/agents/task-researcher.agent.md` |
-| Local workflow | Coordinator dispatches Task Researcher, which delegates investigation to Researcher Subagent and consolidates evidence under `.copilot-tracking/research/` |
-| Remote workflow | One model completion using the compact embedded Task Researcher charter |
+| Persona | Squad Researcher |
+| Canonical charter | `host/cast/.github/agents/squad/squad-researcher.agent.md` |
+| Local workflow | Coordinator dispatches Squad Researcher, which runs `rpi-research`, delegates bounded investigation lanes to RPI Researcher, and consolidates evidence under `.copilot-tracking/research/` |
+| Remote workflow | One model completion using the compact embedded Squad Researcher charter |
 | Output | Local: delegated dispatch package and host-created research artifact. Remote: concise evidence-based research markdown |
 | Side effects | None remotely; local host may write research tracking files |
 
@@ -111,10 +111,10 @@ use `squad_run` or explicitly chain research into planning.
 | Property | Behavior |
 | --- | --- |
 | Scope | `Squad.Plan` over HTTP |
-| Persona | Task Planner |
-| Canonical charter | `host/cast/.github/agents/task-planner.agent.md` |
-| Local workflow | Grounds a plan in research, creates plan/details/log artifacts, identifies parallel phases, and delegates validation to Plan Validator |
-| Remote workflow | One model completion using the real Task Planner charter |
+| Persona | Squad Lead |
+| Canonical charter | `host/cast/.github/agents/squad/squad-lead.agent.md` |
+| Local workflow | Grounds a plan in research via `rpi-plan`, enumerates the run's deliverables and owning roles, and creates plan artifacts under `.copilot-tracking/plans/` |
+| Remote workflow | One model completion using the real Squad Lead charter |
 | Output | An implementation-oriented plan; remote output is advisory text only |
 | Side effects | None remotely; local host may create planning artifacts |
 
@@ -142,10 +142,10 @@ Avoid planning directly from an underspecified idea. Use `squad_research` or
 | Property | Behavior |
 | --- | --- |
 | Scope | `Squad.Review` over HTTP |
-| Persona | Task Reviewer |
-| Canonical charter | `host/cast/.github/agents/task-reviewer.agent.md` |
-| Local workflow | Reviews plan/change/research artifacts, dispatches phase validators and an Implementation Validator, runs validation commands, and produces a severity-ordered review log |
-| Remote workflow | One Task Reviewer model completion |
+| Persona | Squad Reviewer |
+| Canonical charter | `host/cast/.github/agents/squad/squad-reviewer.agent.md` |
+| Local workflow | Reviews plan/change/research artifacts via `rpi-review` and `code-review`, runs validation commands, and produces severity-graded findings under `.copilot-tracking/reviews/` |
+| Remote workflow | One Squad Reviewer model completion |
 | Direct-tool council behavior | Local delegated instructions may add council for go/no-go or multi-domain requests. Remote direct `squad_review` does not run the parallel council; use `squad_run` for the implemented remote council stage |
 | Side effects | None remotely; local host may create review artifacts and run checks |
 
@@ -522,7 +522,7 @@ planning and action is structured and explicit.
 | --- | --- | --- |
 | Expecting Copilot Studio to execute instructions embedded in an artifact | Tool output is data and the server has no action connector | Configure the action separately and give the outer agent an explicit, confirmed orchestration flow |
 | Calling `squad_run` for every request | It adds stages, approval latency, and model cost | Use a focused specialist tool first |
-| Expecting remote `squad_review` to run the council | Its HTTP path is one Task Reviewer completion | Use remote `squad_run` with explicit multi-domain criteria |
+| Expecting remote `squad_review` to run the council | Its HTTP path is one Squad Reviewer completion | Use remote `squad_run` with explicit multi-domain criteria |
 | Planning from a vague idea | Planner must invent assumptions | Research or business-plan first |
 | Reviewing without the artifact | Reviewer lacks the source of truth | Put the artifact and acceptance criteria in `context` |
 | Assuming separate calls share context | Context threading is not automatic unless auto-memory captured it | Pass the prior artifact explicitly or enable governed auto-memory |
@@ -533,16 +533,14 @@ planning and action is structured and explicit.
 
 ## 9. Current Repository Caveats
 
-- The package version is `0.2.12`, while `SERVER_VERSION` currently reports
-  `0.2.10` in the MCP handshake.
-- The bundled cast snapshot is stale relative to the bundled roster and is
-  missing some roster primary personas. Persona resolution fails closed for
-  unresolved non-hero roles, so refresh the cast before relying on every route.
-- The README contains a stale reference to a two-stage async slice. The current
-  advisory implementation plans research, plan, optional council, review, and
-  backlog handoff.
-- The installed production dependency graph currently reports npm audit
-  advisories. Resolve and retest those before a production deployment.
+- `SERVER_VERSION` in `src/server.ts`, `package.json`, and `package-lock.json`
+  are kept in step by `npm run version:set` and verified by `test/generator.test.ts`.
+- The bundled cast snapshot under `host/cast/.github/` is pinned to
+  `Peter-N91/hve-squad@0.21.0` (`host/cast/package-pin.json`) and verified both
+  offline (`test/cast-bundle.test.ts`) and online (`npm run snapshot:cast:check`).
+- Attended-only prompt controls (`discovery`, `pack`, `execution`, `routing`,
+  `depth`) are forwarded on the local delegated path and ignored (with an info
+  log) on the remote embedded path.
 
 ## 10. Source Map
 

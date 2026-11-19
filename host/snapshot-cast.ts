@@ -62,6 +62,9 @@ const CAST_INSTRUCTIONS = join(CAST_ROOT, "instructions");
 const CAST_SKILLS = join(CAST_ROOT, "skills");
 
 const BOUNDARY_FILE = "untrusted-content-boundary.instructions.md";
+/** Upstream relocated `untrusted-content-boundary` from `instructions/shared/` to a skill directory. */
+const BOUNDARY_SKILL_DIR = "/skills/shared/untrusted-content-boundary";
+const BOUNDARY_SKILL_DEST = "skills/untrusted-content-boundary/SKILL.md";
 
 /** The squad skill directory, as `apm.yml` declares it (a directory, not a file). */
 const SQUAD_SKILL_DIR = "/skills/squad";
@@ -207,6 +210,9 @@ export function bundleDestination(dep: Dependency, packageSlug: string): string 
   if (file === BOUNDARY_FILE) {
     return `instructions/${BOUNDARY_FILE}`;
   }
+  if (dep.path.endsWith(`${BOUNDARY_SKILL_DIR}/SKILL.md`)) {
+    return BOUNDARY_SKILL_DEST;
+  }
   if (file.endsWith(".agent.md") && dep.path.includes("/agents/")) {
     return dep.slug === packageSlug ? `agents/squad/${file}` : `agents/${file}`;
   }
@@ -226,13 +232,17 @@ export function bundleDestination(dep: Dependency, packageSlug: string): string 
 
 /**
  * Expand a directory dependency into the individual files the bundle carries.
- * `apm.yml` deploys the package's squad skill as a whole directory; the bundle
- * takes only {@link SQUAD_SKILL_REFERENCES} from it. Every other entry is a file
- * and passes through unchanged.
+ * `apm.yml` deploys the package's squad skill and upstream's untrusted-content-boundary
+ * skill as whole directories; the bundle takes {@link SQUAD_SKILL_REFERENCES} from
+ * the squad skill and `SKILL.md` from the boundary skill. Every other entry is a
+ * file and passes through unchanged.
  */
 export function expandDependency(dep: Dependency, packageSlug: string): Dependency[] {
   if (dep.slug === packageSlug && dep.path.endsWith(SQUAD_SKILL_DIR)) {
     return SQUAD_SKILL_REFERENCES.map((ref) => ({ ...dep, path: `${dep.path}/${ref}` }));
+  }
+  if (dep.path.endsWith(BOUNDARY_SKILL_DIR)) {
+    return [{ ...dep, path: `${dep.path}/SKILL.md` }];
   }
   return [dep];
 }
@@ -374,8 +384,15 @@ async function resolveBundle(pin: Pin): Promise<Resolution> {
   if (!planned.some((file) => file.dest.startsWith("instructions/squad/"))) {
     throw new Error("apm.yml yielded no squad instructions — the manifest layout changed.");
   }
-  if (!planned.some((file) => file.dest === `instructions/${BOUNDARY_FILE}`)) {
-    throw new Error(`apm.yml does not carry ${BOUNDARY_FILE} — boundary enforcement would ship absent.`);
+  if (
+    !planned.some(
+      (file) =>
+        file.dest === BOUNDARY_SKILL_DEST || file.dest === `instructions/${BOUNDARY_FILE}`,
+    )
+  ) {
+    throw new Error(
+      `apm.yml does not carry ${BOUNDARY_SKILL_DEST} (or legacy ${BOUNDARY_FILE}) — boundary enforcement would ship absent.`,
+    );
   }
   for (const reference of SQUAD_SKILL_REFERENCES) {
     if (!planned.some((file) => file.dest === `skills/squad/${reference}`)) {
@@ -449,8 +466,9 @@ function buildManifest(pin: Pin, resolution: Resolution, generatedAt: string): C
       source: `${file.slug}/${file.path}#${file.commit}`,
     })),
     note:
-      "Skill file trees are DEFERRED to the execution expansion; personas + squad/boundary instructions " +
-      "plus the squad skill references the server parses (skills/squad/references/roster-catalog.md) only.",
+      "Skill file trees are DEFERRED to the execution expansion; personas + squad instructions " +
+      "plus the untrusted-content-boundary skill and the squad skill references the server parses " +
+      "(skills/squad/references/roster-catalog.md) only.",
   };
 }
 

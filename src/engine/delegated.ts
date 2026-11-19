@@ -28,8 +28,11 @@ import {
   FEDERATION_COORDINATOR_PERSONA,
   FEDERATION_DETECTION_NOTE,
   GATE_INSTRUCTIONS,
+  depthInstructions,
   discoveryInstructions,
+  executionInstructions,
   modeInstructions,
+  packInstructions,
   routingInstructions,
   squadStateRoot,
 } from "./persona.js";
@@ -65,9 +68,21 @@ function composeSystemPrompt(tool: CatalogTool, request: CoordinatorRequest): st
   if (discoveryBlock.length > 0) {
     blocks.push(discoveryBlock);
   }
+  const packBlock = packInstructions(request.pack, federation);
+  if (packBlock.length > 0) {
+    blocks.push(packBlock);
+  }
+  const executionBlock = executionInstructions(request.execution, federation);
+  if (executionBlock.length > 0) {
+    blocks.push(executionBlock);
+  }
   const routingBlock = routingInstructions(request.routing, federation);
   if (routingBlock.length > 0) {
     blocks.push(routingBlock);
+  }
+  const depthBlock = depthInstructions(request.depth, federation);
+  if (depthBlock.length > 0) {
+    blocks.push(depthBlock);
   }
   // Surface federation resolution for the federation tool, or for any tool that
   // did not pin a sub-squad (a plain repo ignores it; a federation repo needs it).
@@ -246,11 +261,14 @@ async function composeStateContext(
     `- squad state root: \`${stateRoot}\` (create on first use via the Squad Scribe)`,
     `- sub-squad: ${request.squad ?? "(none / plain squad; resolve from meta-routing in a federation)"}`,
     `- profile: ${request.profile ?? "(coordinator discovers / proposes)"}`,
+    `- pack: ${request.pack ?? "(none; coordinator proposes from repository or request signals)"}`,
     `- tier: ${request.tier ?? "(cost-first default)"}`,
     `- owner: ${request.owner ?? "(role-only dispatch)"}`,
+    `- execution: ${request.execution ?? "(roster binding default or internal Primary)"}`,
     `- mode: ${request.mode ?? "(interactive)"}`,
     `- discovery: ${request.discovery ?? "(no explicit depth; offer once when the trigger holds)"}`,
     `- model routing: ${request.routing ?? "(as recorded in team.md; none recorded dispatches with no model parameter)"}`,
+    `- depth: ${request.depth ?? "(standard default; per-turn, never inferred)"}`,
   ];
   // Optional bounded prior-context digest (Step 4.1). With NO store injected the
   // block is never appended, so the output is BYTE-IDENTICAL to the advisory-only

@@ -30,7 +30,7 @@ import {
 import { deliverableRootFor, type ProfileTables, type ResolvedProfile } from "./profiles.js";
 
 /** The `state.json` schema this server writes (matches squad-state.instructions.md). */
-export const STATE_SCHEMA_VERSION = "1.3";
+export const STATE_SCHEMA_VERSION = "1.4";
 
 export const TEAM_PATH = `${SQUAD_STATE_ROOT}/team.md`;
 export const ROUTING_PATH = `${SQUAD_STATE_ROOT}/routing.md`;
@@ -73,6 +73,21 @@ export interface SquadStateJson {
     modelOverrides: Record<string, string>;
     estCostUsd: number;
     estCreditsTotal: number;
+    costPreflight?: {
+      runId: string;
+      roundId: string;
+      ceilingUsd: number | null;
+      evaluatedSpendUsd: number;
+      remainingUsd: number | null;
+      plannedDispatches: number;
+      projectedCostUsd: number;
+      reserveMultiplier: number;
+      admissionCostUsd: number;
+      confidence: string;
+      basis: string;
+      decision: string;
+      reason: string;
+    };
   };
   notify: {
     approvalChannel: string;
@@ -170,7 +185,27 @@ export function initialState(
     mode: opts.mode?.trim() || "interactive",
     activeRoles: [],
     openEscalations: [],
-    currentRun: { sessionModel: "", modelOverrides: {}, estCostUsd: 0, estCreditsTotal: 0 },
+    currentRun: {
+      sessionModel: "",
+      modelOverrides: {},
+      estCostUsd: 0,
+      estCreditsTotal: 0,
+      costPreflight: {
+        runId: "",
+        roundId: "",
+        ceilingUsd: null,
+        evaluatedSpendUsd: 0,
+        remainingUsd: null,
+        plannedDispatches: 0,
+        projectedCostUsd: 0,
+        reserveMultiplier: 3.0,
+        admissionCostUsd: 0,
+        confidence: "not-applicable",
+        basis: "not-requested",
+        decision: "not-requested",
+        reason: "No cost ceiling configured.",
+      },
+    },
     notify: {
       approvalChannel: "in-chat",
       enabled: false,

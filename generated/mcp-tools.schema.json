@@ -27,8 +27,12 @@
               "full",
               "security",
               "design",
+              "accessibility",
               "architecture",
               "azure",
+              "modernization",
+              "compliance",
+              "operations",
               "product"
             ],
             "description": "Optional squad profile to seed when the project has no squad yet."
@@ -97,8 +101,12 @@
               "full",
               "security",
               "design",
+              "accessibility",
               "architecture",
               "azure",
+              "modernization",
+              "compliance",
+              "operations",
               "product"
             ],
             "description": "Optional squad profile to seed when the project has no squad yet."
@@ -167,8 +175,12 @@
               "full",
               "security",
               "design",
+              "accessibility",
               "architecture",
               "azure",
+              "modernization",
+              "compliance",
+              "operations",
               "product"
             ],
             "description": "Optional squad profile to seed when the project has no squad yet."
@@ -243,8 +255,12 @@
               "full",
               "security",
               "design",
+              "accessibility",
               "architecture",
               "azure",
+              "modernization",
+              "compliance",
+              "operations",
               "product"
             ],
             "description": "Optional squad profile to seed when the project has no squad yet."
@@ -313,11 +329,20 @@
               "full",
               "security",
               "design",
+              "accessibility",
               "architecture",
               "azure",
+              "modernization",
+              "compliance",
+              "operations",
               "product"
             ],
             "description": "Optional squad profile to seed when the project has no squad yet."
+          },
+          "pack": {
+            "type": "string",
+            "pattern": "^(power-platform|m365-copilot|aws|foundry|fabric|dotnet|aks|azure-functions|azure-cloud)(,(power-platform|m365-copilot|aws|foundry|fabric|dotnet|aks|azure-functions|azure-cloud))*$",
+            "description": "Optional comma-separated add-on pack(s) layered onto the profile (power-platform, m365-copilot, aws, foundry, fabric, dotnet, aks, azure-functions, azure-cloud). A pack carries specialist roles, scoped guidance, or both and never replaces the profile. Ignored on an unattended run."
           },
           "tier": {
             "type": "string",
@@ -330,6 +355,11 @@
           "owner": {
             "type": "string",
             "description": "Optional Member Name from team.md to pick a specific named member."
+          },
+          "execution": {
+            "type": "string",
+            "pattern": "^(original|both|connector:[a-z0-9][a-z0-9-]*)$",
+            "description": "Optional post-classification connector execution choice (original, connector:<binding-id>, or both) per team.md Connector Bindings (Contract 1.1). Coordinator, Scribe, and Council always remain internal. Ignored on an unattended run."
           },
           "mode": {
             "type": "string",
@@ -354,9 +384,18 @@
             "enum": [
               "off",
               "ranked",
+              "economy",
               "manual"
             ],
-            "description": "Optional per-role model routing mode, persisted in team.md until changed: ranked (pick each role's model by fit from the squad model catalog), manual (ask you to choose each role's model from the models this host can run), or off (no Model column; dispatch with no model parameter). Omit to keep the recorded mode. Ignored on an unattended run."
+            "description": "Optional per-role model routing mode, persisted in team.md until changed: ranked (capability-first picks from the squad model catalog), economy (cost-first across every routed role within its floor after consent, with one ranked escalation after a failed review), manual (ask you to choose each role's model from the models this host can run), or off (no Model column; dispatch with no model parameter). Omit to keep the recorded mode. Ignored on an unattended run."
+          },
+          "depth": {
+            "type": "string",
+            "enum": [
+              "quick",
+              "standard"
+            ],
+            "description": "Optional per-turn workflow depth (quick or standard; omission is standard, never inferred). Controls how much work runs (bounded lane, shrink budgets, plan-driven parallelism), never which model runs, and never skips review, council, intake, or human gates. Ignored on an unattended run."
           },
           "context": {
             "type": "string",
@@ -415,11 +454,20 @@
               "full",
               "security",
               "design",
+              "accessibility",
               "architecture",
               "azure",
+              "modernization",
+              "compliance",
+              "operations",
               "product"
             ],
             "description": "Optional profile hint forwarded to a sub-squad's Init when it has no squad yet."
+          },
+          "pack": {
+            "type": "string",
+            "pattern": "^(power-platform|m365-copilot|aws|foundry|fabric|dotnet|aks|azure-functions|azure-cloud)(,(power-platform|m365-copilot|aws|foundry|fabric|dotnet|aks|azure-functions|azure-cloud))*$",
+            "description": "Optional comma-separated add-on pack(s) forwarded to the selected sub-squad's run (power-platform, m365-copilot, aws, foundry, fabric, dotnet, aks, azure-functions, azure-cloud). Ignored on an unattended run."
           },
           "tier": {
             "type": "string",
@@ -432,6 +480,11 @@
           "owner": {
             "type": "string",
             "description": "Optional Member Name forwarded to the selected sub-squad's run."
+          },
+          "execution": {
+            "type": "string",
+            "pattern": "^(original|both|connector:[a-z0-9][a-z0-9-]*)$",
+            "description": "Optional post-classification connector execution choice (original, connector:<binding-id>, or both), forwarded only to selected child sub-squad runs (binding authority remains member-local). Ignored on an unattended run."
           },
           "mode": {
             "type": "string",
@@ -456,9 +509,18 @@
             "enum": [
               "off",
               "ranked",
+              "economy",
               "manual"
             ],
-            "description": "Optional per-role model routing mode (off, ranked, or manual), forwarded verbatim to every selected sub-squad's coordinator run; each sub-squad persists it in its own team.md and may only narrow it, never widen or substitute it. Ignored on an unattended run."
+            "description": "Optional per-role model routing mode (off, ranked, economy, or manual), forwarded verbatim to every selected sub-squad's coordinator run; each sub-squad persists it in its own team.md and may only narrow it, never widen or substitute it. Ignored on an unattended run."
+          },
+          "depth": {
+            "type": "string",
+            "enum": [
+              "quick",
+              "standard"
+            ],
+            "description": "Optional per-turn workflow depth (quick or standard; omission is standard), forwarded to each selected sub-squad with depthSource=federation; a child never widens it. Changes work, not models, and never skips gates. Ignored on an unattended run."
           },
           "context": {
             "type": "string",

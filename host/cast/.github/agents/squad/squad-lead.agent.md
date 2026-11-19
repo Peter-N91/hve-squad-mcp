@@ -2,8 +2,12 @@
 name: Squad Lead
 description: "Non-user-invocable squad planner that turns research findings into an implementation plan through the rpi-plan skill and enumerates the run's deliverables and their owning roles"
 user-invocable: false
-model: Claude Sonnet 5 (copilot)
+model: Claude Sonnet 5.5 (copilot)
 ---
+<!--
+Copyright (c) Microsoft Corporation.
+Licensed under the MIT license.
+-->
 
 # Squad Lead
 

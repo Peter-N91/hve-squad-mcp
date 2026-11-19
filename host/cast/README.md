@@ -16,9 +16,10 @@ without the full repository or an `apm install` at runtime.
 - `.github/instructions/squad/*.instructions.md` — the squad instructions,
   including the `squad-routing.instructions.md` probe file so the resolved root
   layout matches a deployed consumer.
-- `.github/instructions/untrusted-content-boundary.instructions.md` — the
-  boundary instruction the loader applies to any persona that ingests external
-  content (VF-07 / G6).
+- `.github/skills/untrusted-content-boundary/SKILL.md` — the untrusted-content
+  boundary skill (`microsoft/hve-core` relocated it from
+  `untrusted-content-boundary.instructions.md`) for personas that ingest
+  external content (VF-07 / G6).
 - `.github/skills/squad/references/roster-catalog.md` — the roster **Cast
   Catalog** and Registered External Cast. `hve-squad@0.18.0` moved them out of
   `squad-roster.instructions.md`, and the router, the profile resolver, and the
@@ -76,7 +77,6 @@ commit the regenerated bundle + manifest.
 ## Deferred
 
 Bundling the full referenced **skill** file trees is deferred to the later
-execution expansion to keep image size and scope bounded. The loader's
-untrusted-content-boundary enforcement does not depend on skill files being
-present; personas, squad/boundary instructions, and the squad skill's roster
+execution expansion to keep image size and scope bounded. Personas, squad
+instructions, the untrusted-content-boundary skill, and the squad skill's roster
 catalog are bundled now.
