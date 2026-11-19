@@ -20,7 +20,7 @@ import { loadPersonaForRole } from "../src/engine/persona-loader.js";
  *   2. the bundle carries a file the manifest does not, or vice versa,
  *   3. the manifest is linked to a different package version than the pin,
  *   4. any roster Cast Catalog Primary agent is missing from the bundle, or
- *   5. the untrusted-content-boundary instruction is absent from the bundle.
+ *   5. the untrusted-content-boundary skill is absent from the bundle.
  *
  * Checks 1-3 are the OFFLINE half of the integrity contract and need no network:
  * they catch a hand-edited persona, a partially committed snapshot, and a pin
@@ -41,8 +41,9 @@ const MANIFEST_FILE = join(CAST_DIR, "manifest.json");
 const PIN_FILE = join(CAST_DIR, "package-pin.json");
 const BUNDLE_BOUNDARY = join(
   BUNDLE_ROOT,
-  "instructions",
-  "untrusted-content-boundary.instructions.md",
+  "skills",
+  "untrusted-content-boundary",
+  "SKILL.md",
 );
 
 interface CastManifest {
@@ -258,10 +259,10 @@ test("cast bundle contains every bundled roster Cast Catalog Primary agent", () 
   );
 });
 
-test("cast bundle carries the untrusted-content-boundary instruction", () => {
+test("cast bundle carries the untrusted-content-boundary skill", () => {
   assert.ok(
     existsSync(BUNDLE_BOUNDARY),
-    "untrusted-content-boundary.instructions.md must be present in the bundle " +
+    "skills/untrusted-content-boundary/SKILL.md must be present in the bundle " +
       "(re-run `npm run snapshot:cast`).",
   );
 });

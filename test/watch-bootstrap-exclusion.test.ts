@@ -52,8 +52,12 @@ test("the bundled charter carries the unattended bootstrap the guard exists for"
   const charter = readFileSync(BUNDLED_FEDERATION_COORDINATOR, "utf8");
   // If this ever stops matching, the cast bundle drifted away from the squad
   // release this guard was written against — re-read the charter before relaxing it.
-  assert.match(charter, /Watch Mode Bootstrap Mode/);
+  // hve-squad@0.19+ slimmed the hot Federation Coordinator charter so its Stops and
+  // Response section states "Watch Mode is auto-approved only after its opt-in and
+  // authorization gates; structural event metadata determines its member name."
+  assert.match(charter, /Watch Mode/);
   assert.match(charter, /auto-approved/);
+  assert.match(charter, /structural event metadata/);
 });
 
 test("the exclusion note names the confirmation gate and refuses claimed provenance", () => {

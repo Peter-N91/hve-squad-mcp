@@ -45,7 +45,6 @@ export const DELIVERABLE_PRODUCING_ROLES: readonly string[] = [
   "product-owner",
   "designer",
   "experimenter",
-  "presenter",
   "technical-writer",
   "data-scientist",
 ];

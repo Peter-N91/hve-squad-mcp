@@ -262,15 +262,96 @@ export function discoveryInstructions(discovery: string | undefined): string {
   ].join("\n");
 }
 
-/** The per-role model routing modes the `/squad` prompt accepts (hve-squad 0.18.0). */
-export const MODEL_ROUTING_MODES = ["off", "ranked", "manual"] as const;
+/** The registered add-on packs the `/squad` prompt accepts (hve-squad 0.21.0). */
+export const REGISTERED_PACKS = [
+  "power-platform",
+  "m365-copilot",
+  "aws",
+  "foundry",
+  "fabric",
+  "dotnet",
+  "aks",
+  "azure-functions",
+  "azure-cloud",
+] as const;
+export type RegisteredPack = (typeof REGISTERED_PACKS)[number];
+
+const REGISTERED_PACK_SET: ReadonlySet<string> = new Set(REGISTERED_PACKS);
+
+/**
+ * Normalize and validate a comma-separated `pack` input against {@link REGISTERED_PACKS}.
+ * Returns the deduplicated list in caller order, or `[]` when empty or invalid.
+ */
+export function parsePackList(pack: string | undefined): RegisteredPack[] {
+  const raw = (pack ?? "").trim();
+  if (raw.length === 0) {
+    return [];
+  }
+  const tokens = raw.split(",").map((token) => token.trim().toLowerCase());
+  if (tokens.some((token) => !REGISTERED_PACK_SET.has(token))) {
+    return [];
+  }
+  return [...new Set(tokens)] as RegisteredPack[];
+}
+
+/**
+ * The per-turn add-on pack disposition, paraphrased from `squad.prompt.md` and
+ * `references/profiles-and-packs.md`. Appended only when a valid `pack=` input was supplied.
+ */
+export function packInstructions(pack: string | undefined, federation = false): string {
+  const packs = parsePackList(pack);
+  if (packs.length === 0) {
+    return "";
+  }
+  const joined = packs.join(",");
+  const lines = [
+    `**Pack = ${joined} (explicit input).** Pass \`pack=${joined}\` to the coordinator as`,
+    "the pack hint: a pack layers its specialist roles and/or scoped guidance on top of the",
+    "seeded profile and never replaces it. On an existing squad it is an offer to apply the",
+    "pack via the sealed roster-expansion transaction rather than a re-seed; missing opt-in",
+    "external or preview resources still require explicit user confirmation and installation.",
+  ];
+  if (federation) {
+    lines.push("Forward the pack hint to the selected sub-squad run(s); pack state stays member-local.");
+  }
+  return lines.join("\n");
+}
+
+/** Validated shape for the post-classification `execution` input (Contract 1.1). */
+export const EXECUTION_CHOICE_PATTERN = /^(original|both|connector:[a-z0-9][a-z0-9-]*)$/;
+
+/**
+ * The per-turn connector execution disposition, paraphrased from `squad.prompt.md`
+ * and `references/connector-role-modes.md` (Contract 1.1).
+ */
+export function executionInstructions(execution: string | undefined, federation = false): string {
+  const choice = (execution ?? "").trim();
+  if (!EXECUTION_CHOICE_PATTERN.test(choice)) {
+    return "";
+  }
+  const lines = [
+    `**Execution = ${choice} (explicit input).** Pass \`execution=${choice}\` to the coordinator`,
+    "verbatim for post-classification connector selection against `team.md`'s `## Connector Bindings`",
+    "(`original` runs the internal roster agent, `connector:<binding-id>` runs the registered",
+    "Squad Connector binding, and `both` runs both). Coordinator, Scribe, and Council dispatches",
+    "always remain internal.",
+  ];
+  if (federation) {
+    lines.push("Forward `execution` only to selected child sub-squad runs; binding authority is member-local.");
+  }
+  return lines.join("\n");
+}
+
+/** The per-role model routing modes the `/squad` prompt accepts (hve-squad 0.19.0+ / 0.21.0). */
+export const MODEL_ROUTING_MODES = ["off", "ranked", "economy", "manual"] as const;
 export type ModelRoutingMode = (typeof MODEL_ROUTING_MODES)[number];
 
 /**
  * The per-turn model routing disposition, paraphrased from the `/squad` and
- * `/squad-federation` prompts and `references/model-routing.md`. Appended only
- * when the caller supplied an explicit `routing=` input; when it is omitted the
- * coordinator applies the mode already recorded in `team.md`.
+ * `/squad-federation` prompts, `references/model-routing.md`, and
+ * `references/economy-mode.md`. Appended only when the caller supplied an explicit
+ * `routing=` input; when it is omitted the coordinator applies the mode already
+ * recorded in `team.md`.
  */
 export function routingInstructions(routing: string | undefined, federation = false): string {
   const mode = (routing ?? "").trim().toLowerCase() as ModelRoutingMode;
@@ -283,14 +364,22 @@ export function routingInstructions(routing: string | undefined, federation = fa
   ];
   if (mode === "ranked") {
     lines.push(
-      "`ranked` picks each role's model by fit from the squad model catalog and shows the",
-      "picks in `team.md`'s `Model` column; every non-Scribe dispatch passes that cell verbatim.",
+      "`ranked` is capability-first: it picks each role's model by task capability within its",
+      "floor from the squad model catalog and shows the picks in `team.md`'s `Model` column;",
+      "every non-Scribe dispatch passes that cell verbatim.",
+    );
+  } else if (mode === "economy") {
+    lines.push(
+      "`economy` is cost-first across every routed role within its floor, after stating the",
+      "all-roles trade once and recording `## Economy Mode Accepted` consent in `decisions.md`:",
+      "it picks the lowest-Blended qualified model inside the role's floor, escalates an owner",
+      "once to its `ranked` pick after a failed review, and never weakens floors or gates.",
     );
   } else if (mode === "manual") {
     lines.push(
-      "`manual` asks the user, before any dispatch, to accept the suggestions or choose per",
-      "assignment class and then per role, offering only models this host can run; every",
-      "non-Scribe dispatch passes the recorded `Model` cell verbatim.",
+      "`manual` asks the user, before any dispatch, to accept capability-first suggestions or",
+      "choose per assignment class and then per role, offering only models this host can run;",
+      "every non-Scribe dispatch passes the recorded `Model` cell verbatim.",
     );
   } else {
     lines.push("`off` removes the `Model` column and dispatches with no model parameter.");
@@ -301,6 +390,32 @@ export function routingInstructions(routing: string | undefined, federation = fa
       "Forward the mode to every selected sub-squad exactly as profile and tier are",
       "forwarded; a sub-squad may narrow it, never widen or substitute it.",
     );
+  }
+  return lines.join("\n");
+}
+
+/** The per-turn workflow depths the `/squad` prompt accepts (hve-squad 0.20.0+). */
+export const WORKFLOW_DEPTHS = ["quick", "standard"] as const;
+export type WorkflowDepth = (typeof WORKFLOW_DEPTHS)[number];
+
+/**
+ * The per-turn workflow depth disposition, paraphrased from `squad.prompt.md` and
+ * `references/quick-depth.md`. Appended only when an explicit `depth=` input is supplied.
+ */
+export function depthInstructions(depth: string | undefined, federation = false): string {
+  const normalized = (depth ?? "").trim().toLowerCase() as WorkflowDepth;
+  if (!WORKFLOW_DEPTHS.includes(normalized)) {
+    return "";
+  }
+  const source = federation ? "federation" : "input";
+  const lines = [
+    `**Depth = ${normalized} (explicit input).** Forward \`requestedDepth: "${normalized}"\` with`,
+    `\`depthSource: "${source}"\` to the dispatch planner. Depth is per-turn (never persisted`,
+    "to `team.md` or `state.json`), controls how much work runs rather than which model runs,",
+    "and never skips or relaxes review, council, intake, Risk, or Impactful-Action gates.",
+  ];
+  if (federation) {
+    lines.push("Forward explicit `depth` to each selected sub-squad; a child sub-squad never widens it.");
   }
   return lines.join("\n");
 }

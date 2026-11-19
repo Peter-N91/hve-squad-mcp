@@ -110,7 +110,7 @@
     With <code>SQUAD_MCP_ENABLE_ARTIFACTS=true</code> a run writes a browsable <code>.copilot-tracking/</code> tree —
     the same tree the squad produces when it runs locally in VS Code:
   </p>
-  <pre><code>squad/team.md                          the 13 seeded roles
+  <pre><code>squad/team.md                          the 12 seeded roles
 squad/routing.md                       the rows those roles can serve
 squad/state.json                       the ledger
 squad/decisions.md                     append-only — incl. the Intake Readiness Verdict
@@ -118,7 +118,7 @@ squad/notifications.md                 append-only
 squad/history/&lt;agent&gt;.md               per agent, with a measured Consumption block
 squad/history/autopilot-run-&lt;id&gt;.md    per run
 squad/consumption.md                   rebuilt from those blocks, so earlier turns are never dropped
-plans/ · docs/ · outputs/ · ppt/&lt;date&gt;/&lt;slug&gt;/   the deliverables themselves</code></pre>
+plans/ · reviews/ · docs/ · outputs/   the deliverables themselves</code></pre>
   <div class="callout warn">
     <p>
       Without <code>SQUAD_MCP_ENABLE_ARTIFACTS</code>, auto-memory keeps <strong>three flat keys</strong>. That is
@@ -322,7 +322,7 @@ SQUAD_MCP_MEMORY_DEFAULT_TARGET=azure</code></pre>
 
   <h2>Part 5 — What the product profile actually runs</h2>
   <p>
-    <code>profile: "product"</code> seeds 13 roles, and that seeding is what makes this scenario different from a
+    <code>profile: "product"</code> seeds 12 roles, and that seeding is what makes this scenario different from a
     generic <code>squad_run</code>. Resolved against the bundled cast, a product run sequences:
   </p>
 
@@ -333,14 +333,13 @@ SQUAD_MCP_MEMORY_DEFAULT_TARGET=azure</code></pre>
       <tr><td>1</td><td>Research</td><td><code>researcher</code></td><td>Squad Researcher</td></tr>
       <tr><td>2</td><td>Plan</td><td><code>lead</code></td><td>Squad Lead</td></tr>
       <tr><td>—</td><td>Council</td><td colspan="2">Interleaved here only when the request engages it. A backlog request usually does not.</td></tr>
-      <tr><td>3</td><td rowspan="7"><strong>Deliverable fan-out</strong></td><td><code>analyst</code></td><td>PRD Builder</td></tr>
+      <tr><td>3</td><td rowspan="6"><strong>Deliverable fan-out</strong></td><td><code>analyst</code></td><td>PRD Builder</td></tr>
       <tr><td>4</td><td><code>product-owner</code></td><td>Functional Planner</td></tr>
       <tr><td>5</td><td><code>designer</code></td><td>UX UI Designer</td></tr>
       <tr><td>6</td><td><code>experimenter</code></td><td>Experiment Designer</td></tr>
-      <tr><td>7</td><td><code>presenter</code></td><td>PowerPoint Subagent</td></tr>
-      <tr><td>8</td><td><code>technical-writer</code></td><td>Squad Technical Writer</td></tr>
-      <tr><td>9</td><td><code>data-scientist</code></td><td>DS Gen Data Spec</td></tr>
-      <tr><td>10</td><td>Review</td><td><code>tester</code></td><td>Squad Reviewer</td></tr>
+      <tr><td>7</td><td><code>technical-writer</code></td><td>Squad Technical Writer</td></tr>
+      <tr><td>8</td><td><code>data-scientist</code></td><td>Squad Data Scientist</td></tr>
+      <tr><td>9</td><td>Review</td><td><code>tester</code></td><td>Squad Reviewer</td></tr>
     </tbody>
   </table>
 
@@ -350,7 +349,7 @@ SQUAD_MCP_MEMORY_DEFAULT_TARGET=azure</code></pre>
       <strong>The intake gate can stop the run.</strong> Because the product profile seeds
       <code>intake-validator</code>, a run grounded in a requirements document is validated <em>first</em>. The
       validator records <code>Ready</code>, <code>Ready-With-Gaps</code>, or <code>Not-Ready</code>. On
-      <code>Not-Ready</code> the pipeline halts with <code>reason: "intake_not_ready"</code> rather than letting seven
+      <code>Not-Ready</code> the pipeline halts with <code>reason: "intake_not_ready"</code> rather than letting six
       specialists build on inputs it just rejected. That is the gate working — fix the document and re-run.
     </li>
     <li>
@@ -365,7 +364,6 @@ SQUAD_MCP_MEMORY_DEFAULT_TARGET=azure</code></pre>
     <thead><tr><th>Role</th><th>Deliverable root</th></tr></thead>
     <tbody>
       <tr><td>analyst, product-owner, designer, experimenter</td><td><code>.copilot-tracking/plans</code></td></tr>
-      <tr><td>presenter</td><td><code>.copilot-tracking/ppt/&lt;date&gt;/deck</code></td></tr>
       <tr><td>technical-writer</td><td><code>docs</code></td></tr>
       <tr><td>data-scientist</td><td><code>outputs</code></td></tr>
     </tbody>
@@ -509,7 +507,7 @@ SQUAD_MCP_MEMORY_DEFAULT_TARGET=azure</code></pre>
   <table>
     <thead><tr><th>Check</th><th>Expected</th></tr></thead>
     <tbody>
-      <tr><td>The run's ledger</td><td><code>team.md</code> lists the 13 product roles; <code>routing.md</code> shows only rows those roles can serve.</td></tr>
+      <tr><td>The run's ledger</td><td><code>team.md</code> lists the 12 product roles; <code>routing.md</code> shows only rows those roles can serve.</td></tr>
       <tr><td>The decision log</td><td>An <code>## Intake Readiness Verdict</code> block, if the run was grounded in a document.</td></tr>
       <tr><td>Deliverable roots</td><td>Artifacts under <code>.copilot-tracking/plans</code>, <code>docs</code>, and <code>outputs</code>.</td></tr>
       <tr><td>The tracker</td><td>Every <code>ref</code> created once, children parented, acceptance criteria present on stories.</td></tr>

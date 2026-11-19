@@ -116,15 +116,23 @@
     input instead. An unattended run is gated by validation, not by ideation.
   </p>
 
-  <h3>Model routing</h3>
+  <h3>Model routing and workflow controls</h3>
   <p>
-    Both catch-all tools also take an optional <code>routing</code> mode of <code>off</code>, <code>ranked</code>, or
-    <code>manual</code>, mirroring the argument <code>hve-squad@0.18.0</code> added to <code>/squad</code> and
-    <code>/squad-federation</code>. The coordinator persists it as the <code>Model routing:</code> line in
-    <code>team.md</code> until changed. <code>ranked</code> picks each role's model by fit from the squad model
-    catalog, <code>manual</code> asks you to choose from the models your host can run, and <code>off</code> dispatches
-    with no model parameter. Omit it to keep the recorded mode. The remote path ignores it, because an embedded run
-    uses the operator-configured backend.
+    Both catch-all tools also take an optional <code>routing</code> mode of <code>off</code>, <code>ranked</code>,
+    <code>economy</code>, or <code>manual</code>, mirroring the argument <code>hve-squad@0.18.0</code> added to
+    <code>/squad</code> and <code>/squad-federation</code>. The coordinator persists it as the
+    <code>Model routing:</code> line in <code>team.md</code> until changed. <code>ranked</code> picks each role's model
+    capability-first from the squad model catalog, <code>economy</code> picks the lowest-priced qualified model within
+    each role's floor after consent, <code>manual</code> asks you to choose from the models your host can run, and
+    <code>off</code> dispatches with no model parameter. Omit it to keep the recorded mode. The remote path ignores it,
+    because an embedded run uses the operator-configured backend.
+  </p>
+  <p>
+    On the attended path, both catch-all tools likewise forward per-turn <code>depth</code> (<code>quick</code> or
+    <code>standard</code>, controlling how much work runs without changing models or skipping gates), add-on
+    <code>pack</code> hints layered onto the profile, and post-classification <code>execution</code> connector choices
+    (<code>original</code>, <code>connector:&lt;binding-id&gt;</code>, or <code>both</code>). The remote path ignores
+    all three and logs the ignored controls.
   </p>
 
   <h2>Utility tools</h2>

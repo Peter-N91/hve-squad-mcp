@@ -116,7 +116,7 @@
     <code>.copilot-tracking/</code> consultable, identique à celle que la squad produit lorsqu’elle s’exécute localement
     dans VS Code :
   </p>
-  <pre><code>squad/team.md                          the 13 seeded roles
+  <pre><code>squad/team.md                          the 12 seeded roles
 squad/routing.md                       the rows those roles can serve
 squad/state.json                       the ledger
 squad/decisions.md                     append-only — incl. the Intake Readiness Verdict
@@ -124,7 +124,7 @@ squad/notifications.md                 append-only
 squad/history/&lt;agent&gt;.md               per agent, with a measured Consumption block
 squad/history/autopilot-run-&lt;id&gt;.md    per run
 squad/consumption.md                   rebuilt from those blocks, so earlier turns are never dropped
-plans/ · docs/ · outputs/ · ppt/&lt;date&gt;/&lt;slug&gt;/   the deliverables themselves</code></pre>
+plans/ · reviews/ · docs/ · outputs/   the deliverables themselves</code></pre>
   <div class="callout warn">
     <p>
       Sans <code>SQUAD_MCP_ENABLE_ARTIFACTS</code>, la mémoire automatique ne conserve que <strong>trois clés sans
@@ -339,7 +339,7 @@ SQUAD_MCP_MEMORY_DEFAULT_TARGET=azure</code></pre>
 
   <h2>Partie 5 — Ce que le profil product exécute réellement</h2>
   <p>
-    <code>profile: "product"</code> initialise 13 rôles. C’est cette initialisation qui distingue ce scénario d’un
+    <code>profile: "product"</code> initialise 12 rôles. C’est cette initialisation qui distingue ce scénario d’un
     appel générique à <code>squad_run</code>. Une fois les rôles associés aux agents disponibles dans le package,
     l’exécution du profil product enchaîne les étapes suivantes :
   </p>
@@ -351,14 +351,13 @@ SQUAD_MCP_MEMORY_DEFAULT_TARGET=azure</code></pre>
       <tr><td>1</td><td>Recherche</td><td><code>researcher</code></td><td>Squad Researcher</td></tr>
       <tr><td>2</td><td>Planification</td><td><code>lead</code></td><td>Squad Lead</td></tr>
       <tr><td>—</td><td>Conseil</td><td colspan="2">Intervient à ce stade uniquement si la demande le sollicite. Ce n’est généralement pas le cas d’une demande de backlog.</td></tr>
-      <tr><td>3</td><td rowspan="7"><strong>Production des livrables par les spécialistes</strong></td><td><code>analyst</code></td><td>PRD Builder</td></tr>
+      <tr><td>3</td><td rowspan="6"><strong>Production des livrables par les spécialistes</strong></td><td><code>analyst</code></td><td>PRD Builder</td></tr>
       <tr><td>4</td><td><code>product-owner</code></td><td>Functional Planner</td></tr>
       <tr><td>5</td><td><code>designer</code></td><td>UX UI Designer</td></tr>
       <tr><td>6</td><td><code>experimenter</code></td><td>Experiment Designer</td></tr>
-      <tr><td>7</td><td><code>presenter</code></td><td>PowerPoint Subagent</td></tr>
-      <tr><td>8</td><td><code>technical-writer</code></td><td>Squad Technical Writer</td></tr>
-      <tr><td>9</td><td><code>data-scientist</code></td><td>DS Gen Data Spec</td></tr>
-      <tr><td>10</td><td>Revue</td><td><code>tester</code></td><td>Squad Reviewer</td></tr>
+      <tr><td>7</td><td><code>technical-writer</code></td><td>Squad Technical Writer</td></tr>
+      <tr><td>8</td><td><code>data-scientist</code></td><td>Squad Data Scientist</td></tr>
+      <tr><td>9</td><td>Revue</td><td><code>tester</code></td><td>Squad Reviewer</td></tr>
     </tbody>
   </table>
 
@@ -369,7 +368,7 @@ SQUAD_MCP_MEMORY_DEFAULT_TARGET=azure</code></pre>
       initialise le rôle <code>intake-validator</code>, toute exécution fondée sur un document d’exigences fait
       <em>d’abord</em> l’objet d’une validation. Le validateur consigne le verdict <code>Ready</code>,
       <code>Ready-With-Gaps</code> ou <code>Not-Ready</code>. Dans le cas de <code>Not-Ready</code>, le pipeline
-      s’arrête avec <code>reason: "intake_not_ready"</code>, plutôt que de laisser sept spécialistes travailler à partir
+      s’arrête avec <code>reason: "intake_not_ready"</code>, plutôt que de laisser six spécialistes travailler à partir
       de données qu’il vient de rejeter. C’est le fonctionnement attendu du point de validation : corrigez le document
       et relancez l’exécution.
     </li>
@@ -385,7 +384,6 @@ SQUAD_MCP_MEMORY_DEFAULT_TARGET=azure</code></pre>
     <thead><tr><th>Rôle</th><th>Racine des livrables</th></tr></thead>
     <tbody>
       <tr><td>analyst, product-owner, designer, experimenter</td><td><code>.copilot-tracking/plans</code></td></tr>
-      <tr><td>presenter</td><td><code>.copilot-tracking/ppt/&lt;date&gt;/deck</code></td></tr>
       <tr><td>technical-writer</td><td><code>docs</code></td></tr>
       <tr><td>data-scientist</td><td><code>outputs</code></td></tr>
     </tbody>
@@ -533,7 +531,7 @@ SQUAD_MCP_MEMORY_DEFAULT_TARGET=azure</code></pre>
   <table>
     <thead><tr><th>Point à vérifier</th><th>Résultat attendu</th></tr></thead>
     <tbody>
-      <tr><td>Le registre de l’exécution</td><td><code>team.md</code> répertorie les 13 rôles du profil product ; <code>routing.md</code> ne contient que les lignes de routage que ces rôles peuvent prendre en charge.</td></tr>
+      <tr><td>Le registre de l’exécution</td><td><code>team.md</code> répertorie les 12 rôles du profil product ; <code>routing.md</code> ne contient que les lignes de routage que ces rôles peuvent prendre en charge.</td></tr>
       <tr><td>Le journal des décisions</td><td>Un bloc <code>## Intake Readiness Verdict</code>, si l’exécution s’appuyait sur un document.</td></tr>
       <tr><td>Les racines des livrables</td><td>Des artefacts sous <code>.copilot-tracking/plans</code>, <code>docs</code> et <code>outputs</code>.</td></tr>
       <tr><td>L’outil de suivi</td><td>Chaque <code>ref</code> est créée une seule fois, les enfants sont rattachés à leurs parents et les critères d’acceptation figurent dans les user stories.</td></tr>
