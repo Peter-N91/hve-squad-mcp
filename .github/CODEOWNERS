@@ -1,0 +1,14 @@
+# CODEOWNERS — cicd bicep-cicd-pipeline (security C9/F7 follow-up; SEC-AC15).
+#
+# Requires @Peter-N91's review on the CI/CD pipeline surface: the two
+# workflow files, their shared scripts, and infra's local validation suite
+# these workflows gate on. No repository team convention exists yet (checked:
+# no prior CODEOWNERS file), so this uses the repository owner directly, per
+# this dispatch's instruction.
+#
+# Add narrower owners here as the team grows; do not remove the repository
+# owner's coverage of these paths without an equivalent replacement.
+
+/.github/workflows/  @Peter-N91
+/.github/scripts/    @Peter-N91
+/host/infra/tests/   @Peter-N91
