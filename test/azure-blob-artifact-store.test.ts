@@ -224,3 +224,17 @@ test("IV-001: a delegation-key response without a signing value fails fast", asy
     /did not contain a signing key/,
   );
 });
+
+test("local specialist binaries retain tenant/project/run scope and actual media type", async () => {
+  const { impl, puts } = fakeFetch();
+  const store = new AzureBlobArtifactStore({account:"acct",container:"renders",getAccessToken:async()=>"test-token",fetchImpl:impl});
+  const png = Buffer.from("89504e470d0a1a0a", "hex");
+  const link = await store.uploadSpecialistArtifact("tenant-A", "project-A", "run-A", "diagram.png", png, "image/png", 60000);
+  assert.match(link.blobPath, /^specialists\/tenant-A\/project-A\/run-A\/[a-f0-9-]{36}\/diagram\.png$/);
+  assert.equal(link.contentType,"image/png");
+  assert.equal((puts[0].init.headers as Record<string,string>)["Content-Type"],"image/png");
+  assert.equal(new URL(link.downloadUrl).searchParams.get("sp"),"r");
+  await assert.rejects(store.uploadSpecialistArtifact("tenant-A", "../other", "run-A", "diagram.png", png, "image/png", 60000), /Invalid scoped/);
+  await assert.rejects(store.uploadSpecialistArtifact("tenant-A", "project-A", "run-A", "diagram.png", png, "text/plain", 60000), /MIME/);
+  await assert.rejects(store.uploadSpecialistArtifact("tenant-A", "project-A", "run-A", "report.docx", png, "application\/vnd.openxmlformats-officedocument.wordprocessingml.document", 60000), /binary format/);
+});

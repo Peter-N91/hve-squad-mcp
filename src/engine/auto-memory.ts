@@ -34,6 +34,7 @@
 import { isSafeMemoryPath, isSafeMemorySegment, type SquadMemoryStore } from "./squad-memory-state.js";
 import type { CoordinatorRequest } from "./coordinator-engine.js";
 import type { RedactingLogger } from "../observability/logger.js";
+import { prepareTaskContext } from "./model-backend.js";
 
 /** The logical memory path holding the project's rolling state summary. */
 export const MEMORY_STATE_PATH = "state";
@@ -82,12 +83,17 @@ function head(text: string, max: number): string {
  * The memory block is placed FIRST and the caller's own context LAST, so the most
  * specific, this-turn information is nearest the request. Both are DATA; the
  * prompt composer delimits and neutralizes the whole `context` value, so no part
- * of memory can act as an instruction.
+ * of memory can act as an instruction. A versioned task packet is an explicit
+ * context selection: do not silently append history to it. Stored sources remain
+ * available through the normal evidence/review tools.
  */
 export function withMemoryContext(
   request: CoordinatorRequest,
   memory: string | undefined,
 ): CoordinatorRequest {
+  if (request.context !== undefined && prepareTaskContext(request.context).packet) {
+    return request;
+  }
   if (!memory || memory.trim().length === 0) {
     return request;
   }
@@ -142,6 +148,14 @@ export class AutoMemory {
    * arbitrary write location inside its tenant.
    */
   resolveProject(request: CoordinatorRequest): string {
+    const project = request.project?.trim();
+    if (
+      project &&
+      SUB_SQUAD_NAME.test(project) &&
+      isSafeMemorySegment(project)
+    ) {
+      return project;
+    }
     const squad = request.squad?.trim();
     if (squad && SUB_SQUAD_NAME.test(squad) && isSafeMemorySegment(squad)) {
       return squad;

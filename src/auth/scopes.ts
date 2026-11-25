@@ -30,6 +30,9 @@ export const TOOL_SCOPES: Readonly<Record<string, string>> = {
   // squad_status polls a run the caller started; it reuses the Squad.Run scope
   // (you may inspect runs you are authorized to start).
   squad_status: "Squad.Run",
+  // Answer a pending clarification/confirmation; never grant operator approval.
+  squad_respond: "Squad.Run",
+  squad_approve: "Squad.Operate",
   // squad_render_pptx is a deterministic file-output utility (content YAML -> a
   // .pptx download link). It carries its own least-privilege scope so a render
   // grant does not imply research/plan/run. Fail-closed like every other tool.
@@ -65,15 +68,13 @@ export const TOOL_SCOPES: Readonly<Record<string, string>> = {
 
 /**
  * The distinct, high-privilege OPERATOR scope required to release a held run
- * through the out-of-band approval endpoint (`POST /admin/approve`). It is
- * deliberately NOT a member of {@link TOOL_SCOPES} — releasing a Human Gate is an
- * operator action, not a squad tool a caller invokes — and it is separate from
+ * through `squad_approve` or `POST /admin/approve`. It is separate from
  * `Squad.Run` so a caller that may START or POLL a run (Squad.Run) still cannot
  * APPROVE one. Grant it as an Entra app role (application permission) to the
  * human/service principal that operates the deployment; the authenticator merges
  * `roles[]` into the resolved scopes, so the same check covers a delegated scope
  * or an app role. Never derivable from caller `request`/`context` or model output
- * (SEC-6): the only code path that checks it is the admin route.
+ * (SEC-6): explicit approval calls must pass this authorization check.
  */
 export const OPERATOR_APPROVAL_SCOPE = "Squad.Operate";
 
@@ -116,6 +117,8 @@ export const REMOTE_EXPOSED_TOOLS: readonly string[] = [
   ...ADVISORY_EXPOSED_TOOLS,
   "squad_run",
   "squad_status",
+  "squad_respond",
+  "squad_approve",
   // squad_federate is the federation meta layer. It is deliberately here (the
   // pipeline-gated set) and NOT in ADVISORY_EXPOSED_TOOLS: like squad_run it is a
   // catch-all with `gates: true`, so it must inherit the same non-bypassable Human
@@ -151,6 +154,8 @@ export function isRemotelyExposed(toolId: string): boolean {
 
 /** The synthetic status-poll utility tool id (not a squad routing intent). */
 export const SQUAD_STATUS_TOOL = "squad_status";
+export const SQUAD_RESPOND_TOOL = "squad_respond";
+export const SQUAD_APPROVE_TOOL = "squad_approve";
 
 /**
  * The synthetic deterministic render tool id (not a squad routing intent, so it

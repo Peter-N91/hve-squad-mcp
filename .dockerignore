@@ -11,3 +11,4 @@ copilot-studio
 docs
 test
 *.log
+host/infra/*.local.bicepparam

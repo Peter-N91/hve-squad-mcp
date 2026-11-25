@@ -22,12 +22,26 @@ import { resolveSquadGithubRoot } from "../src/paths.js";
 
 const TABLES = loadProfileTables();
 
+test("every public profile selector advertises the focused BRD profile", () => {
+  const selectors = loadCatalog().tools.filter((tool) => tool.input.properties?.profile);
+  assert.ok(selectors.some((tool) => tool.id === "squad_run"));
+  for (const tool of selectors) {
+    const profile = tool.input.properties?.profile;
+    assert.ok(typeof profile === "object" && profile !== null && "enum" in profile);
+    assert.ok(Array.isArray(profile.enum) && profile.enum.includes("brd"), tool.id);
+    for (const name of profile.enum) {
+      assert.ok(TABLES.profiles.has(name), `${tool.id} advertises unknown profile ${name}`);
+    }
+  }
+});
+
 test("the deployed roster yields every documented profile", () => {
   const names = [...TABLES.profiles.keys()].sort();
   assert.deepEqual(names, [
     "accessibility",
     "architecture",
     "azure",
+    "brd",
     "compliance",
     "default",
     "design",
@@ -70,7 +84,6 @@ test("REGISTERED_PACKS matches the Registered Packs table in squad-roster.instru
     .filter((name) => name.length > 0);
   assert.deepEqual(deployedPacks, [...REGISTERED_PACKS]);
 });
-
 test("the product profile seeds exactly the roster's twelve roles", () => {
   const product = resolveProfile("product", TABLES);
   assert.equal(product.name, "product");

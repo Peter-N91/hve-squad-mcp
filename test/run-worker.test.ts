@@ -9,11 +9,12 @@ import { test } from "node:test";
 import { loadCatalog, type CatalogTool } from "../src/catalog/catalog.js";
 import { EmbeddedCoordinator } from "../src/engine/embedded.js";
 import { EphemeralWorkspaceManager } from "../src/engine/workspace.js";
-import { RunStoreApprovalChannel, TenantQuotaTracker } from "../src/engine/gates.js";
+import { GateKeeper, RunStoreApprovalChannel, TenantQuotaTracker } from "../src/engine/gates.js";
 import { EphemeralRunStateStore } from "../src/engine/run-state.js";
-import { RunWorker } from "../src/engine/run-worker.js";
+import { RunWorker, WORKER_EXECUTION_OPTIONS } from "../src/engine/run-worker.js";
 import type { AuthContext } from "../src/auth/entra.js";
 import type { BackendRequest, BackendResult, ModelBackend } from "../src/engine/model-backend.js";
+import { scriptedStageExecutor } from "./helpers/scripted-stage-executor.js";
 
 class FakeBackend implements ModelBackend {
   readonly id = "fake-backend";
@@ -32,22 +33,62 @@ function squadRun(): CatalogTool {
   return t;
 }
 
-function makeStack(store = new EphemeralRunStateStore()) {
+function makeStack(store = new EphemeralRunStateStore(), advisoryAutopilotEnabled = false) {
   const approvals = new RunStoreApprovalChannel(store);
   const backend = new FakeBackend();
+  const quota = new TenantQuotaTracker({ concurrency: 4, monthlyCeilingUsd: 500 });
+  const stageDeadlines: (number | undefined)[] = [];
   const engine = new EmbeddedCoordinator({
+    ...WORKER_EXECUTION_OPTIONS,
     backend,
+    stageExecutorFactory: (_workspace, _project, _runId, options) => {
+      stageDeadlines.push(options?.deadlineMs);
+      return scriptedStageExecutor(backend);
+    },
     workspaceManager: new EphemeralWorkspaceManager(),
-    quota: new TenantQuotaTracker({ concurrency: 4, monthlyCeilingUsd: 500 }),
+    quota,
     runStateStore: store,
     approvals,
+    gates: new GateKeeper({ advisoryAutopilotEnabled }),
     driveOnPoll: false, // worker deployment: the poll is read-only.
   });
-  return { store, approvals, backend, engine };
+  return { store, approvals, backend, engine, quota, stageDeadlines };
 }
 
+test("worker budget reaches stages and lease prevents reclaim during long execution", async () => {
+  const { store, approvals, backend, engine, stageDeadlines } = makeStack();
+  const started = await engine.startHttpRun(squadRun(), { toolId: "squad_run", request: "research delivery" }, { auth: AUTH });
+  assert.ok(started.runId);
+  await approvals.approve(started.runId, "operator");
+  let markEntered!: () => void;
+  let release!: () => void;
+  const entered = new Promise<void>((resolve) => { markEntered = resolve; });
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  const complete = backend.complete.bind(backend);
+  backend.complete = async (request) => {
+    markEntered();
+    await released;
+    return complete(request);
+  };
+  const tick = new RunWorker({ coordinator: engine, batchSize: 1 }).tickOnce();
+  try {
+    await entered;
+    const run = await store.get(started.runId);
+    assert.ok(run?.leaseExpiresAt);
+    assert.ok(run.leaseExpiresAt > Date.now() + 35 * 60 * 1000);
+    assert.equal((await engine.listClaimableRuns(Date.now() + 11 * 60 * 1000)).length, 0);
+    assert.equal((await engine.pollRun(started.runId, { auth: AUTH })).reason, "run_already_in_flight");
+    assert.ok(WORKER_EXECUTION_OPTIONS.leaseMs > WORKER_EXECUTION_OPTIONS.stageDeadlineMs);
+  } finally {
+    release();
+    await tick;
+  }
+  assert.ok(stageDeadlines.length > 0);
+  assert.ok(stageDeadlines.every((deadline) => deadline === 30 * 60 * 1000));
+});
+
 test("in worker mode the poll is read-only; the worker drives the approved run", async () => {
-  const { approvals, backend, engine } = makeStack();
+  const { store, approvals, backend, engine, quota } = makeStack();
 
   const started = await engine.startHttpRun(squadRun(), { toolId: "squad_run", request: "improve caching" }, { auth: AUTH });
   const runId = started.runId!;
@@ -68,6 +109,29 @@ test("in worker mode the poll is read-only; the worker drives the approved run",
   const done = await engine.pollRun(runId, { auth: AUTH });
   assert.equal(done.outcome, "completed");
   assert.match(done.artifact ?? "", /## Squad Reviewer/);
+  assert.equal(done.usage?.completionCount, backend.calls);
+  assert.equal(done.usage?.attemptCount, backend.calls);
+  assert.ok(Math.abs((done.usage?.estimatedCostUsd ?? 0) - backend.calls * 0.01) < 1e-9);
+  assert.ok(Math.abs(quota.spentUsd(AUTH.tenantId) - backend.calls * 0.01) < 1e-9,
+    "Per-completion persistence must not charge the tenant twice.");
+  const persisted = await store.get(runId);
+  assert.equal(persisted?.completionUsage?.length, backend.calls);
+  assert.ok(persisted?.completionUsage?.every((record) =>
+    record.runId === runId && record.stage && record.actor && record.outcome === "completed"));
+});
+
+test("worker-mode polling distinguishes server-admitted advisory work from a human hold", async () => {
+  const { store, approvals, backend, engine } = makeStack(undefined, true);
+  const started = await engine.startHttpRun(squadRun(), { toolId: "squad_run", request: "research delivery" }, { auth: AUTH });
+  assert.ok(started.runId);
+  assert.equal(started.reason, "queued");
+  const polled = await engine.pollRun(started.runId, { auth: AUTH });
+  assert.equal(polled.reason, "queued_for_worker");
+  assert.equal(polled.approvalRequest, undefined);
+  assert.equal(backend.calls, 0);
+  assert.equal((await new RunWorker({ coordinator: engine }).tickOnce()).driven, 1);
+  assert.equal((await store.get(started.runId))?.status, "complete");
+  assert.equal(await approvals.approvalRecord(started.runId), undefined);
 });
 
 test("the worker ignores an unapproved held run (gate still non-bypassable)", async () => {

@@ -105,6 +105,18 @@ test("expectedEtag becomes If-Match and a 412 is reported as a conflict", async 
   assert.equal(put?.headers["If-Match"], "etag-old");
 });
 
+test("empty expectedEtag uses Graph create-only conflict behavior without an empty If-Match", async () => {
+  const { store, calls } = graphStore((call) => {
+    if (call.method === "PUT") return { status: 409 };
+    return { status: 404 };
+  });
+  const result = await store.write(TENANT, "acme", "context/bridge", "identity", "");
+  assert.equal(result.ok, false);
+  const put = calls.find((call) => call.method === "PUT");
+  assert.equal(new URL(put!.url).searchParams.get("@microsoft.graph.conflictBehavior"), "fail");
+  assert.equal(put?.headers["If-Match"], undefined);
+});
+
 test("SEC-4: a traversal path never issues a Graph request", async () => {
   const { store, calls } = graphStore(() => ({ status: 200, body: {} }));
   const result = await store.write(TENANT, "acme", "../../secrets", "x");

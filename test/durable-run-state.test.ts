@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
@@ -10,7 +9,7 @@ import {
 } from "../src/engine/durable-run-state.js";
 
 function tempDir(): { dir: string; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), "squad-runs-"));
+  const dir = mkdtempSync(join(process.cwd(), ".test-squad-runs-"));
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 

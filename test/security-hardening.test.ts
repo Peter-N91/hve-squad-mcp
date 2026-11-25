@@ -20,6 +20,7 @@ import {
 } from "../src/engine/gates.js";
 import type { AuthContext } from "../src/auth/entra.js";
 import type { BackendRequest, BackendResult, ModelBackend } from "../src/engine/model-backend.js";
+import { scriptedStageExecutor } from "./helpers/scripted-stage-executor.js";
 
 class FakeBackend implements ModelBackend {
   readonly id = "fake-backend";
@@ -49,6 +50,7 @@ async function measureSinglePollRunCalls(request: string): Promise<number> {
   const approvals = new InMemoryApprovalChannel();
   const engine = new EmbeddedCoordinator({
     backend,
+    stageExecutorFactory: () => scriptedStageExecutor(backend),
     workspaceManager: new EphemeralWorkspaceManager(),
     quota: new TenantQuotaTracker({ concurrency: 4, monthlyCeilingUsd: 500 }),
     approvals,
@@ -74,6 +76,7 @@ test("MEDIUM-1: concurrent polls of an approved run execute the pipeline only on
   const approvals = new InMemoryApprovalChannel();
   const engine = new EmbeddedCoordinator({
     backend,
+    stageExecutorFactory: () => scriptedStageExecutor(backend),
     workspaceManager: new EphemeralWorkspaceManager(),
     quota: new TenantQuotaTracker({ concurrency: 4, monthlyCeilingUsd: 500 }),
     approvals,

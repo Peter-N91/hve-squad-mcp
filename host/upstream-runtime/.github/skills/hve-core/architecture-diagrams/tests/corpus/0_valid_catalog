@@ -1,0 +1,21 @@
+---
+catalog_version: DS_CATALOG_V1
+engagement: demo
+entities:
+  - id: orders
+    name: Orders
+  - id: customers
+    name: Customers
+relationships:
+  - id: rel-customers-orders
+    from: customers
+    to: orders
+    cardinality: one-to-many
+    from_minimum: one
+    to_minimum: zero
+    join_keys:
+      from_field: customer_id
+      to_field: customer_id
+    confidence: confirmed
+    basis: Confirmed by the data owner
+---

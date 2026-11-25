@@ -1,3 +1,5 @@
+import { readRosterDocumentation } from "../src/engine/roster-documentation.js";
+
 /**
  * Manifest generator (build-time).
  *
@@ -17,7 +19,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { loadCatalog, type CatalogTool, type ToolCatalog } from "../src/catalog/catalog.js";
-import { generatedSchemaPath, packageRoot, resolveSquadGithubRoot, rosterCatalogPath } from "../src/paths.js";
+import { generatedSchemaPath, packageRoot, resolveSquadGithubRoot } from "../src/paths.js";
 import { emitOrCheck } from "./emit.js";
 
 const GENERATOR_NAME = "generators/build-manifests.ts";
@@ -183,7 +185,7 @@ export function loadGeneratorInputs(): GeneratorInputs {
     join(githubRoot, "instructions", "squad", "squad-routing.instructions.md"),
     "utf8",
   );
-  const rosterMd = readFileSync(rosterCatalogPath(githubRoot), "utf8");
+  const rosterMd = readRosterDocumentation(githubRoot);
   const routingRows = parseRoutingRows(routingMd);
   const rosterAgents = parseRosterAgents(rosterMd);
   const squadAgents = readAgentNames(join(githubRoot, "agents", "squad"));

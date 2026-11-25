@@ -22,19 +22,21 @@
  * so the routing engine and the drift generator read these same files the same
  * way — no new parser is invented.
  *
- * Advisory stage order (VF-08) — the explicit, documented order this router
- * plans and Phase 3 will execute:
+ * Advisory stage order (VF-08) — the pipeline resolves the routed roles into
+ * this sequence:
  *
  *     research (`researcher`)
  *       -> plan (`lead`)
  *       -> council (task-fit: one role per lens the request touches, from
  *                   `architect`, `security`, `cost-manager`, `product-owner`,
  *                   `rai`)
+ *       -> [text-only developer report OR deliverable fan-out]
  *       -> review (`tester`)
  *       -> backlog-handoff
  *
  * The linear pipeline stages returned in {@link RoutePlan.stages} are
- * research -> plan -> review; the council is surfaced separately in
+ * research -> plan -> review; the report/fan-out stage is resolved by the
+ * advisory pipeline, and the council is surfaced separately in
  * {@link RoutePlan.council} (triggered when the request crosses two or more
  * council lenses or raises any RAI concern) so Phase 3 can interleave it between plan and review without
  * this Phase re-planning. A single research-type request routes to the single
@@ -47,10 +49,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { resolveSquadGithubRoot, rosterCatalogPath } from "../paths.js";
+import { resolveSquadGithubRoot } from "../paths.js";
+import { readRosterDocumentation } from "./roster-documentation.js";
 import {
   defaultProfileTables,
   INTAKE_VALIDATOR_ROLE,
+  isBrdAuthoringRequest,
+  profileForRequest,
   resolveProfile,
   type ProfileTables,
 } from "./profiles.js";
@@ -152,7 +157,7 @@ export function parseRosterMap(markdown: string): Map<string, string> {
   return map;
 }
 
-/** Load + parse the routing and roster instructions from disk (read-only). */
+/** Load routing instructions and combined roster documentation (read-only). */
 export function loadRoutingTables(githubRoot = resolveSquadGithubRoot()): RoutingTables {
   if (!githubRoot) {
     throw new Error(
@@ -163,7 +168,7 @@ export function loadRoutingTables(githubRoot = resolveSquadGithubRoot()): Routin
     join(githubRoot, "instructions", "squad", "squad-routing.instructions.md"),
     "utf8",
   );
-  const rosterMd = readFileSync(rosterCatalogPath(githubRoot), "utf8");
+  const rosterMd = readRosterDocumentation(githubRoot);
   return {
     intents: parseRoutingIntents(routingMd),
     rosterMap: parseRosterMap(rosterMd),
@@ -242,6 +247,9 @@ export interface RoutePlan {
    * other profile keeps the unchanged single build.
    */
   fanOut: RouteStage[];
+  requiredAgent?: string;
+  missingRoles?: string[];
+  focusedDeliverable?: boolean;
 }
 
 /** Options mirroring the `/squad` prompt arguments that influence routing. */
@@ -254,6 +262,7 @@ export interface RouteOptions {
   tier?: string;
   /** Optional Member Name hint — accepted for forward-compat; does not change the stage plan. */
   owner?: string;
+  review?: import("./brd-review.js").BrdReviewRequest;
 }
 
 /** The advisory role KEYS, in the fixed advisory stage order (VF-08). */
@@ -365,8 +374,17 @@ export function computeRoutePlan(
   tables: RoutingTables,
   profileTables?: ProfileTables,
 ): RoutePlan {
+  if (opts.review) {
+    return {
+      stages: [{ role: "brd-reviewer", agentName: "BRD Quality Reviewer", tier: "confirm", parallelEligible: false }],
+      council: { engaged: false, members: [], extension: [], notProposed: [] },
+      profile: opts.profile ?? "brd", fanOut: [], focusedDeliverable: true, requiredAgent: "BRD Quality Reviewer",
+    };
+  }
   const lower = request.toLowerCase();
-  const profile = resolveProfile(opts.profile, profileTables ?? defaultProfileTables());
+  const effectiveTables = profileTables ?? defaultProfileTables();
+  const profile = resolveProfile(profileForRequest(opts.profile, request), effectiveTables);
+  const brd = profile.name === "brd" || isBrdAuthoringRequest(request);
 
   const researchMatched = RESEARCH_KEYWORDS.some((keyword) => keywordPresent(lower, keyword));
   const councilDomains = crossedCouncilDomains(lower);
@@ -380,7 +398,7 @@ export function computeRoutePlan(
 
   // A profile whose Implement stage fans out is never a single-stage run: the
   // deliverables it seeds are the point of choosing it.
-  const advisoryOverride = Boolean(opts.mode) || profile.fansOut;
+  const advisoryOverride = Boolean(opts.mode) || profile.fansOut || brd;
   const otherMatched = nonResearchRowMatched || councilDomains.length > 0 || advisoryOverride;
 
   // A role the profile did not seed cannot be dispatched this run.
@@ -388,7 +406,12 @@ export function computeRoutePlan(
   const intake = profile.hasIntakeGate
     ? buildStage(tables, INTAKE_VALIDATOR_ROLE, "intake", "confirm", false)
     : undefined;
-  const fanOut = profile.fansOut
+  const analyst = effectiveTables.cast.get("analyst");
+  const brdAvailable = profile.seeded.has("analyst") &&
+    [analyst?.primary, ...(analyst?.alternates ?? [])].includes("BRD Builder");
+  const fanOut = brd
+    ? (brdAvailable ? [{ ...buildStage(tables, "analyst", "requirements", "confirm", false), agentName: "BRD Builder" }] : [])
+    : profile.fansOut
     ? profile.deliverableRoles.map((role) => buildStage(tables, role, role, "confirm", true))
     : [];
 
@@ -420,6 +443,7 @@ export function computeRoutePlan(
     profile: profile.name,
     intake,
     fanOut,
+    ...(brd ? { requiredAgent: "BRD Builder", missingRoles: brdAvailable ? [] : ["analyst"], focusedDeliverable: true } : {}),
   };
 }
 

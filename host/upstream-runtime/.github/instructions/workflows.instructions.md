@@ -1,0 +1,422 @@
+---
+description: "GitHub Actions workflow conventions for hve-core"
+applyTo: '**/.github/workflows/*.yml'
+
+---
+
+# GitHub Actions Workflow Instructions
+
+These instructions define required conventions and security requirements for GitHub Actions workflows in the hve-core repository. All workflows MUST comply with these rules to pass CI validation.
+
+## Dependency Pinning
+
+All third-party GitHub Actions MUST be pinned to a full commit SHA. Version tags MUST NOT be used as the reference. Each pin MUST carry a trailing comment naming the exact release tag that points at the pinned commit (for example `# v4.2.2`, not a moving `# v4`). The commit MUST be a commit, not an annotated tag object, and MUST be on an upstream tag or in the upstream default branch history. A reusable workflow pinned to an untagged commit on the default branch may use a free-text comment that records its origin.
+
+**Required pattern:**
+
+```yaml
+uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+```
+
+**Forbidden patterns:**
+
+```yaml
+uses: actions/checkout@v4
+uses: actions/checkout@v4.2.2
+```
+
+Same-repository actions and reusable workflows use the self-repository syntax, `uses: $/.github/actions/<name>` or `uses: $/.github/workflows/<name>.yml`. It resolves to the running commit, needs no checkout, and can't load code a job cloned at runtime, so these references are excluded from SHA pinning requirements. Don't use the workspace-relative `./` form; it loads whatever is checked out in the workspace.
+
+**Enforcement:** Violations are detected by `scripts/security/Test-DependencyPinning.ps1` and `scripts/security/Test-SHAStaleness.ps1`. `scripts/security/Test-ActionPinProvenance.ps1` resolves each comment and commit against the upstream repository with `git ls-remote` and the compare API, and fails on a mislabeled comment, a tag-object pin, or a commit that is on no tag and not in the default branch history (a possible impostor commit). CI will fail on SHA pinning violations.
+
+## Permissions
+
+Workflows MUST declare explicit permissions following the principle of least privilege. The workflow-level block MUST be `contents: read` or `permissions: {}` and MUST NOT grant any other scope, including read scopes such as `security-events: read`. Additional permissions MUST be granted at the job level and only when required for a specific capability. The `read-all` and `write-all` values MUST NOT be used at any level; `read-all` includes reads of security events and vulnerability alerts.
+
+Every job MUST declare its own `permissions:` block whenever the workflow-level block grants any scope. A job with no block silently inherits the workflow grant, which is neither explicit nor auditable. The one exception is a workflow-level `permissions: {}`, which grants nothing, so a job beneath it that declares no block inherits an empty set and holds no scope.
+
+An empty workflow-level block is a default, not a ceiling. A job that does declare its own block still receives what it declares, because job-level permissions replace the workflow-level set rather than being capped by it.
+
+A job that acts only through a GitHub App token or another credential, and never uses `GITHUB_TOKEN`, SHOULD declare `permissions: {}`. When a job mints a GitHub App token with `actions/create-github-app-token`, it SHOULD request only the app permissions the job uses through `permission-*` inputs.
+
+**Required pattern:**
+
+```yaml
+permissions:
+  contents: read
+
+jobs:
+  comment:
+    name: Comment on Pull Request
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+```
+
+**Job-level permissions example:**
+
+```yaml
+jobs:
+  validate:
+    name: Validate Code
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Run validation
+        run: |
+          echo "Running validation steps"
+```
+
+**Enforcement:** Violations are detected by `scripts/security/Test-WorkflowPermissions.ps1`, which classifies each workflow and then each of its jobs:
+
+| Workflow-level block | Job-level block | Effective scopes                   | Verdict   |
+|----------------------|-----------------|------------------------------------|-----------|
+| absent               | absent          | repository or organization default | violation |
+| absent               | present         | job-declared                       | violation |
+| `permissions: {}`    | absent          | none                               | pass      |
+| populated            | absent          | inherits the workflow grant        | violation |
+| `{}` or populated    | present         | job-declared                       | pass      |
+
+A workflow with no workflow-level block is a file-level violation whatever its jobs declare, because a job added later without its own block would still inherit the repository or organization default.
+
+Two breadth rules apply in addition to that matrix:
+
+* A workflow-level block that grants anything beyond `contents: read` (entries set to `none` are allowed) is an `ExcessiveWorkflowPermissions` violation.
+* A `read-all` or `write-all` value at the workflow level or on any job is a `BroadPermissionsScalar` violation, regardless of the workflow-level state.
+
+CI will fail on a missing top-level block, a job that omits its own block under a populated workflow-level block, a workflow-level grant beyond `contents: read`, or any `read-all` or `write-all` value. The `copilot-setup-steps.yml` workflow is excluded by default.
+
+## Credentials and Secrets
+
+Workflows MUST NOT persist GitHub credentials by default. Credential persistence MUST be enabled only when explicitly required for a specific capability. Secrets and tokens MUST be granted explicitly and scoped to the minimum required permissions.
+
+**Required pattern:**
+
+```yaml
+- name: Checkout code
+  uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+  with:
+    persist-credentials: false
+```
+
+**Secret handling:**
+
+```yaml
+- name: Use secret
+  env:
+    MY_SECRET: ${{ secrets.MY_SECRET }}
+  run: |
+    # Use $MY_SECRET securely
+```
+
+## Runners
+
+Workflows MUST run on dated GitHub-hosted Ubuntu runners. Windows, macOS, self-hosted, and other non-Ubuntu runner types are not supported in hve-core.
+
+**Allowed `runs-on` labels** (dated GitHub-hosted Ubuntu images only):
+
+* `ubuntu-24.04` (and the other known dated GitHub-hosted Ubuntu images, `ubuntu-22.04` and `ubuntu-26.04`)
+* ARM variants of dated labels, such as `ubuntu-24.04-arm`
+* Firewall variants of dated labels, such as `ubuntu-24.04-firewall`, which run behind GitHub's native egress firewall
+
+**Disallowed `runs-on` values:**
+
+* `ubuntu-latest` and `ubuntu-slim`: their image changes without a workflow change, so an image upgrade would skip review.
+* Dated labels for an Ubuntu version GitHub does not host, such as `ubuntu-25.04`. Add a new image version to `$script:KnownUbuntuVersions` in `scripts/security/Test-WorkflowRunner.ps1` when GitHub publishes it.
+* `windows-*`, `macos-*`, `self-hosted`, and any custom or third-party runner label.
+* Expressions such as `${{ matrix.os }}`: the runner cannot be verified from the workflow file.
+
+**Required pattern:**
+
+```yaml
+runs-on: ubuntu-24.04
+```
+
+Moving to a newer image is a deliberate change that updates every job together. `scripts/security/Test-SHAStaleness.ps1` reports when GitHub publishes a newer Ubuntu image.
+
+## Runtime Versions
+
+Node.js and Python versions come from the root `.node-version` and `.python-version` files, each holding one exact `X.Y.Z` version. The devcontainer, `copilot-setup-steps.yml`, and uv read the same files.
+
+* `actions/setup-node` MUST use `node-version-file: .node-version`.
+* `actions/setup-python` MUST use `python-version-file: .python-version`.
+* A job without a checkout MAY use a literal `node-version` or `python-version`; the literal MUST equal the version file.
+
+**Required pattern:**
+
+```yaml
+- name: Setup Node.js
+  uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+  with:
+    node-version-file: .node-version
+```
+
+**Enforcement:** `scripts/security/Test-ToolVersionConsistency.ps1` fails on a setup step without a version, a step that reads another file, a literal that differs from the version file, or a devcontainer runtime feature that differs. `scripts/security/Test-SHAStaleness.ps1` reports a newer patch release on the pinned line.
+
+## Workflow Structure
+
+Workflows MUST follow these structural expectations:
+
+* Use descriptive names for workflows and jobs
+* Group related jobs with `needs:` dependencies
+* Use `concurrency:` to prevent duplicate runs
+* Prefer reusable workflows for common patterns
+
+**Required structure example:**
+
+```yaml
+name: Descriptive Workflow Name
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Code
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Run Validation
+        run: |
+          echo "Running validation steps"
+```
+
+## Reusable Workflows
+
+### Defining Reusable Workflows
+
+Reusable workflows MUST use `workflow_call` trigger and define explicit inputs and outputs.
+
+**Reusable workflow definition:**
+
+```yaml
+name: Reusable Analysis Workflow
+
+on:
+  workflow_call:
+    inputs:
+      threshold:
+        description: 'Compliance threshold percentage (0-100)'
+        required: false
+        type: number
+      soft-fail:
+        description: 'Whether to continue on violations'
+        required: false
+        type: boolean
+      upload-sarif:
+        description: 'Whether to upload SARIF results to Security tab'
+        required: false
+        type: boolean
+    outputs:
+      compliance-score:
+        description: 'Compliance score percentage'
+        value: ${{ jobs.scan.outputs.compliance-score }}
+      unpinned-count:
+        description: 'Number of unpinned dependencies found'
+        value: ${{ jobs.scan.outputs.unpinned-count }}
+      is-compliant:
+        description: 'Whether repository meets compliance threshold'
+        value: ${{ jobs.scan.outputs.is-compliant }}
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Validate Compliance
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      compliance-score: ${{ steps.analyze.outputs.compliance-score }}
+      unpinned-count: ${{ steps.analyze.outputs.unpinned-count }}
+      is-compliant: ${{ steps.analyze.outputs.is-compliant }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Run Analysis
+        id: analyze
+        run: |
+          echo "compliance-score=95" >> "${GITHUB_OUTPUT}"
+          echo "unpinned-count=2" >> "${GITHUB_OUTPUT}"
+          echo "is-compliant=true" >> "${GITHUB_OUTPUT}"
+```
+
+### Consuming Reusable Workflows
+
+Reusable workflows in this repository MUST be called with the `$/` self-repository reference (`uses: $/.github/workflows/<name>.yml`), with explicit permissions and inputs. Annotate every permission beyond `contents: read` with a reason comment.
+
+A called workflow is the exception to job-level replacement: the calling job's grant is a ceiling for everything the called workflow requests, at its workflow level and in each of its jobs. GitHub refuses to start the run when any request exceeds that grant, so a called workflow whose jobs declare their own blocks SHOULD set `permissions: {}` at the workflow level. The workflow validator reports a request above the caller's grant as `workflow-check/reusable-workflow-permissions`.
+
+**Example usage:**
+
+```yaml
+name: PR Validation Workflow
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-pinning:
+    name: Validate Dependency Pinning
+    uses: $/.github/workflows/dependency-pinning-scan.yml
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to code scanning
+    with:
+      soft-fail: false
+      upload-sarif: true
+```
+
+## Validation Requirements
+
+All workflows MUST pass the following validation checks:
+
+### Workflow Validation
+
+* **Script:** `scripts/linting/workflow-validator/validate-workflows.mjs` (`npm run lint:workflows`)
+* **What it enforces:** GitHub's own workflow parser validates every workflow and composite action, custom checks catch undefined references, undeclared action inputs, and reusable-workflow permission requests above the caller's grant, and the manifest-pinned shellcheck checks every bash and sh `run:` script. Nothing is ignored or disabled.
+* **CI blocking:** `workflow-validation-scan.yml` reports SARIF to code scanning and fails PR validation on any finding that no tracked exception in `security/code-scanning-exceptions.yml` excuses (`npm run lint:workflows:gated` runs the same gate locally)
+
+### zizmor Audit
+
+* **Tool:** zizmor at the `pedantic` persona, installed from `scripts/security/tool-checksums.json` by `.github/actions/setup-zizmor` (`npm run lint:zizmor` in the devcontainer)
+* **What it enforces:** Every workflow, composite action, and `dependabot.yml` passes zizmor's audits, including template injection, `GITHUB_PATH` and `GITHUB_ENV` writes, dangerous triggers, unscoped GitHub App tokens, and undocumented permissions. Every permission beyond `contents: read` carries a `# reason` comment.
+* **CI blocking:** `zizmor-scan.yml` runs with `--no-ignores`, so inline `zizmor: ignore` comments suppress nothing. It uploads SARIF under category `zizmor` and fails PR validation on any result that no tracked exception in `security/code-scanning-exceptions.yml` excuses (`Test-CodeQLSarifThreshold.ps1 -Threshold All`)
+
+### Dependency Pinning Validation
+
+* **Script:** `scripts/security/Test-DependencyPinning.ps1`
+* **What it enforces:** All third-party actions use full SHA pins
+* **CI blocking:** `dependency-pinning-scan.yml` reports one SARIF rule per dependency type and fails on any finding that no tracked exception excuses; soft-fail callers report the gate result without failing (`npm run lint:dependency-pinning:gated` runs the same gate locally)
+
+### Action Pin Provenance Validation
+
+* **Script:** `scripts/security/Test-ActionPinProvenance.ps1` (`npm run lint:action-pin-provenance`)
+* **What it enforces:** Every pin comment names the release tag at the pinned commit, and every pinned commit is on an upstream tag or in the default branch history. The `Update-ActionSHAPinning.ps1` remediation table is held to the same rules, and each entry must map to a release in its key's major version
+* **CI blocking:** `action-pin-provenance-scan.yml` runs it in PR validation and fails closed when upstream cannot be read
+
+### SHA Staleness Validation
+
+* **Script:** `scripts/security/Test-SHAStaleness.ps1`
+* **What it enforces:** SHA-pinned dependencies are not stale
+* **CI blocking:** Stale dependencies generate warnings and may fail CI
+
+### Workflow Permissions Validation
+
+* **Script:** `scripts/security/Test-WorkflowPermissions.ps1`
+* **What it enforces:** Every workflow declares a top-level `permissions:` block, and every job declares its own block unless the workflow-level block is empty
+* **CI blocking:** Failures block CI when configured to enforce compliance
+
+### Runner Policy Validation
+
+* **Script:** `scripts/security/Test-WorkflowRunner.ps1`
+* **What it enforces:** Every job's `runs-on` value is a dated GitHub-hosted Ubuntu label (see § Runners for the allow list). Floating labels are reported under their own `floating-runner-label` rule. `copilot-setup-steps.yml` is scanned like every other workflow.
+* **CI blocking:** Failures block CI when configured to enforce compliance
+
+## Security Requirements
+
+* Never expose secrets in logs or outputs
+* Never publish agent transcripts or raw model output as workflow artifacts; artifacts on a public repository are world-readable and a transcript can contain job environment contents
+* Classic personal access tokens (`ghp_`) MUST NOT be used in workflows
+* Fine-grained personal access tokens (`github_pat_`) are permitted only as a documented exception where no alternative credential works. The sole current exception is `COPILOT_GITHUB_TOKEN`, which the `@github/copilot` CLI requires and which `GITHUB_TOKEN` cannot satisfy; see `docs/contributing/evals-ci.md`
+* Prefer a GitHub App installation token minted in-run over any stored long-lived credential
+* Use event guards for release-specific operations when needed
+* Enable security features like CodeQL and dependency scanning
+* All security workflows use explicit, minimal permissions
+
+**Example event guard pattern:**
+
+Pass event values to the script through step `env:`; never interpolate `${{ }}` inside `run:`.
+
+```yaml
+- name: Process Release
+  env:
+    EVENT_NAME: ${{ github.event_name }}
+    RELEASE_TAG: ${{ github.event.release.tag_name }}
+    INPUT_VERSION: ${{ inputs.version }}
+  run: |
+    if [ "${EVENT_NAME}" == "release" ]; then
+      VERSION="${RELEASE_TAG}"
+    else
+      VERSION="${INPUT_VERSION}"
+    fi
+    echo "Processing version: ${VERSION}"
+```
+
+## YAML Expression Quoting
+
+GitHub Actions expression single quotes (`'...'`) inside `${{ }}` are NOT YAML quotes. The YAML parser treats them as literal characters in a plain scalar. If the expression text contains a colon followed by whitespace (`:`&nbsp;), the YAML parser interprets it as a mapping value indicator and fails with `mapping values are not allowed in this context`.
+
+**Problem pattern:**
+
+```yaml
+# FAILS: ': release' contains colon-space, YAML parser chokes
+with:
+  my-input: ${{ startsWith(value, 'prefix: release') }}
+```
+
+**Acceptable solutions (in preference order):**
+
+1. **Shorten the literal to avoid colon-space.** Use a prefix that does not contain a colon followed by whitespace when the specificity tradeoff is acceptable.
+
+    ```yaml
+    with:
+      my-input: ${{ startsWith(value, 'prefix') }}
+    ```
+
+2. **Double-quote the entire expression.** This makes the value a YAML quoted scalar, preventing the parser from interpreting internal colon-space as structure. Add a comment explaining why quotes are required.
+
+    ```yaml
+    with:
+      # Quotes required: expression literal contains ': ' which breaks YAML plain scalars
+      my-input: "${{ startsWith(value, 'prefix: release') }}"
+    ```
+
+Avoid `format()` workarounds or environment variable indirection when the simpler options above apply.
+
+## PR Validation Gate
+
+`pr-validation.yml` exposes a single `pr-validation-success` aggregator job as the required status check that gates merge. This job is green only when every other job in the workflow passes.
+
+Every job defined in `pr-validation.yml`, except `pr-validation-success` itself, MUST appear in the `needs:` list of the `pr-validation-success` job. Omitting a job lets that job fail silently without blocking merge, which defeats the gate.
+
+The `gate-completeness-check` job enforces this rule in CI, failing the workflow whenever the gate's `needs:` list drifts out of sync with the defined jobs. Contributors can validate the gate locally by running `npm run lint:pr-gate` before pushing.
+
+## Enforcement Statement
+
+The following scripts enforce compliance:
+
+* `scripts/security/Test-DependencyPinning.ps1` - Validates dependency pinning
+* `scripts/security/Test-SHAStaleness.ps1` - Checks for stale dependencies
+* `scripts/security/Test-WorkflowPermissions.ps1` - Validates workflow permissions declarations
+* `scripts/security/Test-WorkflowRunner.ps1` - Validates `runs-on` values against the dated GitHub-hosted Ubuntu allow-list
+* `scripts/linting/workflow-validator/validate-workflows.mjs` - Validates workflows and composite actions with GitHub's parser, custom checks, and pinned shellcheck
+* `scripts/security/Test-PrValidationGate.ps1` - Validates the PR validation gate `needs:` completeness
+
+All workflows must pass these validation checks to be merged into the repository.

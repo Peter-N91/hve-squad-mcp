@@ -17,14 +17,23 @@
  * Nothing here calls a model or touches storage; it is parsing and resolution
  * only, so the whole surface is unit-testable against the bundled cast.
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readRosterDocumentation } from "./roster-documentation.js";
 
-import { resolveSquadGithubRoot, rosterCatalogPath } from "../paths.js";
+import { resolveSquadGithubRoot } from "../paths.js";
 import { parseTables } from "./markdown-table.js";
 
 /** The profile seeded when the caller names none, or names one that does not exist. */
 export const DEFAULT_PROFILE = "default";
+
+export function isBrdAuthoringRequest(request: string): boolean {
+  return /\b(?:brd|business requirements? document)\b/i.test(request) &&
+    /\b(?:create|write|draft|produce|generate|build|author|prepare)\b/i.test(request);
+}
+
+/** Select a focused roster only at initialization; existing rosters still win. */
+export function profileForRequest(profile: string | undefined, request: string): string | undefined {
+  return !profile?.trim() && isBrdAuthoringRequest(request) ? "brd" : profile;
+}
 
 /** The single writer of squad state; the roster includes it in every profile. */
 export const SCRIBE_ROLE = "scribe";
@@ -224,22 +233,25 @@ export function parseCastCatalog(markdown: string): Map<string, CastCatalogRow> 
   return cast;
 }
 
-/** Load + parse the profile and deliverable-root tables from disk (read-only). */
+/** Load profile, cast and deliverable-root tables from combined roster documentation. */
 export function loadProfileTables(githubRoot = resolveSquadGithubRoot()): ProfileTables {
   if (!githubRoot) {
     throw new Error(
       "Could not resolve the squad .github root (squad-roster.instructions.md not found).",
     );
   }
-  const rosterMd = readFileSync(
-    join(githubRoot, "instructions", "squad", "squad-roster.instructions.md"),
-    "utf8",
-  );
-  const catalogMd = readFileSync(rosterCatalogPath(githubRoot), "utf8");
+  const rosterMd = readRosterDocumentation(githubRoot);
+  const profiles = parseProfiles(rosterMd);
+  const cast = parseCastCatalog(rosterMd);
+  const analyst = cast.get("analyst");
+  if (!profiles.has("brd") &&
+      [analyst?.primary, ...(analyst?.alternates ?? [])].includes("BRD Builder")) {
+    profiles.set("brd", ["researcher", "lead", "developer", "tester", "analyst", SCRIBE_ROLE]);
+  }
   return {
-    profiles: parseProfiles(rosterMd),
+    profiles,
     deliverableRoots: parseDeliverableRoots(rosterMd),
-    cast: parseCastCatalog(catalogMd),
+    cast,
   };
 }
 
@@ -285,7 +297,7 @@ export interface DeliverableRootOptions {
  * Resolve the directory a role writes its deliverable into.
  *
  * Returns `undefined` for a role the roster deliberately omits — `cost-manager`,
- * `intake-validator` and friends hand a structured result back to the coordinator
+ * `fact-checker` and friends hand a structured result back to the coordinator
  * instead of writing a standalone artifact, so having no root is correct for them
  * rather than a gap.
  */

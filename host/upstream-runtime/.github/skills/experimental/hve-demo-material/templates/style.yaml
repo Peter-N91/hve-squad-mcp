@@ -1,0 +1,10 @@
+# Deck metadata for HVE demo material. Copy to content/global/style.yaml.
+# The canonical HVE Slides CSS owns presentation styling, not this file.
+
+metadata:
+  title: "<deck title for this level and topic>" # substitute
+  author: "microsoft/hve-core"
+  subject: "<one line naming the level and its audience>" # substitute
+  keywords: "<comma separated keywords, ending with the level label>" # substitute
+  category: "Demo Material"
+  language: "en-US"

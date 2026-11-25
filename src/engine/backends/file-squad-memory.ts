@@ -167,7 +167,8 @@ export class FileSquadMemoryStore implements SquadMemoryStore {
       return Promise.resolve({ ok: false, conflict: true, current: undefined });
     }
     const existing = this.readEnvelope(file);
-    if (expectedEtag !== undefined && (existing === undefined || existing.etag !== expectedEtag)) {
+    if (expectedEtag === "" ? existing !== undefined :
+      expectedEtag !== undefined && (existing === undefined || existing.etag !== expectedEtag)) {
       // CAS lost: the caller's expected revision no longer matches (or is gone).
       const current =
         existing === undefined

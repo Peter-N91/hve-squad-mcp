@@ -15,9 +15,11 @@
  * comes from the validated Entra token at the call site and is the store's first
  * argument, exactly as it is on every write path.
  */
+import { createHash } from "node:crypto";
 import {
   SQUAD_STATE_ROOT,
   TRACKING_ROOT,
+  isUtf16Boundary,
   type SquadArtifactListEntry,
   type SquadArtifactStore,
 } from "./artifact-store.js";
@@ -37,6 +39,28 @@ export interface HistoryEntry {
   path: string;
   size: number;
   updatedAt: number;
+}
+
+export interface HistoryArtifactPage {
+  path: string;
+  content: string;
+  updatedAt: number;
+  etag: string;
+  offset: number;
+  endOffset: number;
+  nextOffset: number | null;
+  totalChars: number;
+  totalBytes: number;
+  sha256: string;
+  pageSha256: string;
+  truncated: boolean;
+}
+
+export class HistoryReadRangeError extends Error {
+  constructor() {
+    super("History read requires an integer offset at a valid character boundary within the artifact.");
+    this.name = "HistoryReadRangeError";
+  }
 }
 
 /** The compact picture of a project's prior work. */
@@ -82,6 +106,39 @@ export class SquadHistory {
         ? artifact.content
         : `${artifact.content.slice(0, HISTORY_READ_MAX_CHARS)}\n…(truncated)…`;
     return { path: artifact.path, content, updatedAt: artifact.updatedAt };
+  }
+
+  /** Exact pages and source-version receipts for lossless project mirroring. */
+  async readPage(
+    tenantId: string,
+    project: string,
+    path: string,
+    offset: number,
+  ): Promise<HistoryArtifactPage | undefined> {
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new HistoryReadRangeError();
+    const artifact = await this.store.get(tenantId, project, path);
+    if (!artifact) return undefined;
+    const { content } = artifact;
+    if ((offset >= content.length && offset !== 0) || !isUtf16Boundary(content, offset)) {
+      throw new HistoryReadRangeError();
+    }
+    let endOffset = Math.min(content.length, offset + HISTORY_READ_MAX_CHARS);
+    if (!isUtf16Boundary(content, endOffset)) endOffset -= 1;
+    const page = content.slice(offset, endOffset);
+    return {
+      path: artifact.path,
+      content: page,
+      updatedAt: artifact.updatedAt,
+      etag: artifact.etag,
+      offset,
+      endOffset,
+      nextOffset: endOffset < content.length ? endOffset : null,
+      totalChars: content.length,
+      totalBytes: Buffer.byteLength(content, "utf8"),
+      sha256: createHash("sha256").update(content, "utf8").digest("hex"),
+      pageSha256: createHash("sha256").update(page, "utf8").digest("hex"),
+      truncated: offset > 0 || endOffset < content.length,
+    };
   }
 
   /**

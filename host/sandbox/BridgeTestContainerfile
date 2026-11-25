@@ -1,0 +1,16 @@
+FROM node:22-bookworm-slim
+WORKDIR /opt/hve-bridge
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY tsconfig.json tools.catalog.yml ./
+COPY src ./src
+COPY generators ./generators
+COPY host ./host
+COPY generated ./generated
+RUN npm run build
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates libicu72 libgssapi-krb5-2 && curl --fail --location https://github.com/PowerShell/PowerShell/releases/download/v7.5.3/powershell-7.5.3-linux-arm64.tar.gz -o /tmp/pwsh.tar.gz && echo '4a6b656dd0e751e82c5df9b9a4245bd1ec7d21de5334afbbd802dfd009595599  /tmp/pwsh.tar.gz' | sha256sum -c - && mkdir -p /opt/pwsh && tar -xzf /tmp/pwsh.tar.gz -C /opt/pwsh && chmod +x /opt/pwsh/pwsh && ln -s /opt/pwsh/pwsh /usr/bin/pwsh
+COPY host/upstream-runtime /opt/hve-upstream
+RUN useradd --create-home --uid 10001 agent && mkdir -p /workspace && chown agent:agent /workspace && chmod -R a-w /opt/hve-upstream
+COPY host/sandbox/upstream-bridge-linux-smoke.mjs /opt/hve-upstream-bridge-smoke.mjs
+USER agent
+RUN node /opt/hve-upstream-bridge-smoke.mjs

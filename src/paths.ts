@@ -97,9 +97,13 @@ export function resolveSquadGithubRoot(fromPackageRoot = packageRoot()): string 
  * a consumer still on an older APM install keeps resolving roles.
  */
 export function rosterCatalogPath(githubRoot: string): string {
-  const relocated = join(githubRoot, "skills", "squad", "references", "roster-catalog.md");
-  if (existsSync(relocated)) {
-    return relocated;
+  for (const relocated of [
+    join(githubRoot, "skills", "squad", "references", "roster-catalog.md"),
+    join(githubRoot, "references", "squad", "roster-catalog.md"),
+  ]) {
+    if (existsSync(relocated)) {
+      return relocated;
+    }
   }
   return join(githubRoot, "instructions", "squad", "squad-roster.instructions.md");
 }

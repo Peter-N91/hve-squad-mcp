@@ -38,6 +38,12 @@ export const TRACKING_ROOT = ".copilot-tracking";
 /** The squad-state directory within the tracking root. */
 export const SQUAD_STATE_ROOT = `${TRACKING_ROOT}/squad`;
 
+/** Whether slicing here preserves a UTF-16 surrogate pair as one character. */
+export function isUtf16Boundary(content: string, offset: number): boolean {
+  return !(offset > 0 && offset < content.length &&
+    /[\uD800-\uDBFF]/.test(content[offset - 1]) && /[\uDC00-\uDFFF]/.test(content[offset]));
+}
+
 /** One stored artifact, content included. */
 export interface SquadArtifact {
   readonly tenantId: string;
@@ -208,6 +214,8 @@ export class MemoryBackedArtifactStore implements SquadArtifactStore {
     const entries = await this.store.list(tenantId, project);
     const normalized = prefix?.replace(/\/+$/, "");
     return entries
+      // Memory also holds internal bridge/state records, not browsable artifacts.
+      .filter((entry) => isSafeMemoryPath(entry.path) && ALLOWED_ROOTS.includes(entry.path.split("/")[0]))
       .filter((entry) =>
         normalized ? entry.path === normalized || entry.path.startsWith(`${normalized}/`) : true,
       )

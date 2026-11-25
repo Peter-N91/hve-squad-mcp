@@ -82,11 +82,21 @@ export type SquadMemoryWriteResult = SquadMemoryWriteOk | SquadMemoryWriteConfli
 export interface SquadMemoryStore {
   /** List every entry for a `tenantId:project` partition (empty when none). */
   list(tenantId: string, project: string): Promise<SquadMemoryEntry[]>;
+  /**
+   * Optionally list entries updated at or after an epoch-millisecond boundary.
+   * Decorators can use this to avoid rehydrating old overflow payloads.
+   */
+  listUpdatedSince?(
+    tenantId: string,
+    project: string,
+    updatedAt: number,
+  ): Promise<SquadMemoryEntry[]>;
   /** Read a single entry, or `undefined` when it does not exist. */
   read(tenantId: string, project: string, path: string): Promise<SquadMemoryEntry | undefined>;
   /**
    * Write (create or replace) an entry under CAS. When `expectedEtag` is provided
-   * the write applies only if it matches the current revision (else a conflict);
+   * the write applies only if it matches the current revision (else a conflict).
+   * An empty expectedEtag means atomic create-only (conflict if already present);
    * when omitted the write is an unconditional upsert (first-write / overwrite).
    */
   write(

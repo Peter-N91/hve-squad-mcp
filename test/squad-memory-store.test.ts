@@ -26,6 +26,7 @@ import {
 import { FileSquadMemoryStore } from "../src/engine/backends/file-squad-memory.js";
 import { AzureTableSquadMemoryStore } from "../src/engine/backends/azure-table-squad-memory.js";
 import { AesGcmFieldCipher, type FieldCipher } from "../src/engine/field-cipher.js";
+import { ProjectContextBridge, type ProjectContextEnvelope } from "../src/engine/project-context-bridge.js";
 
 function tempDir(): { dir: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), "squad-memory-"));
@@ -51,7 +52,7 @@ function isValidTableKey(key: string): boolean {
  *   * a `$filter` collection query at `.../<table>()?$filter=...` (used by
  *     `list` with `PartitionKey eq` and `listProjects` with `ge`/`lt`).
  * The PUT response carries an `etag` header (the store's write etag); the GET
- * carries `odata.etag` (the store's read etag).
+ * carries `odata.etag` only for fullmetadata, like the Azure REST API.
  */
 class FakeMemoryTable {
   private readonly rows = new Map<string, { entity: Record<string, unknown>; etag: string }>();
@@ -75,6 +76,14 @@ class FakeMemoryTable {
     }
 
     // Single-entity operations carry the exact key in the path.
+    if (method === "POST" && /\/squadmemory$/.test(url)) {
+      const entity = JSON.parse(init?.body as string) as Record<string, unknown>;
+      const key = this.key(String(entity.PartitionKey), String(entity.RowKey));
+      if (this.rows.has(key)) return new Response(null, { status: 409 });
+      const etag = this.nextEtag();
+      this.rows.set(key, { entity, etag });
+      return new Response(null, { status: 204, headers: { etag } });
+    }
     const entityMatch = /\(PartitionKey='([^']*)',RowKey='([^']*)'\)/.exec(url);
     if (entityMatch) {
       const partitionKey = decodeURIComponent(entityMatch[1]);
@@ -92,7 +101,10 @@ class FakeMemoryTable {
         if (!existing) {
           return new Response(null, { status: 404 });
         }
-        return this.json({ ...existing.entity, "odata.etag": existing.etag });
+        return new Response(JSON.stringify({
+          ...existing.entity,
+          ...(headers.Accept?.includes("odata=fullmetadata") ? { "odata.etag": existing.etag } : {}),
+        }), { status: 200, headers: { etag: existing.etag, "content-type": "application/json" } });
       }
       if (method === "PUT") {
         const ifMatch = headers["If-Match"];
@@ -128,7 +140,10 @@ class FakeMemoryTable {
           return pk >= ge[1] && pk < lt[1];
         });
       }
-      const value = matches.map((r) => ({ ...r.entity, "odata.etag": r.etag }));
+      const value = matches.map((r) => ({
+        ...r.entity,
+        ...(headers.Accept?.includes("odata=fullmetadata") ? { "odata.etag": r.etag } : {}),
+      }));
       return this.json({ value });
     }
     return new Response(null, { status: 405 });
@@ -169,8 +184,72 @@ async function forEachStore(body: (store: SquadMemoryStore) => Promise<void>): P
   } finally {
     cleanup();
   }
+
   await body(tableStoreOn(new FakeMemoryTable()));
 }
+
+test("Table-backed project bridge advances across locally committed blocked turns without resetting revisions", async () => {
+  const store = tableStoreOn(new FakeMemoryTable());
+  const bridge = new ProjectContextBridge(store);
+  const tenant = "11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const context: ProjectContextEnvelope = {
+    schemaVersion: 2, projectId: "06dd866f-51e8-412c-9497-d451644c9ae9",
+    revision: 1, sequence: 1,
+    storage: { provider: "sharepoint", driveId: "drive-1", folderItemId: "folder-1" },
+  };
+  const registered = await bridge.negotiate(tenant, "northstar", context);
+  assert.equal(registered?.acceptedRevision, 1);
+  const advanced = await bridge.negotiate(tenant, registered?.project, {
+    ...context, revision: 5, sequence: 4,
+  });
+  assert.equal(advanced?.status, "advanced");
+  assert.equal(advanced?.acceptedRevision, 5);
+  assert.equal(advanced?.acceptedSequence, 4);
+  assert.ok(advanced);
+  const listed = await store.list(tenant, advanced.project);
+  assert.ok(listed.every((entry) => entry.etag.length > 0), "queries preserve per-entry ETags");
+  await assert.rejects(() => bridge.negotiate(tenant, advanced?.project, context), /stale/i);
+});
+
+test("Table memory reads preserve an HTTP ETag when the response body omits metadata", async () => {
+  const store = new AzureTableSquadMemoryStore({
+    account: "fakeacct", tableName: "squadmemory", getAccessToken: async () => "fake-token",
+    fetchImpl: async () => new Response(JSON.stringify({
+      project: "alpha", path: "context/bridge", content: "saved", updatedAt: 1,
+    }), { status: 200, headers: { etag: 'W/"header-etag"' } }),
+  });
+  assert.equal((await store.read("tenant-a", "alpha", "context/bridge"))?.etag, 'W/"header-etag"');
+});
+
+test("Table memory refuses missing read and write ETags instead of returning a create-only token", async () => {
+  const store = new AzureTableSquadMemoryStore({
+    account: "fakeacct", tableName: "squadmemory", getAccessToken: async () => "fake-token",
+    fetchImpl: async (_input, init) => init?.method === "GET"
+      ? new Response(JSON.stringify({
+          project: "alpha", path: "state", content: "saved", updatedAt: 1,
+        }), { status: 200 })
+      : new Response(null, { status: 204 }),
+  });
+  await assert.rejects(() => store.read("tenant-a", "alpha", "state"), /missing an entity ETag/);
+  await assert.rejects(() => store.write("tenant-a", "alpha", "state", "new"), /no entity ETag/);
+});
+
+test("empty expectedEtag creates exactly once without overwriting a competing identity", async () => {
+  await forEachStore(async (store) => {
+    const results = await Promise.all([
+      store.write("tenant-a", "alpha", "context/bridge", "first", ""),
+      store.write("tenant-a", "alpha", "context/bridge", "second", ""),
+    ]);
+    assert.equal(results.filter((result) => result.ok).length, 1);
+    const winner = results.find((result) => result.ok);
+    assert.ok(winner?.ok);
+    assert.equal((await store.read("tenant-a", "alpha", "context/bridge"))?.content,
+      winner.entry.content);
+    const loser = results.find((result) => !result.ok);
+    assert.ok(loser && !loser.ok);
+    assert.equal(loser.current?.content, winner.entry.content);
+  });
+});
 
 test("write -> read round-trips the content and returns the write etag", async () => {
   await forEachStore(async (store) => {

@@ -284,7 +284,7 @@ export function discoveryInstructions(discovery: string | undefined): string {
   ].join("\n");
 }
 
-/** The registered add-on packs the `/squad` prompt accepts (hve-squad 0.21.0). */
+/** The registered add-on packs the `/squad` prompt accepts (`microsoft/hve-squad@0.22.0`). */
 export const REGISTERED_PACKS = [
   "power-platform",
   "m365-copilot",
@@ -364,7 +364,7 @@ export function executionInstructions(execution: string | undefined, federation 
   return lines.join("\n");
 }
 
-/** The per-role model routing modes the `/squad` prompt accepts (hve-squad 0.19.0+ / 0.21.0). */
+/** The per-role model routing modes the `/squad` prompt accepts (`microsoft/hve-squad@0.22.0`). */
 export const MODEL_ROUTING_MODES = ["off", "ranked", "economy", "manual"] as const;
 export type ModelRoutingMode = (typeof MODEL_ROUTING_MODES)[number];
 

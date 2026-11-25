@@ -145,7 +145,7 @@ test("the offer is scoped to the profiles that seed the brief's author", () => {
     .filter(([, roles]) => roles.includes("analyst"))
     .map(([name]) => name)
     .sort();
-  assert.deepEqual(withAnalyst, ["full", "product"]);
+  assert.deepEqual(withAnalyst, ["brd", "full", "product"]);
 });
 
 test("deep is the only depth a product squad must add a role for", () => {

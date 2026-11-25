@@ -52,8 +52,25 @@ test("malformed tool input is rejected by schema validation", () => {
 });
 
 test("valid input passes validation and maps to a CoordinatorRequest", () => {
+  const projectContext = {
+    schemaVersion: 1,
+    projectId: "11111111-1111-4111-8111-111111111111",
+    revision: 2,
+    sequence: 3,
+    trackingRoot: ".copilot-tracking",
+    storage: {
+      provider: "sharepoint",
+      driveId: "drive",
+      folderItemId: "folder",
+    },
+  };
   assert.doesNotThrow(() =>
-    router.validateInput("squad_research", { request: "caching options", profile: "default" }),
+    router.validateInput("squad_research", {
+      request: "caching options",
+      profile: "default",
+      project: "legora-storyboard",
+      projectContext,
+    }),
   );
   const tool = router.getTool("squad_research");
   assert.ok(tool, "squad_research is a known tool");
@@ -61,11 +78,15 @@ test("valid input passes validation and maps to a CoordinatorRequest", () => {
     request: "caching options",
     profile: "default",
     mode: "autopilot",
+    project: "legora-storyboard",
+    projectContext,
   });
   assert.equal(coordinatorRequest.toolId, "squad_research");
   assert.equal(coordinatorRequest.request, "caching options");
   assert.equal(coordinatorRequest.profile, "default");
   assert.equal(coordinatorRequest.mode, "autopilot");
+  assert.equal(coordinatorRequest.project, "legora-storyboard");
+  assert.equal(coordinatorRequest.projectContext?.revision, 2);
 });
 
 test("an unknown tool id is rejected", () => {

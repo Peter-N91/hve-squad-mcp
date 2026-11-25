@@ -8,7 +8,11 @@
  * per-tool scope (SEC-2) — is the REAL {@link import("../../../src/auth/entra.js").EntraAuthenticator};
  * only the cryptographic verify step is stubbed.
  */
-import type { JwtClaims, JwtVerifier } from "../../../src/auth/entra.js";
+import type {
+  JwtClaims,
+  JwtVerificationContext,
+  JwtVerifier,
+} from "../../../src/auth/entra.js";
 
 /** The audience the suite's tokens are bound to (RFC 8707 resource indicator). */
 export const TEST_AUDIENCE = "api://hve-squad-mcp-test";
@@ -48,6 +52,7 @@ function claimsFor(identity: FakeIdentity): JwtClaims {
 /** An in-memory {@link JwtVerifier}: known tokens resolve to claims; unknown tokens reject. */
 export class FakeJwtVerifier implements JwtVerifier {
   private readonly byToken = new Map<string, JwtClaims>();
+  lastVerificationContext?: JwtVerificationContext;
 
   /** Register an identity so its token verifies to the derived claims. */
   register(identity: FakeIdentity): FakeIdentity {
@@ -55,7 +60,11 @@ export class FakeJwtVerifier implements JwtVerifier {
     return identity;
   }
 
-  verify(token: string): Promise<JwtClaims> {
+  verify(
+    token: string,
+    context?: JwtVerificationContext,
+  ): Promise<JwtClaims> {
+    this.lastVerificationContext = context;
     const claims = this.byToken.get(token);
     if (!claims) {
       // Mirrors a signature/issuer/expiry failure in the live verifier.

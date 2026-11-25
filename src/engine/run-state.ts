@@ -16,6 +16,8 @@
 import { randomUUID } from "node:crypto";
 
 import type { CouncilVerdictClass } from "./council.js";
+import type { CompletionUsageRecord } from "./model-backend.js";
+import type { ResponsibleAiBlocker } from "./responsible-ai.js";
 
 export type RunStatus = "running" | "held" | "complete" | "failed";
 
@@ -64,6 +66,25 @@ export interface RunHistoryEntry {
   at: string;
 }
 
+export interface HumanInputRequest {
+  questionId: string;
+  question: string;
+  purpose: "clarification" | "confirmation";
+  choices?: string[];
+  notice?: string;
+}
+
+export interface HumanInputResponse {
+  answer: string;
+  respondedBy: string;
+  respondedAt: number;
+}
+
+/** Caller/model text and identity; encrypted in durable stores. */
+export interface HumanInputState extends HumanInputRequest {
+  response?: HumanInputResponse;
+}
+
 export interface RunState {
   /** Server-allocated, unguessable run id (never caller-influenced). */
   readonly runId: string;
@@ -76,6 +97,11 @@ export interface RunState {
   readonly createdAt: number;
   /** When `status === "held"`, why the gate is held (no secret content). */
   holdReason?: string;
+  /** Stable failure code; failed-stage details are kept in the encrypted artifact. */
+  failureReason?: string;
+  /** Terminal, safe policy receipt; never a resumable human-input approval. */
+  responsibleAi?: ResponsibleAiBlocker;
+  modelFailure?: import("./model-backend.js").ModelFailureDiagnostics;
   /** The finished artifact, persisted on completion (durable store; async poll). */
   artifact?: string;
   /** Epoch ms of the last status transition (durable store bookkeeping / TTL). */
@@ -139,6 +165,15 @@ export interface RunState {
    * (metadata only: stage label + timestamp), left in the clear for auditability.
    */
   history?: RunHistoryEntry[];
+  /**
+   * Prompt-free per-provider-attempt usage and outcome attribution. Token subset
+   * fields retain provider semantics and cost remains a configured estimate.
+   */
+  completionUsage?: CompletionUsageRecord[];
+  /** Pending human question and its accepted response; encrypted at rest. */
+  humanInput?: HumanInputState;
+  /** Opaque compressed advisory continuation state; encrypted at rest. */
+  advisoryCheckpoint?: string;
 }
 
 export interface CreateRunInit {
@@ -172,6 +207,13 @@ export interface RunStateStore {
   update(runId: string, patch: Partial<Omit<RunState, "runId" | "tenantId" | "toolId" | "createdAt">>): Promise<RunState | undefined>;
   delete(runId: string): Promise<void>;
   /**
+   * Atomically answer the current unanswered question on an unexpired held run
+   * with a checkpoint, then queue it as running without a lease. A replay of the
+   * same question, answer and principal returns the original accepted response
+   * (including timestamp), even after completion. Conflicts return undefined.
+   */
+  answerInput(runId: string, questionId: string, response: HumanInputResponse): Promise<RunState | undefined>;
+  /**
    * WI-06 — atomically transition a run from one of `from` to `to`, stamping a
    * fresh lease. Succeeds only when the run exists, is not expired, its current
    * status is in `from`, AND (for a `running` run) its prior lease has expired —
@@ -196,8 +238,40 @@ export function isRunApproved(run: RunState): boolean {
 }
 
 /** True when a run has passed its TTL. */
-export function isRunExpired(run: RunState, now: number): boolean {
+export function isRunExpired(run: Pick<RunState, "expiresAt">, now: number): boolean {
   return typeof run.expiresAt === "number" && run.expiresAt <= now;
+}
+
+export function hasUnansweredHumanInput(run: RunState): boolean {
+  return run.humanInput !== undefined && !run.humanInput.response;
+}
+
+/** Pure compare-and-transition; stores must persist with their own atomic guard. */
+export function answerRunInput(
+  run: RunState,
+  questionId: string,
+  response: HumanInputResponse,
+  now: number,
+): RunState | undefined {
+  if (isRunExpired(run, now) || !run.humanInput || run.humanInput.questionId !== questionId) {
+    return undefined;
+  }
+  const accepted = run.humanInput.response;
+  if (accepted) {
+    return accepted.answer === response.answer && accepted.respondedBy === response.respondedBy
+      ? run : undefined;
+  }
+  if (run.status !== "held" || !run.advisoryCheckpoint?.trim()) {
+    return undefined;
+  }
+  return {
+    ...run,
+    humanInput: { ...run.humanInput, response: { ...response } },
+    status: "running",
+    holdReason: undefined,
+    leaseExpiresAt: undefined,
+    updatedAt: now,
+  };
 }
 
 /**
@@ -206,7 +280,8 @@ export function isRunExpired(run: RunState, now: number): boolean {
  * Shared by every store so `listClaimable` semantics are identical everywhere.
  */
 export function isRunClaimable(run: RunState, now: number): boolean {
-  if (run.status === "complete" || run.status === "failed" || isRunExpired(run, now)) {
+  if (run.status === "complete" || run.status === "failed" || isRunExpired(run, now) ||
+      hasUnansweredHumanInput(run)) {
     return false;
   }
   if (run.status === "held") {
@@ -275,13 +350,22 @@ export class EphemeralRunStateStore implements RunStateStore {
     return Promise.resolve();
   }
 
+  answerInput(runId: string, questionId: string, response: HumanInputResponse): Promise<RunState | undefined> {
+    // No await between the read, comparison, and write: process-local atomicity.
+    const current = this.peek(runId);
+    const next = current ? answerRunInput(current, questionId, response, Date.now()) : undefined;
+    if (next && next !== current) this.runs.set(runId, next);
+    return Promise.resolve(next);
+  }
+
   claim(runId: string, from: RunStatus[], to: RunStatus, options: ClaimOptions = {}): Promise<RunState | undefined> {
     const now = options.now ?? Date.now();
     // Read+check+write with NO await between them: atomic within one process, so
     // two concurrent claims cannot both win (in-process CAS; cross-replica CAS is
     // the Azure Table store's ETag If-Match).
     const existing = this.peek(runId);
-    if (!existing || !from.includes(existing.status)) {
+    if (!existing || isRunExpired(existing, now) || !from.includes(existing.status) ||
+        hasUnansweredHumanInput(existing)) {
       return Promise.resolve(undefined);
     }
     if (existing.status === "running" && (existing.leaseExpiresAt ?? 0) > now) {

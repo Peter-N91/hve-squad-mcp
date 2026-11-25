@@ -12,7 +12,7 @@
   "generatedAt": "2026-11-25",
   "agentFileCount": 91,
   "instructionFileCount": 15,
-  "referenceFileCount": 3,
+  "referenceFileCount": 6,
   "agentNames": [
     "Accessibility Framework Assessor",
     "Accessibility Planner",
@@ -638,6 +638,21 @@
       "source": "microsoft/hve-squad/squad-src/.github/instructions/squad/squad-watch-mode.instructions.md#a8cc33d5973fb00f7f47ddb069d26db8fd8eed5f"
     },
     {
+      "path": "skills/squad/references/economy-mode.md",
+      "sha256": "d7dc7f7cd7d1aa4c17bc34960c9610f5ffc6d756e5700ac1f530f762244010b5",
+      "source": "microsoft/hve-squad/squad-src/.github/skills/squad/references/economy-mode.md#a8cc33d5973fb00f7f47ddb069d26db8fd8eed5f"
+    },
+    {
+      "path": "skills/squad/references/model-catalog.md",
+      "sha256": "b0c0688c028dd811e45b9c7f8876c56692c535042d37d9df13c74769984ea110",
+      "source": "microsoft/hve-squad/squad-src/.github/skills/squad/references/model-catalog.md#a8cc33d5973fb00f7f47ddb069d26db8fd8eed5f"
+    },
+    {
+      "path": "skills/squad/references/model-routing.md",
+      "sha256": "e341a47edcd6f3f78621098033f82c0eef6aa05804c3f3a22f99f7c244dbd03a",
+      "source": "microsoft/hve-squad/squad-src/.github/skills/squad/references/model-routing.md#a8cc33d5973fb00f7f47ddb069d26db8fd8eed5f"
+    },
+    {
       "path": "skills/squad/references/responsible-use.md",
       "sha256": "5acd3e6ed959770e4c5211cd363d2af07e8beb1ba93d71d978a253e45529b682",
       "source": "microsoft/hve-squad/squad-src/.github/skills/squad/references/responsible-use.md#a8cc33d5973fb00f7f47ddb069d26db8fd8eed5f"
@@ -653,5 +668,5 @@
       "source": "microsoft/hve-core/.github/skills/shared/untrusted-content-boundary/SKILL.md#a81603f3fc7f93083910d8b5cb7f4095407ab786"
     }
   ],
-  "note": "Skill file trees are DEFERRED to the execution expansion; personas + squad instructions plus the untrusted-content-boundary skill and the squad skill references (skills/squad/references/responsible-use.md, skills/squad/references/roster-catalog.md) only."
+  "note": "Skill file trees are DEFERRED to the execution expansion; personas + squad instructions plus the untrusted-content-boundary skill and the squad skill references (skills/squad/references/{responsible-use,roster-catalog,model-routing,model-catalog,economy-mode}.md) only."
 }

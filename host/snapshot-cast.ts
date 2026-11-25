@@ -79,6 +79,9 @@ const SQUAD_SKILL_DIR = "/skills/squad";
 export const SQUAD_SKILL_REFERENCES = [
   "references/responsible-use.md",
   "references/roster-catalog.md",
+  "references/model-routing.md",
+  "references/model-catalog.md",
+  "references/economy-mode.md",
 ] as const;
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
@@ -197,6 +200,19 @@ export function parseApmDependencies(apmYaml: string): Dependency[] {
     throw new Error("apm.yml declares no dependencies.apm entries.");
   }
   return entries.map((entry) => parseDependency(String(entry)));
+}
+
+/** Ensure a bundle-relative path is clean, relative, and strictly inside the bundle root. */
+export function validateBundlePath(bundlePath: string): string {
+  const cleaned = bundlePath.replace(/\\/g, "/");
+  if (!cleaned || cleaned.startsWith("/") || /^[A-Za-z]:/.test(cleaned)) {
+    throw new Error(`Invalid bundle path "${bundlePath}": must be relative.`);
+  }
+  const parts = cleaned.split("/");
+  if (parts.some((part) => part.length === 0 || part === "." || part === "..")) {
+    throw new Error(`Invalid bundle path "${bundlePath}": contains empty or parent segments.`);
+  }
+  return cleaned;
 }
 
 /**
@@ -473,7 +489,7 @@ function buildManifest(pin: Pin, resolution: Resolution, generatedAt: string): C
     note:
       "Skill file trees are DEFERRED to the execution expansion; personas + squad instructions " +
       "plus the untrusted-content-boundary skill and the squad skill references " +
-      "(skills/squad/references/responsible-use.md, skills/squad/references/roster-catalog.md) only.",
+      "(skills/squad/references/{responsible-use,roster-catalog,model-routing,model-catalog,economy-mode}.md) only.",
   };
 }
 

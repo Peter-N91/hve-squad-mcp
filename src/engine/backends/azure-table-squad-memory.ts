@@ -100,7 +100,8 @@ export class AzureTableSquadMemoryStore implements SquadMemoryStore {
       Authorization: `Bearer ${token}`,
       "x-ms-version": TABLE_API_VERSION,
       "x-ms-date": new Date().toUTCString(),
-      Accept: "application/json;odata=nometadata",
+      // Only fullmetadata includes per-entity ETags in collection responses.
+      Accept: "application/json;odata=fullmetadata",
       "Content-Type": "application/json",
       ...extra,
     };
@@ -162,12 +163,16 @@ export class AzureTableSquadMemoryStore implements SquadMemoryStore {
 
   /** Map a wire entity back to a decrypted entry. */
   private fromEntity(entity: MemoryEntity, tenantId: string): SquadMemoryEntry {
+    const etag = entity["odata.etag"];
+    if (typeof etag !== "string" || etag.length === 0 || etag === "*") {
+      throw new Error("Table memory response is missing an entity ETag; refusing unsafe concurrency.");
+    }
     return {
       tenantId,
       project: entity.project,
       path: entity.path,
       content: decryptField(this.cipher, entity.content) ?? "",
-      etag: entity["odata.etag"] ?? "",
+      etag,
       updatedAt: entity.updatedAt,
     };
   }
@@ -223,7 +228,9 @@ export class AzureTableSquadMemoryStore implements SquadMemoryStore {
     if (!response.ok) {
       throw new Error(`Table read failed with status ${response.status}.`);
     }
-    return (await response.json()) as MemoryEntity;
+    const entity = (await response.json()) as MemoryEntity;
+    entity["odata.etag"] = response.headers.get("etag") ?? entity["odata.etag"];
+    return entity;
   }
 
   async write(
@@ -245,19 +252,25 @@ export class AzureTableSquadMemoryStore implements SquadMemoryStore {
     // (If-Match: <etag>) makes a CAS write a true compare-and-swap — a stale etag
     // (or a since-deleted entry) fails 412/404 and we return the current revision.
     const conditional = expectedEtag !== undefined;
-    const response = await this.fetchImpl(this.entityUrl(partitionKey, path), {
-      method: "PUT",
-      headers: await this.headers(conditional ? { "If-Match": expectedEtag } : {}),
+    const createOnly = expectedEtag === "";
+    const response = await this.fetchImpl(createOnly
+      ? `${this.baseUrl}/${this.tableName}` : this.entityUrl(partitionKey, path), {
+      method: createOnly ? "POST" : "PUT",
+      headers: await this.headers(conditional && !createOnly ? { "If-Match": expectedEtag } : {}),
       body: JSON.stringify(entity),
     });
-    if (conditional && (response.status === 412 || response.status === 404)) {
+    if (conditional && (response.status === 412 || response.status === 404 ||
+      (createOnly && response.status === 409))) {
       const current = await this.fetchEntity(partitionKey, path);
       return { ok: false, conflict: true, current: current ? this.fromEntity(current, tenantId) : undefined };
     }
     if (!response.ok) {
       throw new Error(`Table write failed with status ${response.status}.`);
     }
-    const etag = response.headers.get("etag") ?? "";
+    const etag = response.headers.get("etag");
+    if (!etag || etag === "*") {
+      throw new Error("Table memory write returned no entity ETag; re-read the entry before retrying.");
+    }
     return {
       ok: true,
       etag,

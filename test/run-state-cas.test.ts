@@ -5,17 +5,21 @@
  */
 import assert from "node:assert/strict";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { EphemeralRunStateStore, type RunStateStore } from "../src/engine/run-state.js";
+import {
+  EphemeralRunStateStore,
+  isRunClaimable,
+  type HumanInputState,
+  type RunStateStore,
+} from "../src/engine/run-state.js";
 import { DurableRunStateStore } from "../src/engine/durable-run-state.js";
 import { AesGcmFieldCipher } from "../src/engine/field-cipher.js";
 import { randomBytes } from "node:crypto";
 
 function tempDir(): { dir: string; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), "squad-cas-"));
+  const dir = mkdtempSync(join(process.cwd(), ".test-squad-cas-"));
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
@@ -158,6 +162,231 @@ const SAMPLE_HISTORY = [
   { stage: "Squad Lead", at: "2026-07-06T00:00:01.000Z" },
   { stage: "Council Verdict", at: "2026-07-06T00:00:02.000Z" },
 ];
+
+const QUESTION: HumanInputState = {
+  questionId: "question-secret-1",
+  question: "Which sensitive scope is intended?",
+  purpose: "clarification",
+  choices: ["private-option-a", "private-option-b"],
+  notice: "private human handoff notice",
+};
+const ANSWER = { answer: "private-option-a", respondedBy: "private-user-1", respondedAt: 12345 };
+
+async function awaitingInput(store: RunStateStore): Promise<string> {
+  const run = await store.create({ tenantId: "t", toolId: "squad_run" });
+  await store.update(run.runId, {
+    status: "held",
+    holdReason: "awaiting-human-input",
+    leaseExpiresAt: Date.now() + 60_000,
+    humanInput: QUESTION,
+    advisoryCheckpoint: "opaque-sensitive-checkpoint",
+    stages: SAMPLE_STAGES,
+    councilVerdict: SAMPLE_VERDICT,
+    history: SAMPLE_HISTORY,
+  });
+  return run.runId;
+}
+
+test("human answer atomically queues the same run and preserves completed stages", async () => {
+  await forEachStore(async (store) => {
+    const runId = await awaitingInput(store);
+    const before = await store.get(runId);
+    const answered = await store.answerInput(runId, QUESTION.questionId, ANSWER);
+    assert.ok(answered);
+    assert.equal(answered.runId, runId);
+    assert.equal(answered.createdAt, before?.createdAt);
+    assert.equal(answered.status, "running");
+    assert.equal(answered.holdReason, undefined);
+    assert.equal(answered.leaseExpiresAt, undefined);
+    assert.equal(answered.approvedBy, undefined, "human input does not fabricate operator approval");
+    assert.deepEqual(answered.humanInput, { ...QUESTION, response: ANSWER });
+    assert.equal(answered.advisoryCheckpoint, "opaque-sensitive-checkpoint");
+    assert.deepEqual(answered.stages, SAMPLE_STAGES);
+    assert.deepEqual(answered.councilVerdict, SAMPLE_VERDICT);
+    assert.deepEqual(answered.history, SAMPLE_HISTORY);
+    assert.deepEqual((await store.listClaimable()).map((run) => run.runId), [runId]);
+    assert.ok(await store.claim(runId, ["running"], "running"));
+    assert.equal(await store.claim(runId, ["running"], "running"), undefined);
+  });
+});
+
+test("unanswered input blocks list and claim despite earlier operator approval", async () => {
+  await forEachStore(async (store) => {
+    const runId = await awaitingInput(store);
+    for (const status of ["held", "running"] as const) {
+      const run = await store.update(runId, {
+        status, approvedBy: "earlier-operator", approvedAt: 99, leaseExpiresAt: 0,
+      });
+      assert.ok(run);
+      assert.equal(isRunClaimable(run, Date.now()), false);
+      assert.deepEqual(await store.listClaimable(), []);
+      assert.equal(await store.claim(runId, ["held", "running"], "running"), undefined);
+      assert.equal((await store.get(runId))?.humanInput?.response, undefined);
+    }
+    await store.update(runId, { status: "held" });
+    const answered = await store.answerInput(runId, QUESTION.questionId, ANSWER);
+    assert.equal(answered?.approvedBy, "earlier-operator");
+    assert.ok(answered && isRunClaimable(answered, Date.now()));
+  });
+});
+
+test("a deferred question stays held until a later collaborator answers within the original TTL", async (t) => {
+  const startedAt = Date.now();
+  const expiresAt = startedAt + 60_000;
+  let now = startedAt;
+  t.mock.method(Date, "now", () => now);
+  await forEachStore(async (store) => {
+    now = startedAt;
+    const runId = await awaitingInput(store);
+    await store.update(runId, {
+      params: JSON.stringify({ initiatedBy: "original-initiator" }),
+      approvedBy: "original-initiator",
+      approvedAt: startedAt,
+      expiresAt,
+    });
+    now += 30_000;
+    const waiting = await store.get(runId);
+    assert.equal(waiting?.status, "held");
+    assert.equal(waiting?.humanInput?.response, undefined);
+    assert.equal(waiting?.expiresAt, expiresAt);
+    assert.deepEqual(await store.listClaimable(), []);
+    assert.equal(await store.claim(runId, ["held", "running"], "running"), undefined);
+
+    const collaborator = { answer: "private-option-b", respondedBy: "different-collaborator", respondedAt: now };
+    const answered = await store.answerInput(runId, QUESTION.questionId, collaborator);
+    assert.equal(answered?.status, "running");
+    assert.deepEqual(answered?.humanInput?.response, collaborator);
+    assert.equal(answered?.expiresAt, expiresAt, "deferral and answering do not silently extend retention");
+    assert.equal(answered?.params, JSON.stringify({ initiatedBy: "original-initiator" }));
+    assert.equal(answered?.approvedBy, "original-initiator");
+    assert.equal(await store.answerInput(runId, QUESTION.questionId, {
+      ...collaborator, respondedBy: "original-initiator",
+    }), undefined, "only the accepted collaborator can make an idempotent retry");
+    assert.deepEqual(
+      (await store.answerInput(runId, QUESTION.questionId, { ...collaborator, respondedAt: now + 1 }))?.humanInput?.response,
+      collaborator,
+    );
+    now = expiresAt;
+    assert.equal(await store.answerInput(runId, QUESTION.questionId, collaborator), undefined);
+    assert.equal(await store.get(runId), undefined, "the original finite TTL still expires the answered run");
+  });
+});
+
+test("human answer rejects absent runs, wrong questions and missing checkpoints without transitions", async () => {
+  await forEachStore(async (store) => {
+    assert.equal(await store.answerInput("missing", QUESTION.questionId, ANSWER), undefined);
+    const runId = await awaitingInput(store);
+    assert.equal(await store.answerInput(runId, "wrong-question", ANSWER), undefined);
+    for (const checkpoint of [undefined, "", " \n "]) {
+      await store.update(runId, { advisoryCheckpoint: checkpoint });
+      assert.equal(await store.answerInput(runId, QUESTION.questionId, ANSWER), undefined);
+      assert.equal((await store.get(runId))?.status, "held");
+      assert.equal((await store.get(runId))?.humanInput?.response, undefined);
+    }
+    await store.update(runId, { advisoryCheckpoint: "checkpoint", humanInput: undefined });
+    assert.equal(await store.answerInput(runId, QUESTION.questionId, ANSWER), undefined);
+  });
+});
+
+test("first human answer requires held status; complete, failed and running cannot be resumed", async () => {
+  await forEachStore(async (store) => {
+    const runId = await awaitingInput(store);
+    for (const status of ["running", "complete", "failed"] as const) {
+      await store.update(runId, { status });
+      assert.equal(await store.answerInput(runId, QUESTION.questionId, ANSWER), undefined);
+      assert.equal((await store.get(runId))?.status, status);
+    }
+  });
+});
+
+test("competing different human answers accept exactly one answer", async () => {
+  await forEachStore(async (store) => {
+    const runId = await awaitingInput(store);
+    const results = await Promise.all([
+      store.answerInput(runId, QUESTION.questionId, ANSWER),
+      store.answerInput(runId, QUESTION.questionId, { ...ANSWER, answer: "different" }),
+    ]);
+    assert.equal(results.filter(Boolean).length, 1);
+    assert.deepEqual((await store.get(runId))?.humanInput?.response, results.find(Boolean)?.humanInput?.response);
+  });
+});
+
+test("human answer replay retains original timestamp during running and after completion", async () => {
+  await forEachStore(async (store) => {
+    const runId = await awaitingInput(store);
+    const responses = await Promise.all([
+      store.answerInput(runId, QUESTION.questionId, ANSWER),
+      store.answerInput(runId, QUESTION.questionId, { ...ANSWER, respondedAt: 99999 }),
+    ]);
+    assert.ok(responses.every(Boolean));
+    assert.deepEqual(JSON.parse(JSON.stringify(responses[0])), JSON.parse(JSON.stringify(responses[1])));
+    assert.equal(responses[0]?.updatedAt, responses[1]?.updatedAt);
+    assert.deepEqual(responses[1]?.humanInput?.response, ANSWER);
+    const complete = await store.update(runId, {
+      status: "complete", artifact: "finished", advisoryCheckpoint: undefined,
+    });
+    assert.deepEqual(
+      await store.answerInput(runId, QUESTION.questionId, { ...ANSWER, respondedAt: 54321 }), complete,
+    );
+    assert.equal(await store.answerInput(runId, QUESTION.questionId, { ...ANSWER, answer: "other" }), undefined);
+    assert.equal(await store.answerInput(runId, QUESTION.questionId, { ...ANSWER, respondedBy: "other-user" }), undefined);
+    assert.equal(await store.answerInput(runId, "other-question", ANSWER), undefined);
+    assert.deepEqual(await store.get(runId), complete);
+  });
+});
+
+test("an expired human handoff cannot be answered, claimed or replayed", async () => {
+  await forEachStore(async (store) => {
+    const runId = await awaitingInput(store);
+    await store.update(runId, { expiresAt: Date.now() - 1 });
+    assert.equal(await store.answerInput(runId, QUESTION.questionId, ANSWER), undefined);
+    assert.equal(await store.claim(runId, ["held"], "running"), undefined);
+    assert.deepEqual(await store.listClaimable(), []);
+    const accepted = await awaitingInput(store);
+    await store.answerInput(accepted, QUESTION.questionId, ANSWER);
+    await store.update(accepted, { expiresAt: Date.now() - 1 });
+    assert.equal(await store.answerInput(accepted, QUESTION.questionId, ANSWER), undefined);
+  });
+});
+
+test("file human state and checkpoint stay encrypted across restart, answer and claim", async () => {
+  const { dir, cleanup } = tempDir();
+  try {
+    const key = randomBytes(32);
+    const first = new DurableRunStateStore({ baseDir: dir, cipher: new AesGcmFieldCipher(key) });
+    const runId = await awaitingInput(first);
+    const assertSealed = () => {
+      const raw = readFileSync(join(dir, `${runId}.json`), "utf8");
+      for (const secret of [
+        QUESTION.questionId, QUESTION.question, ...QUESTION.choices!, QUESTION.notice!,
+        ANSWER.respondedBy, "opaque-sensitive-checkpoint",
+      ]) {
+        assert.ok(!raw.includes(secret), `at-rest bytes must not include ${secret}`);
+      }
+      assert.equal(typeof (JSON.parse(raw) as { humanInput: unknown }).humanInput, "string");
+    };
+    assertSealed();
+    const second = new DurableRunStateStore({ baseDir: dir, cipher: new AesGcmFieldCipher(key) });
+    assert.deepEqual((await second.get(runId))?.humanInput, QUESTION);
+    assert.equal(await second.claim(runId, ["held"], "running"), undefined);
+    assert.ok(await second.answerInput(runId, QUESTION.questionId, ANSWER));
+    assertSealed();
+    const sealedAnswer = readFileSync(join(dir, `${runId}.json`), "utf8");
+    await first.answerInput(runId, QUESTION.questionId, { ...ANSWER, respondedAt: 99999 });
+    assert.equal(readFileSync(join(dir, `${runId}.json`), "utf8"), sealedAnswer, "idempotent replay does not rewrite ciphertext");
+    const restarted = new DurableRunStateStore({ baseDir: dir, cipher: new AesGcmFieldCipher(key) });
+    assert.deepEqual((await restarted.get(runId))?.humanInput, { ...QUESTION, response: ANSWER });
+    const claimed = await restarted.claim(runId, ["running"], "running");
+    assert.ok(claimed);
+    const replayed = await first.answerInput(runId, QUESTION.questionId, { ...ANSWER, respondedAt: 99999 });
+    assert.equal(replayed?.leaseExpiresAt, claimed.leaseExpiresAt, "replay cannot clear an active worker lease");
+    assert.deepEqual(replayed?.humanInput?.response, ANSWER);
+    assert.deepEqual((await restarted.get(runId))?.stages, SAMPLE_STAGES);
+    assertSealed();
+  } finally {
+    cleanup();
+  }
+});
 
 test("advisory stages + verdict + history round-trip on both stores", async () => {
   await forEachStore(async (store) => {

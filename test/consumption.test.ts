@@ -18,6 +18,7 @@ import {
   parseConsumptionBlocks,
   rebuildConsumption,
   renderConsumptionBlock,
+  renderConsumptionMarkdown,
   summarize,
 } from "../src/engine/consumption.js";
 import type { CoordinatorRequest } from "../src/engine/coordinator-engine.js";
@@ -55,6 +56,8 @@ test("a consumption block round-trips through render and parse", () => {
   assert.equal(parsed.inputTokens, 1200);
   assert.equal(parsed.outputTokens, 340);
   assert.equal(parsed.costUsd, 0.0182);
+  assert.equal(parsed.costStatus, "complete");
+  assert.equal(parsed.completionCount, 1);
   // One credit is one US cent.
   assert.match(block, /"est_credits": 1\.82/);
   assert.match(block, /"basis": "measured"/);
@@ -110,7 +113,7 @@ test("the ledger accumulates across turns instead of snapshotting the last one",
     assert.match(text, /\| researcher \|/, "turn one's role was dropped from the ledger");
     assert.match(text, /\| lead \|/);
     // 100 + 200 input, 50 + 80 output, 0.03 total.
-    assert.match(text, /\| \*\*total\*\* \| 300 \| 130 \| 0\.03 \| 3 \|/);
+    assert.match(text, /\| \*\*total\*\* \| 300 \| 0 \| 0 \| 130 \| 0 \| 0\.03 \| 3 \|/);
   } finally {
     fixture.cleanup();
   }
@@ -121,6 +124,29 @@ test("a stage with no reported usage records no consumption block", async () => 
   try {
     await fixture.ledger.seed(TENANT, PROJECT, resolveProfile("default", TABLES), TABLES, {
       date: "2026-08-07",
+    });
+
+    test("missing token and pricing values stay explicit instead of becoming zero", () => {
+      const block = renderConsumptionBlock({
+        role: "researcher",
+        agentName: "Squad Researcher",
+        model: "deployment-a",
+        completionCount: 2,
+        inputTokens: 100,
+        unreportedInputCompletions: 1,
+        unreportedOutputCompletions: 2,
+        pricedCompletionCount: 0,
+        incompletelyPricedCompletionCount: 1,
+        unpricedCompletionCount: 1,
+        costStatus: "incomplete",
+      });
+      assert.doesNotMatch(block, /"output_tokens":\s*0/);
+      assert.doesNotMatch(block, /"est_cost_usd":\s*0/);
+      const totals = summarize(parseConsumptionBlocks(block));
+      const rendered = renderConsumptionMarkdown(totals);
+      assert.match(rendered, /100 known; 1 unreported/);
+      assert.match(rendered, /0 known; 2 unreported/);
+      assert.match(rendered, /0 known; 1 incomplete, 1 unavailable/);
     });
     await fixture.recorder.recordStage(TENANT, PROJECT, REQUEST, "run-1", {
       roleKey: "researcher",
