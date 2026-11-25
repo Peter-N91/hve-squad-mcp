@@ -20,7 +20,7 @@ optional `-SquadRoot <root>`, and optional `-InventoryPath <transport.json>`.
 The inventory is a JSON array of exact native IDs or display names from the
 host's dispatchable-agent listing, not a filesystem inventory. No inventory
 means `unverified`, not present or absent. `-Scope` narrows only domain checks;
-its default `all` checks all seven domains. No network or AI call is made.
+its default `all` checks all six domains. No network or AI call is made.
 
 The script checks its required runtime files, domain representatives, existing
 squad/federation structure, rate-table shape, and the existing read-only

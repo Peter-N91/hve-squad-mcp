@@ -126,7 +126,7 @@ test("persisted explicit Init response is mapped to actual subject and consumed 
         backendId: "copilot-sdk", text: "Verified advisory report.", finishReason: "stop", stages: [],
         usage: { inputTokens: 12, outputTokens: 4, costStatus: "unavailable" },
         metadata: { upstreamCommit: bundle.identity.sourceCommit, upstreamVersion: bundle.identity.declaredVersion,
-          rolloutVersion: "0.21.0", routing: "economy", outcome: "accepted", gaps: [], reports: [],
+          rolloutVersion: "0.22.0", routing: "economy", outcome: "accepted", gaps: [], reports: [],
           verification: { verdict: "Pass", reviewerStageId: "review", ownerStageId: "owner", readHashes: [],
             reviewReceipt: { path: "docs/review.md", sha256: "0".repeat(64) }, findings: [], approvedActionablePipeline: false },
           events: [], productionSmokeVerified: false, ownsLedger: true },

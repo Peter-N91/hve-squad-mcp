@@ -3,13 +3,15 @@ name: sql-migration-advisor
 description: "Legacy compatibility fallback for SQL Server-to-Azure migration recommendations in HVE Squad. Use only when the preferred `recommend-migration-path` skill from the `sql-migration-advisor` plugin is unavailable. Runs a guided interview and recommends a target, method, downtime class, blockers, remediations, cost levers and Microsoft program fit. It cannot produce the plugin's prerequisite readiness plan."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "2.0"
   last_updated: "2026-11-16"
   skill_based_on: "microsoft/microsoft-sql (MIT)"
 ---
 
 # SQL Migration Advisor — best path to Azure
+
+Read installed `squad/references/responsible-use.md` once.
 
 > **Compatibility fallback.** `Squad SQL Migration Advisor` prefers the upstream
 > `recommend-migration-path` skill from `microsoft/microsoft-sql` (`plugins/microsoft-sql-migration`). Use this bundled copy only when that skill is unavailable,
@@ -221,4 +223,4 @@ SSAS → AAS / Power BI · SQL Agent → native (MI) / Elastic Jobs (SQL DB) · 
 - This skill is **advisory only.** It never runs data movement, schema migration, cutover, or
   deployment steps; those hand off to the appropriate execution role.
 
-> Brought to you by Peter-N91/hve-squad
+> Brought to you by microsoft/hve-squad

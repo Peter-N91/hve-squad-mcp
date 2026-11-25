@@ -3,7 +3,7 @@ name: squad-roster-expansion
 description: "Confirmed hash-bound addition of catalog roles and packs to a plain squad or one federation member."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-11-04"
 ---

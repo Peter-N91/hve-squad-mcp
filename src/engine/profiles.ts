@@ -206,7 +206,7 @@ export function parseCastCatalog(markdown: string): Map<string, CastCatalogRow> 
     t.headers.some((h) => h.toLowerCase().includes("primary agent")),
   );
   if (!table) {
-    throw new Error("Could not find the Cast Catalog table in squad-roster.instructions.md.");
+    throw new Error("Could not find the Cast Catalog table in roster-catalog.md.");
   }
   const roleIdx = table.headers.findIndex((h) => h.trim().toLowerCase() === "role");
   const primaryIdx = table.headers.findIndex((h) => h.toLowerCase().includes("primary agent"));

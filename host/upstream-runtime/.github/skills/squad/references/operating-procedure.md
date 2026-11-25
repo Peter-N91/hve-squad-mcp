@@ -3,7 +3,7 @@ name: squad-operating-procedure
 description: "The four stages of a squad turn — Init, Route, Decide, Handoff — plus ledger reconciliation and the tool-to-mechanism mapping."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-10-24"
 ---

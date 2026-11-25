@@ -3,7 +3,7 @@ name: squad-profiles-and-packs
 description: "Squad profile catalog and add-on packs: which roles a profile seeds and which roles a pack appends."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-11-17"
 ---

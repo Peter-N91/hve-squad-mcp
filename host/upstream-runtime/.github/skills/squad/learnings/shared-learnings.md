@@ -3,7 +3,7 @@ name: squad-shared-learnings
 description: 'Curated, human-reviewed shared learnings playbook the Squad Coordinator consults as an authoritative reference during routing and decision-making. Shipped as versioned package content so a learning captured in one consumer reaches every consumer on the next sync.'
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-06-22"
 ---

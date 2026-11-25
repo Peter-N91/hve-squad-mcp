@@ -19,7 +19,7 @@ param(
     [string]$RepoRoot = (Get-Location).Path,
     [string]$SquadRoot = '.copilot-tracking/squad',
     [string]$InventoryPath,
-    [ValidateSet('all', 'security', 'rai', 'privacy', 'accessibility', 'project-planning', 'design-thinking', 'coding-standards')]
+    [ValidateSet('all', 'security', 'rai', 'privacy', 'accessibility', 'project-planning', 'design-thinking')]
     [string]$Scope = 'all',
     [ValidateSet('rates')]
     [string[]]$Repair = @(),
@@ -191,7 +191,6 @@ try {
         accessibility = @('Accessibility Framework Assessor', 'Accessibility Surface Inventory')
         'project-planning' = @('PRD Builder', 'BRD Builder', 'Functional Planner', 'System Architecture Reviewer', 'ADR Creator', 'Meeting Analyst', 'UX UI Designer')
         'design-thinking' = @('DT Coach', 'DT Learning Tutor')
-        'coding-standards' = @('Code Review Functional', 'Code Review Standards', 'Code Review Security', 'Code Review Accessibility')
     }
     foreach ($domain in $domains.Keys) {
         if ($Scope -ne 'all' -and $Scope -ne $domain) { continue }

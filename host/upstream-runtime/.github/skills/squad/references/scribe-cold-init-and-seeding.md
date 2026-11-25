@@ -3,7 +3,7 @@ name: squad-scribe-cold-init-and-seeding
 description: "Scribe cold section: fallback initialization, Deliverable Root resolution, and repository-memory/learning-promotion writes."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-10-24"
 ---

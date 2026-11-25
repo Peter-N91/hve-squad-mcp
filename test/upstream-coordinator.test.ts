@@ -169,7 +169,7 @@ test("authentic upstream coordinator contract dynamically selects direct owner a
   assert.equal(h.stages[1].model, selectUpstreamEconomyRoute(catalog, routing, reviewer.role, reviewer.floor, models).rankedModel);
   assert.ok(h.stages.every(s => !s.allowNestedDelegation && s.maxModelCalls > 0));
   assert.equal(result.metadata.outcome, "accepted");
-  assert.equal(result.metadata.rolloutVersion, "0.21.0");
+  assert.equal(result.metadata.rolloutVersion, "0.22.0");
   assert.equal(result.metadata.productionSmokeVerified, false);
   assert.equal(result.metadata.reports[0].sha256, sha(h.files.get(report)!.content));
   assert.equal(result.usage?.inputTokens, 211);
@@ -189,7 +189,7 @@ test("immutable readers are bounded and reject traversal, unknown tools/args, un
   const h = harness(async call => {
     const resources = await call("list_upstream_resources", {});
     assert.equal((resources.paths as string[]).length, 100);
-    assert.equal(resources.total, 1740);
+    assert.equal(resources.total, 1743);
     await call("read_upstream_resource", { path: ".github/skills/squad/SKILL.md", maxLines: 10 });
     await call("read_upstream_resource", { path: "../secrets" }, false);
     await call("read_upstream_resource", { path: ".github/skills/rpi/rpi-plan/SKILL.md" }, false);

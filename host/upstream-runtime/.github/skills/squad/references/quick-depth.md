@@ -3,7 +3,7 @@ name: squad-quick-depth
 description: "Opt-in depth=quick procedure, read only on a turn whose trusted input is depth=quick: the depth plan, the bounded lane, plan-driven parallelism, shrink budgets, the escape hatch, the reasoning-effort lever, the intake waiver, Route and Depth markers, and what never changes."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-11-06"
 ---

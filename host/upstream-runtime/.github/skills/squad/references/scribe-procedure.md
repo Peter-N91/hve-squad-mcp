@@ -3,7 +3,7 @@ name: squad-scribe-procedure
 description: "Full legacy Scribe procedure for cold operations: non-negotiable rules, payload-to-step map, conditional reads, append-only rules, consumption, state advancement, and completeness checks. Ordinary writes use economy-scribe.md."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-10-24"
 ---

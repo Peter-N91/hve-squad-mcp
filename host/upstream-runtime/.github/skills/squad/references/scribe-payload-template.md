@@ -3,7 +3,7 @@ name: squad-scribe-payload-template
 description: "Cold payload template for unsupported verdict fallback, refresh, memory, notifications, federation, and summaries."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-10-24"
 ---

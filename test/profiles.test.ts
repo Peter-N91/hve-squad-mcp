@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import { loadCatalog } from "../src/catalog/catalog.js";
+import { parseTables } from "../src/engine/markdown-table.js";
+import { REGISTERED_PACKS } from "../src/engine/persona.js";
 import {
   DEFAULT_PROFILE,
   DELIVERABLE_PRODUCING_ROLES,
@@ -14,6 +18,7 @@ import {
   SCRIBE_ROLE,
 } from "../src/engine/profiles.js";
 import { loadRosterMap, route } from "../src/engine/routing.js";
+import { resolveSquadGithubRoot } from "../src/paths.js";
 
 const TABLES = loadProfileTables();
 
@@ -48,6 +53,37 @@ test("the deployed roster yields every documented profile", () => {
   ]);
 });
 
+test("every catalog tool offers the full deployed profile set", () => {
+  const expected = [...TABLES.profiles.keys()].sort();
+  const catalog = loadCatalog();
+  for (const tool of catalog.tools) {
+    const schema = tool.input as { properties?: Record<string, { enum?: string[] }> };
+    assert.deepEqual(
+      [...(schema.properties?.profile?.enum ?? [])].sort(),
+      expected,
+      `${tool.id} profile enum must match squad-roster.instructions.md`,
+    );
+  }
+});
+
+test("REGISTERED_PACKS matches the Registered Packs table in squad-roster.instructions.md", () => {
+  const githubRoot = resolveSquadGithubRoot();
+  assert.ok(githubRoot, "squad .github root resolves");
+  const rosterMd = readFileSync(
+    join(githubRoot, "instructions", "squad", "squad-roster.instructions.md"),
+    "utf8",
+  );
+  const packTable = parseTables(rosterMd).find(
+    (t) =>
+      (t.headers[0] ?? "").trim().toLowerCase() === "pack" &&
+      t.headers.some((h) => h.toLowerCase().includes("adds")),
+  );
+  assert.ok(packTable, "Registered Packs table found in squad-roster.instructions.md");
+  const deployedPacks = packTable.rows
+    .map((row) => (row[0] ?? "").replace(/`/g, "").trim().toLowerCase())
+    .filter((name) => name.length > 0);
+  assert.deepEqual(deployedPacks, [...REGISTERED_PACKS]);
+});
 test("the product profile seeds exactly the roster's twelve roles", () => {
   const product = resolveProfile("product", TABLES);
   assert.equal(product.name, "product");
@@ -117,6 +153,7 @@ test("deliverable roots resolve their date and deck-slug placeholders", () => {
   );
   assert.equal(deliverableRootFor("lead", TABLES), ".copilot-tracking/plans");
   assert.equal(deliverableRootFor("intake-validator", TABLES), ".copilot-tracking/reviews");
+  // Custom rosters or connectors may still declare a `<deck-slug>` placeholder.
   const customTables = {
     ...TABLES,
     deliverableRoots: new Map([
@@ -131,7 +168,15 @@ test("deliverable roots resolve their date and deck-slug placeholders", () => {
 });
 
 test("a role that returns findings rather than an artifact has no deliverable root", () => {
-  for (const role of ["cost-manager", "deployer", "fact-checker", "scribe"]) {
+  for (const role of [
+    "cost-manager",
+    "deployer",
+    "fact-checker",
+    "asbuilt-author",
+    "azure-diagnose",
+    "aws-diagnose",
+    "scribe",
+  ]) {
     assert.equal(deliverableRootFor(role, TABLES), undefined, `${role} should have no root`);
   }
 });

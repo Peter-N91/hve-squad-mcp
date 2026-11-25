@@ -129,7 +129,7 @@ export function parseRosterAgents(markdown: string): string[] {
     t.headers.some((h) => h.toLowerCase().includes("primary agent")),
   );
   if (!table) {
-    throw new Error("Could not find the roster cast catalog (Primary Agent) in squad-roster.instructions.md.");
+    throw new Error("Could not find the roster cast catalog (Primary Agent) in roster-catalog.md.");
   }
   const primaryIdx = table.headers.findIndex((h) => h.toLowerCase().includes("primary agent"));
   const alternateIdx = table.headers.findIndex((h) => h.toLowerCase().includes("alternate"));

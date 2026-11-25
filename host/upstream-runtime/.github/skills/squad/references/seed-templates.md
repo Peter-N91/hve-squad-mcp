@@ -3,7 +3,7 @@ name: squad-seed-templates
 description: "First-run squad state templates stamped once during Init: team.md and routing.md."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-10-24"
 ---
@@ -38,7 +38,7 @@ description: "Squad roster: roles and the deployed HVE Core agents that fill the
 | researcher      | Alpha       | Squad Researcher             | Codebase Profiler, Meeting Analyst                     | technology-profile scan → Codebase Profiler; meeting-transcript mining → Meeting Analyst                | runSubagent / task | default                 | .copilot-tracking/research/<date>/    |
 | lead            | Beta        | Squad Lead                   | —                                                       | —                                                                                                       | runSubagent / task | default                 | .copilot-tracking/plans/              |
 | developer       | Gamma       | Squad Implementor            | —                                                      | —                                                                                                       | runSubagent / task | default                 | .copilot-tracking/changes/            |
-| tester          | Delta       | Squad Reviewer               | Code Review Functional, Code Review Standards          | correctness/edge-case diff → Code Review Functional; project-conventions diff → Code Review Standards   | runSubagent / task | fast                    | .copilot-tracking/reviews/            |
+| tester          | Delta       | Squad Reviewer               |                                                        | implementation-versus-plan review → Squad Reviewer                                                      | runSubagent / task | fast                    | .copilot-tracking/reviews/            |
 | challenger      | Epsilon     | Squad Challenger             | —                                                      | —                                                                                                       | runSubagent / task | default                 | .copilot-tracking/reviews/            |
 | architect       | Zeta        | System Architecture Reviewer | ADR Creator                                            | capture a decision record → ADR Creator                                                                 | runSubagent / task | default                 | docs/architecture/                    |
 | azure-architect | Eta         | Squad Azure Architect        | —                                                      | —                                                                                                       | runSubagent / task | default                 | docs/architecture/                    |

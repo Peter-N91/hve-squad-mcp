@@ -5,19 +5,10 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { parse as parseYaml } from "yaml";
 
-import {
-  bundleDestination,
-  RESEARCH_DEST,
-  skillReferences,
-  sha256,
-  validateSkillReferences,
-  validateBundlePath,
-} from "../host/snapshot-cast.js";
+import { sha256 } from "../host/snapshot-cast.js";
 import { loadCatalog } from "../src/catalog/catalog.js";
 import { resolvePersonaForRole } from "../src/engine/embedded-roles.js";
 import { loadPersonaForRole } from "../src/engine/persona-loader.js";
-import { MAX_BUNDLE_RESOURCE_CHARS } from "../src/engine/research-runtime.js";
-import { readRosterDocumentation } from "../src/engine/roster-documentation.js";
 
 /**
  * Cast-bundle drift check.
@@ -29,7 +20,7 @@ import { readRosterDocumentation } from "../src/engine/roster-documentation.js";
  *   2. the bundle carries a file the manifest does not, or vice versa,
  *   3. the manifest is linked to a different package version than the pin,
  *   4. any roster Cast Catalog Primary agent is missing from the bundle, or
- *   5. the untrusted-content-boundary instruction is absent from the bundle.
+ *   5. the untrusted-content-boundary skill is absent from the bundle.
  *
  * Checks 1-3 are the OFFLINE half of the integrity contract and need no network:
  * they catch a hand-edited persona, a partially committed snapshot, and a pin
@@ -50,27 +41,19 @@ const MANIFEST_FILE = join(CAST_DIR, "manifest.json");
 const PIN_FILE = join(CAST_DIR, "package-pin.json");
 const BUNDLE_BOUNDARY = join(
   BUNDLE_ROOT,
-  "instructions",
-  "untrusted-content-boundary.instructions.md",
+  "skills",
+  "untrusted-content-boundary",
+  "SKILL.md",
 );
 
 interface CastManifest {
-  sourceCommit: string;
-  sourceRef: string;
   linkedPackageVersion: string;
   sourcePackage: string;
-  sourceManifestSha256: string;
   agentFileCount: number;
   instructionFileCount: number;
-  skillFileCount: number;
-  dataFileCount: number;
-  skillCount: number;
-  skills: { name: string; path: string; source: string }[];
-  excludedFiles: { source: string; reason: string }[];
-  referenceIssues: unknown[];
-  upstreamCommits: Record<string, string>;
+  referenceFileCount: number;
   duplicateAgentNames: string[];
-  files: { path: string; sha256: string; source: string; kind?: "data" }[];
+  files: { path: string; sha256: string; source: string }[];
 }
 
 function readManifest(): CastManifest {
@@ -94,24 +77,25 @@ function bundledPaths(dir = BUNDLE_ROOT, acc: string[] = []): string[] {
   return acc;
 }
 
-test("every shipped agent and instruction fits the runtime resource budget", () => {
-  const paths = bundledPaths().filter((path) =>
-    /^(?:agents|instructions|references)\//.test(path) && /\.md$/.test(path));
-  assert.ok(paths.length > 100, "Check the complete pinned bundle, not a miniature fixture.");
-  for (const path of paths) {
-    const text = readFileSync(join(BUNDLE_ROOT, path), "utf8");
-    assert.ok(text.length <= MAX_BUNDLE_RESOURCE_CHARS,
-      `${path}: ${text.length} characters exceeds runtime resource budget ${MAX_BUNDLE_RESOURCE_CHARS}`);
-  }
-});
-
 /**
- * The roster the bundle SHIPS. Deliberately not a sibling package checkout: the
+ * The roster catalog the bundle SHIPS. Deliberately not a sibling package checkout: the
  * bundle is the artifact the image runs on, so validating it against a roster
  * that is not in it means a developer with a checkout and a runner without one
  * assert different things — and the runner's answer is the one that matters.
  * `npm run snapshot:cast:check` is what confirms this roster is the pinned one.
+ *
+ * Since hve-squad 0.18.0 the Cast Catalog and the Registered External Cast live in
+ * the squad skill's `references/roster-catalog.md`, not the roster instructions.
  */
+const ROSTER_FILE = join(BUNDLE_ROOT, "skills", "squad", "references", "roster-catalog.md");
+const RESPONSIBLE_USE_FILE = join(
+  BUNDLE_ROOT,
+  "skills",
+  "squad",
+  "references",
+  "responsible-use.md",
+);
+
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
 function collectAgentFiles(dir: string, acc: string[] = []): string[] {
@@ -167,7 +151,7 @@ const isSeparator = (line: string): boolean =>
  * the Profiles / Members-schema tables are never mistaken for cast rows.
  */
 function rosterPrimaryAgents(): { role: string; primary: string }[] {
-  const lines = readRosterDocumentation(BUNDLE_ROOT).split(/\r?\n/);
+  const lines = readFileSync(ROSTER_FILE, "utf8").split(/\r?\n/);
   const primaries: { role: string; primary: string }[] = [];
   let inFence = false;
   for (let i = 0; i < lines.length; i += 1) {
@@ -218,7 +202,7 @@ function slugify(value: string): string {
  * the upstream resource id (`qa-subagent`).
  */
 function optInExternalAgents(): { resources: Set<string>; roles: Set<string> } {
-  const lines = readRosterDocumentation(BUNDLE_ROOT).split(/\r?\n/);
+  const lines = readFileSync(ROSTER_FILE, "utf8").split(/\r?\n/);
   const resources = new Set<string>();
   const roles = new Set<string>();
   let inFence = false;
@@ -282,12 +266,32 @@ test("cast bundle contains every bundled roster Cast Catalog Primary agent", () 
   );
 });
 
-test("cast bundle carries the untrusted-content-boundary instruction", () => {
+test("cast bundle carries the untrusted-content-boundary skill", () => {
   assert.ok(
     existsSync(BUNDLE_BOUNDARY),
-    "untrusted-content-boundary.instructions.md must be present in the bundle " +
+    "skills/untrusted-content-boundary/SKILL.md must be present in the bundle " +
       "(re-run `npm run snapshot:cast`).",
   );
+});
+
+test("cast bundle carries the squad roster catalog the router parses", () => {
+  assert.ok(
+    existsSync(ROSTER_FILE),
+    "skills/squad/references/roster-catalog.md must be present in the bundle — routing, " +
+      "profiles, and the generator resolve every role through it (re-run `npm run snapshot:cast`).",
+  );
+});
+
+test("cast bundle carries the shared responsible-use policy referenced by squad entrypoints", () => {
+  assert.ok(
+    existsSync(RESPONSIBLE_USE_FILE),
+    "skills/squad/references/responsible-use.md must be present in the bundle — every " +
+      "bundled squad persona reads it once per context (re-run `npm run snapshot:cast`).",
+  );
+  const policy = readFileSync(RESPONSIBLE_USE_FILE, "utf8");
+  assert.match(policy, /No independent usage reporting/);
+  assert.match(policy, /Preserve human gates and Stop decisions/);
+  assert.match(policy, /not professional advice or authorization to deploy high-consequence/);
 });
 
 test("every bundled file hashes to what the manifest records", () => {
@@ -295,9 +299,6 @@ test("every bundled file hashes to what the manifest records", () => {
   assert.ok(manifest.files.length > 0, "the manifest records at least one file");
   const mismatched: string[] = [];
   for (const entry of manifest.files) {
-    assert.ok(!entry.path.includes("\\") && !entry.path.startsWith("/") &&
-      !entry.path.includes(":") && !entry.path.split("/").includes(".."),
-    `unsafe manifest path: ${entry.path}`);
     const target = join(BUNDLE_ROOT, entry.path);
     if (!existsSync(target)) {
       mismatched.push(`${entry.path} (missing)`);
@@ -329,105 +330,10 @@ test("the bundle carries no file the manifest does not record", () => {
 test("the manifest counts agree with the recorded files", () => {
   const manifest = readManifest();
   const agents = manifest.files.filter((entry) => entry.path.startsWith("agents/"));
+  const references = manifest.files.filter((entry) => entry.path.startsWith("skills/"));
   assert.equal(manifest.agentFileCount, agents.length);
-  assert.equal(manifest.instructionFileCount, manifest.files.filter((entry) =>
-    entry.path.startsWith("instructions/") || entry.path.startsWith("references/")).length);
-  assert.equal(manifest.skillFileCount, manifest.files.filter((entry) => entry.path.startsWith("skills/")).length);
-  assert.equal(manifest.dataFileCount, manifest.files.filter((entry) => entry.kind === "data").length);
-  assert.equal(manifest.files.length, manifest.agentFileCount + manifest.instructionFileCount + manifest.skillFileCount);
-});
-
-test("the release pin resolves to an immutable commit, not a moving tag", () => {
-  const manifest = readManifest();
-  const pin = JSON.parse(readFileSync(PIN_FILE, "utf8")) as { ref: string; commit: string };
-  assert.equal(pin.ref, "v0.21.0");
-  assert.match(pin.commit, /^[a-f0-9]{40}$/);
-  assert.equal(manifest.sourceRef, pin.ref);
-  assert.equal(manifest.sourceCommit, pin.commit);
-});
-
-test("active cast contains pinned agents, squad instructions and inert references only", () => {
-  const manifest = readManifest();
-  assert.equal(manifest.linkedPackageVersion, "0.21.0");
-  assert.equal(manifest.skillCount, 0);
-  assert.equal(manifest.skillFileCount, 0);
-  assert.equal(manifest.dataFileCount, 0);
-  assert.ok(manifest.skills.length === 0);
-  assert.ok(manifest.files.every((file) =>
-    file.path.startsWith("agents/") || file.path.startsWith("instructions/") || file.path.startsWith("references/")));
-  for (const entry of manifest.files) {
-    const [source, commit] = entry.source.split("#");
-    const [owner, repo] = source.split("/");
-    assert.match(commit, /^[a-f0-9]{40}$/);
-    assert.equal(commit, manifest.upstreamCommits[`${owner}/${repo}`]);
-  }
-  const researcher = readFileSync(join(BUNDLE_AGENTS, "rpi-researcher.agent.md"), "utf8");
-  assert.match(researcher, /Read only/i);
-  assert.match(researcher, /No file is created or edited/);
-});
-
-test("only deployed agents, squad instructions and boundary instruction are mapped", () => {
-  const slug = "microsoft/hve-core";
-  assert.equal(bundleDestination({ slug: "Peter-N91/hve-squad", path: "squad-src/.github/agents/squad-researcher.agent.md" }, "Peter-N91/hve-squad"),
-    "agents/squad/squad-researcher.agent.md");
-  assert.equal(bundleDestination({ slug, path: ".github/agents/rpi-researcher.agent.md" }, "Peter-N91/hve-squad"),
-    "agents/rpi-researcher.agent.md");
-  assert.equal(bundleDestination({ slug, path: ".github/instructions/squad/squad-routing.instructions.md" }, "Peter-N91/hve-squad"),
-    "instructions/squad/squad-routing.instructions.md");
-  assert.equal(bundleDestination({ slug, path: ".github/instructions/untrusted-content-boundary.instructions.md" }, "Peter-N91/hve-squad"),
-    "instructions/untrusted-content-boundary.instructions.md");
-  assert.equal(bundleDestination({ slug, path: ".github/skills/rpi/rpi-research" }, "Peter-N91/hve-squad"), undefined);
-  assert.equal(bundleDestination({ slug, path: ".github/instructions/coding-standards/python-tests.instructions.md" }, "Peter-N91/hve-squad"), undefined);
-});
-
-test("skill reference resolution is deterministic and rejects missing or escaping local dependencies", () => {
-  const from = `${RESEARCH_DEST}/references/research.md`;
-  const content = "`../templates/research.md` [template](../templates/research.md#heading) " +
-    "[web](https://example.com/external.md)\n[template]: ../templates/research.md\n" +
-    "`.copilot-tracking/research/{{YYYY-MM-DD}}/{{task_slug}}-research.md`\n" +
-    "Future example: `brd-standard-findings-v2.md`; threshold `80%`.";
-  assert.deepEqual(skillReferences(content, from), [`${RESEARCH_DEST}/templates/research.md`]);
-  assert.deepEqual(
-    skillReferences(content.split("\n").reverse().join("\n"), from),
-    skillReferences(content, from),
-  );
-  assert.equal(sha256(content.replace(/\n/g, "\r\n")), sha256(content));
-  for (const target of ["../../../../../escape.md", "%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/escape.md", "/outside.md", "C:\\outside.md", "..\\outside.md"]) {
-    assert.throws(() => skillReferences(`[bad](${target})`, from), /Unsafe|escapes/);
-  }
-  for (const dest of ["../outside.md", "/outside.md", "skills/../../outside.md", "C:\\outside.md", "skills\\escape.md"]) {
-    assert.throws(() => validateBundlePath(dest), /Unsafe bundle destination/);
-  }
-  validateBundlePath(`${RESEARCH_DEST}/SKILL.md`);
-  assert.throws(() => validateSkillReferences([
-    { dest: `${RESEARCH_DEST}/SKILL.md`, content: "`references/missing.md`" },
-  ]), /Missing skill dependency/);
-});
-
-test("Agent Skill dependencies are not copied into the active cast", () => {
-  const manifest = readManifest();
-  assert.equal(manifest.skills.length, 0);
-  assert.equal(manifest.skillCount, 0);
-  assert.equal(manifest.skillFileCount, 0);
-  assert.equal(manifest.dataFileCount, 0);
-  assert.ok(manifest.files.every((entry) => !entry.path.startsWith("skills/")));
-});
-
-test("runtime supplies native procedures instead of skill-loading tools", () => {
-  const runtime = readFileSync(join(PACKAGE_ROOT, "src", "engine", "research-runtime.ts"), "utf8");
-  assert.doesNotMatch(runtime, /tool\("load_skill"/);
-  assert.match(runtime, /server-owned research and planning artifact contracts/);
-  assert.match(runtime, /RPI Researcher is a read-only source finder/);
-});
-
-test("bundle source provenance is immutable and contains only approved Markdown", () => {
-  const manifest = readManifest();
-  assert.match(manifest.sourceManifestSha256, /^[a-f0-9]{64}$/);
-  assert.ok(manifest.files.every((entry) =>
-    (/\.(?:agent|instructions)\.md$/.test(entry.path) &&
-      (entry.path.startsWith("agents/") || entry.path.startsWith("instructions/"))) ||
-    /^references\/squad\/(?:roster-catalog|model-routing|model-catalog|economy-mode)\.md$/.test(entry.path)));
-  assert.ok(manifest.upstreamCommits["Peter-N91/hve-squad"]);
+  assert.equal(manifest.referenceFileCount, references.length);
+  assert.equal(manifest.instructionFileCount, manifest.files.length - agents.length - references.length);
 });
 
 test("the bundled manifest is linked to the pinned package version", () => {

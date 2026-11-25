@@ -3,7 +3,7 @@ name: squad-economy-mode
 description: "Opt-in routing=economy procedure, read only while team.md records Model routing: economy: all-role consent, the cheapest known-price pick for every routed role within its floor, qualification disclosure, the one escalation, Route markers, the dispatch brief, the scripted hand-off, rate seeding and Cost Preflight writes, and what never changes. Workflow depth is the separate depth=quick input (quick-depth.md)."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-11-06"
 ---

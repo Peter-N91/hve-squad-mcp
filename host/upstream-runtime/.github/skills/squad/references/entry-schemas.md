@@ -3,7 +3,7 @@ name: squad-entry-schemas
 description: "Recurring Markdown/state schemas for cold Scribe operations and compatibility reference. Ordinary handoffs use the small deterministic writer contract, not this full schema read."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-09-27"
 ---

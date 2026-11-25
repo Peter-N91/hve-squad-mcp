@@ -3,7 +3,7 @@ name: squad-model-routing
 description: "Opt-in model routing: persisted modes and Model cells, capability-first Ranked and manual suggestions, host availability, minimum floors, explicit pins, fallback, identity, Cost Preflight, and federation forwarding."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "2.0"
   last_updated: "2026-10-24"
 ---
@@ -97,6 +97,11 @@ Availability precedence is `model-catalog.md`'s own (host-advertised enum ∩ ca
 | VS Code, Local agent                                        | `runSubagent`   | No list is advertised. VS Code rejects a model above the session model's cost tier, so treat catalog ids whose `Input` rate is at or below a **concrete, priced** session model as available, unverified. `sessionModel: auto`, `unknown`, a tier label, or an unpriced model proves no availability and yields no automatic ranked/manual suggestion; wait for a concrete picker value or the model list returned by a rejected dispatch. That returned list replaces the derived set for the rest of the run | The display name from `consumption-rates.md`'s `Model (as routed)` column |
 
 Never offer or rank an id outside the host's available set, and label an unverified set as such in the question the user sees.
+
+Availability is not entitlement or organization-policy approval. Users and their
+organizations own those decisions. Honor any supplied customer allowlist in
+addition to host availability and role floors; disclose policy facts the host
+does not expose rather than claim they were checked. Never bypass a refusal.
 
 On `task` hosts, pass the actual `model` enum as `availableModels`; `sessionModel` is metadata only. In every mode using `rejectedModels`, the planner stops before refreshing any Model cell unless it has a confirmed host list. Reuse an already advertised list; the rejection need not return a new one.
 

@@ -3,7 +3,7 @@ name: squad-builder-workflows
 description: "Progressively loaded decisions and scripted workflows for connector and external endpoint builders."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-11-18"
 ---

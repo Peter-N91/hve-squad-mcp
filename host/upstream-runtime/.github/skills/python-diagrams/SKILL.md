@@ -3,7 +3,7 @@ name: python-diagrams
 description: 'Documentation-only reference template for rendering Azure architecture diagrams with real product icons using the Python `diagrams` library (Graphviz backend), producing paired PNG + SVG output. Use when a squad role needs a committed, file-based icon diagram (HLD/LLD) instead of Mermaid, especially for the Squad Azure Architect. Templates never run from this package; a consumer copies them on demand.'
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-06-19"
 ---
@@ -13,6 +13,8 @@ Licensed under the MIT license.
 -->
 
 # Python Diagrams
+
+Read installed `squad/references/responsible-use.md` once.
 
 ## Overview
 

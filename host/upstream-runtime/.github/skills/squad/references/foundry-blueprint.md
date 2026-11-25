@@ -3,7 +3,7 @@ name: squad-foundry-blueprint
 description: "Opt-in Foundry project blueprint: existing owners, customer decisions, SDK/API evidence and delivery checkpoint handoffs."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-11-15"
 ---

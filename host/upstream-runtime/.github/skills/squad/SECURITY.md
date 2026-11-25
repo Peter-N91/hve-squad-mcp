@@ -34,7 +34,7 @@ The two buckets below cover configuration/dispatch and file exchange/persistence
 Each enumerates all six STRIDE categories. Agent instructions are procedural
 controls, not a sandbox or a substitute for host filesystem permissions.
 
-> See also: [repo-wide STRIDE model registry](https://github.com/Peter-N91/hve-squad/blob/main/docs/security/security-model.md#skill-security-models).
+> See also: [repo-wide STRIDE model registry](https://github.com/microsoft/hve-squad/blob/main/docs/security/security-model.md#skill-security-models).
 > This repository previously had a security policy but no model registry; that
 > registry indexes this scoped model, not a completed repository-wide assessment.
 
@@ -459,5 +459,5 @@ least-privilege worktrees and isolation outside the prompt layer.
 * [Roster expansion planner](scripts/Get-SquadRosterExpansionPlan.ps1)
 * [Roster expansion transaction](scripts/Expand-SquadRoster.ps1)
 * [Connector registration transaction](scripts/Register-SquadConnector.ps1)
-* [Consumer guide and examples](https://github.com/Peter-N91/hve-squad/blob/main/docs/templates/connector-example/CONSUMER-GUIDE.md)
-* [Repository security policy](https://github.com/Peter-N91/hve-squad/blob/main/SECURITY.md)
+* [Consumer guide and examples](https://github.com/microsoft/hve-squad/blob/main/docs/templates/connector-example/CONSUMER-GUIDE.md)
+* [Repository security policy](https://github.com/microsoft/hve-squad/blob/main/SECURITY.md)

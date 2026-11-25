@@ -3,7 +3,7 @@ name: squad-model-scoring
 description: "Versioned capability comparison shared by generation and offline routing: verified evidence, separate dates, common comparison panels, qualification, and explicit coverage limitations."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-11-06"
 ---

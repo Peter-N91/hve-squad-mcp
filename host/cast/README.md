@@ -16,12 +16,20 @@ without the full repository or an `apm install` at runtime.
 - `.github/instructions/squad/*.instructions.md` — the squad instructions,
   including the `squad-routing.instructions.md` probe file so the resolved root
   layout matches a deployed consumer.
-- `.github/instructions/untrusted-content-boundary.instructions.md` — the
-  boundary instruction the loader applies to any persona that ingests external
-  content (VF-07 / G6).
-- `.github/references/squad/*.md` — the split roster catalog and inert
-  model-routing, model-catalog and economy-mode references. These are data for
-  native server parsing, not executable Agent Skill trees.
+- `.github/skills/untrusted-content-boundary/SKILL.md` — the untrusted-content
+  boundary skill (`microsoft/hve-core` relocated it from
+  `untrusted-content-boundary.instructions.md`) for personas that ingest
+  external content (VF-07 / G6).
+- `.github/skills/squad/references/responsible-use.md` — the shared
+  responsible-use, no-reporting, and customer-control contract (`hve-squad@0.22.0+`)
+  read directly once per context by every Squad entrypoint and forwarded to
+  isolated workers.
+- `.github/skills/squad/references/roster-catalog.md` — the roster **Cast
+  Catalog** and Registered External Cast. `hve-squad@0.18.0` moved them out of
+  `squad-roster.instructions.md`, and the router, the profile resolver, and the
+  generator resolve every role through this file. Together with
+  `responsible-use.md`, these are the only files the bundle takes from the squad
+  skill, which `apm.yml` deploys as a directory.
 - `manifest.json` — the integrity record: the resolved package and upstream
   commits, a SHA-256 per bundled file with the pinned source it came from, and
   the file counts.
@@ -40,9 +48,8 @@ cd squad-mcp
 npm run snapshot:cast
 ```
 
-`host/snapshot-cast.ts` resolves the version tag in `package-pin.json`, or uses
-its explicit immutable `commit` with the descriptive `ref`, then reads
-that snapshot's `apm.yml` — the deployment manifest, which lists every deployed
+`host/snapshot-cast.ts` resolves the tag in `package-pin.json` to a commit, reads
+that release's `apm.yml` — the deployment manifest, which lists every deployed
 file as `<owner>/<repo>/<path>[#<ref>]` — and fetches each file from its pinned
 source. It needs network access and nothing else: **no local package checkout and
 no `apm install`**.
@@ -57,11 +64,6 @@ produced a bundle mixing current squad charters with retired upstream agents.
 Set `GITHUB_TOKEN` (or `GH_TOKEN`) to raise the API rate limit; the sources are
 public, so a token is optional.
 
-The active release pin is `v0.21.0` at
-`8921a36faf7402686bd3b2b64f6e70be70a0523c` (`apm.yml` declares `0.21.0`). An
-explicit `ref` requires a full commit SHA: regeneration never follows a moving
-tag. The native runtime does not execute upstream PowerShell orchestration.
-
 ## Drift check
 
 Two halves, because they catch different failures:
@@ -71,7 +73,7 @@ Two halves, because they catch different failures:
   manifest does not record, when `package-pin.json` moved without a re-snapshot,
   or when a roster **Primary** agent is missing or ambiguous. No network.
 - **Online** — `npm run snapshot:cast:check` re-resolves the pin and FAILS when
-  the committed bundle is not what the immutable pin produces. Non-zero exit, no
+  the committed bundle is not what the pinned tag produces. Non-zero exit, no
   writes.
 
 Re-run `npm run snapshot:cast` after the pin or the upstream cast changes, then
@@ -80,6 +82,6 @@ commit the regenerated bundle + manifest.
 ## Deferred
 
 Bundling the full referenced **skill** file trees is deferred to the later
-execution expansion to keep image size and scope bounded. The loader's
-untrusted-content-boundary enforcement does not depend on skill files being
-present; personas + squad/boundary instructions are bundled now.
+execution expansion to keep image size and scope bounded. Personas, squad
+instructions, the untrusted-content-boundary skill, and the squad skill's
+`responsible-use.md` and `roster-catalog.md` references are bundled now.

@@ -3,7 +3,7 @@ name: squad-scribe-cold-federation
 description: "Scribe cold section: unsupported-host federation lifecycle, repairs, root history, and aggregate summaries."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-09-27"
 ---

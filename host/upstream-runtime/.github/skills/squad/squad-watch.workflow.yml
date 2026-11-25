@@ -459,7 +459,7 @@ jobs:
               '     and record history/Squad Implementor.md (and specialist history files) via',
               '     Squad Scribe.',
               '   - Stage 5 (Review): gated on the implementation artifacts existing on disk,',
-              '     dispatch tester (Squad Reviewer or cue-matched Code Review * Alternate)',
+              '     dispatch tester (Squad Reviewer)',
               '     to verify the changes, acceptance criteria, tests, and artifact/history',
               '     completeness; write a review artifact under',
               '     .copilot-tracking/squad/members/<name>/reviews/; and record',
@@ -492,7 +492,7 @@ jobs:
               '   issue_comment triggers, select the sub-squad profile and packs per case and',
               '   per ask from the diff and description, dispatch researcher (when codebase',
               '   or diff context investigation is needed), task-fit council roles, and',
-              '   tester (Squad Reviewer and/or cue-matched Code Review * Alternates), and',
+              '   tester (Squad Reviewer), and',
               '   record the review artifact under .copilot-tracking/squad/members/<name>/reviews/',
               '   and per-role history under members/<name>/history/ through Squad Scribe.',
               '',
@@ -600,7 +600,7 @@ jobs:
                   'profile and any optional packs per case and per ask from the PR diff and',
                   'description. Dispatch researcher (when codebase/diff context investigation is',
                   'needed), any task-fit council/domain reviewers warranted by the ask, and',
-                  'tester (Squad Reviewer and/or cue-matched Code Review * Alternates); verify',
+                  'tester (Squad Reviewer); verify',
                   'against any linked issue\'s acceptance criteria and the producing run\'s RPI',
                   'artifacts and history; record the review artifact under',
                   `.copilot-tracking/squad/members/${member}/reviews/ and per-role history under`,
@@ -1190,6 +1190,7 @@ jobs:
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           API_URL: ${{ github.api_url }}
+          SERVER_URL: ${{ github.server_url }}
         run: |
           set -euo pipefail
           if [[ -z "${COPILOT_GITHUB_TOKEN}" ]]; then
@@ -1197,19 +1198,23 @@ jobs:
             exit 1
           fi
           case "${COPILOT_GITHUB_TOKEN}" in
-            ghp_*|gho_*|ghs_*)
-              echo "::error::COPILOT_GITHUB_TOKEN uses a classic or server token prefix. Supply a dedicated fine-grained PAT with only 'Copilot Requests' and zero repository write permissions."
+            ghp_*|gho_*|ghs_*|ghu_*|ghr_*)
+              echo "::error::COPILOT_GITHUB_TOKEN uses a classic, OAuth, or server token prefix. Supply a dedicated fine-grained PAT with only 'Copilot Requests' and zero repository write permissions."
               exit 1
               ;;
           esac
           headers_file="$RUNNER_TEMP/copilot-token-headers.txt"
           body_file="$RUNNER_TEMP/copilot-token-repo.json"
-          trap 'rm -f "$headers_file" "$body_file"' EXIT
+          collab_headers_file="$RUNNER_TEMP/copilot-token-collab-headers.txt"
+          collab_body_file="$RUNNER_TEMP/copilot-token-collab.json"
+          trap 'rm -f "$headers_file" "$body_file" "$collab_headers_file" "$collab_body_file"' EXIT
+          api_base="${API_URL%/}"
+          server_base="${SERVER_URL%/}"
           http_code="$(curl -sS -D "$headers_file" -o "$body_file" -w '%{http_code}' \
             -H "Authorization: Bearer ${COPILOT_GITHUB_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            "${API_URL}/repos/${REPO}")"
+            "${api_base}/repos/${REPO}")"
           if grep -qiE '^x-oauth-scopes:\s*[^[:space:]]' "$headers_file"; then
             echo "::error::COPILOT_GITHUB_TOKEN returned classic OAuth scopes. Supply a fine-grained PAT with only 'Copilot Requests' and zero repository write permissions."
             exit 1
@@ -1223,17 +1228,73 @@ jobs:
               echo "Verified COPILOT_GITHUB_TOKEN has no repository scope on ${REPO} (HTTP ${http_code})."
               ;;
             200)
-              has_write="$(node -e '
+              has_user_write="$(node -e '
                 const fs = require("fs");
-                const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+                const data = JSON.parse(fs.readFileSync(0, "utf8"));
                 const p = data && data.permissions ? data.permissions : {};
                 process.stdout.write((p.push || p.maintain || p.admin) ? "true" : "false");
-              ' "$body_file")"
-              if [[ "$has_write" == "true" ]]; then
-                echo "::error::COPILOT_GITHUB_TOKEN carries push, maintain, or admin permission on ${REPO}. Refusing to expose a repository-write PAT to an unattended --allow-all-tools run."
-                exit 1
+              ' < "$body_file")"
+              if [[ "$has_user_write" != "true" ]]; then
+                echo "Verified COPILOT_GITHUB_TOKEN carries no push, maintain, or admin permission on ${REPO}."
+              else
+                # On public repositories GET /repos/{owner}/{repo} populates
+                # data.permissions from the PAT owner's user role even when a
+                # fine-grained PAT grants zero repository access. Verify the
+                # token's own repository and push scope directly.
+                case "${COPILOT_GITHUB_TOKEN}" in
+                  github_pat_*) ;;
+                  *)
+                    echo "::error::COPILOT_GITHUB_TOKEN carries push, maintain, or admin permission on ${REPO} and is not a fine-grained PAT. Supply a dedicated fine-grained PAT with only 'Copilot Requests' and zero repository write permissions."
+                    exit 1
+                    ;;
+                esac
+                collab_code="$(curl -sS -D "$collab_headers_file" -o "$collab_body_file" -w '%{http_code}' \
+                  -H "Authorization: Bearer ${COPILOT_GITHUB_TOKEN}" \
+                  -H "Accept: application/vnd.github+json" \
+                  -H "X-GitHub-Api-Version: 2022-11-28" \
+                  "${api_base}/repos/${REPO}/collaborators?per_page=1")"
+                no_repo_scope="false"
+                if [[ "$collab_code" == "403" ]]; then
+                  if grep -qiE '^x-accepted-github-permissions:.*metadata=read' "$collab_headers_file"; then
+                    no_repo_scope="true"
+                  else
+                    no_repo_scope="$(node -e '
+                      const fs = require("fs");
+                      try {
+                        const data = JSON.parse(fs.readFileSync(0, "utf8"));
+                        const msg = String((data && data.message) || "");
+                        process.stdout.write(/resource not accessible by personal access token/i.test(msg) ? "true" : "false");
+                      } catch {
+                        process.stdout.write("false");
+                      }
+                    ' < "$collab_body_file")"
+                  fi
+                fi
+                if [[ "$no_repo_scope" == "true" ]]; then
+                  echo "Verified COPILOT_GITHUB_TOKEN has no repository scope on ${REPO} (HTTP 403; owner role on public repository ignored)."
+                elif [[ "$collab_code" == "200" || "$collab_code" == "403" || "$collab_code" == "404" ]]; then
+                  basic_auth="$(printf 'x-access-token:%s' "${COPILOT_GITHUB_TOKEN}" | base64 | tr -d '\r\n')"
+                  push_code="$(curl -sS -o /dev/null -w '%{http_code}' \
+                    -H "Authorization: Basic ${basic_auth}" \
+                    "${server_base}/${REPO}.git/info/refs?service=git-receive-pack")"
+                  case "$push_code" in
+                    200)
+                      echo "::error::COPILOT_GITHUB_TOKEN carries push, maintain, or admin permission on ${REPO}. Refusing to expose a repository-write PAT to an unattended --allow-all-tools run."
+                      exit 1
+                      ;;
+                    403|404)
+                      echo "Verified COPILOT_GITHUB_TOKEN carries no push permission on ${REPO} (HTTP ${push_code})."
+                      ;;
+                    *)
+                      echo "::error::Unexpected HTTP ${push_code} while verifying COPILOT_GITHUB_TOKEN push permissions; failing closed."
+                      exit 1
+                      ;;
+                  esac
+                else
+                  echo "::error::Unexpected HTTP ${collab_code} while verifying COPILOT_GITHUB_TOKEN repository scope; failing closed."
+                  exit 1
+                fi
               fi
-              echo "Verified COPILOT_GITHUB_TOKEN carries no push, maintain, or admin permission on ${REPO}."
               ;;
             *)
               echo "::error::Unexpected HTTP ${http_code} while verifying COPILOT_GITHUB_TOKEN repository permissions; failing closed."

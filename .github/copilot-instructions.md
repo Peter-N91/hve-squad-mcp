@@ -2,7 +2,7 @@
 
 ## Overview
 
-This public repository builds and ships `@hve-squad/mcp`, the outbound Model Context Protocol (MCP) server for `Peter-N91/hve-squad`, together with its remote Azure Container Apps (`host/`) infrastructure, Copilot Studio connector (`generated/copilot-studio-connector/`), and Microsoft 365 Copilot Cowork + Code dynamic plugin (`cowork/`).
+This public repository builds and ships `@hve-squad/mcp`, the outbound Model Context Protocol (MCP) server for `microsoft/hve-squad`, together with its remote Azure Container Apps (`host/`) infrastructure, Copilot Studio connector (`generated/copilot-studio-connector/`), and Microsoft 365 Copilot Cowork + Code dynamic plugin (`cowork/`).
 
 ## Public Repository & Secret Hygiene
 

@@ -3,7 +3,7 @@ name: squad
 description: 'Run or initialize a squad with deterministic scripts, native HVE agent dispatch, gated persistence and verified state. Use when operating .copilot-tracking/squad/.'
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-10-25"
 ---
@@ -20,6 +20,10 @@ The user-invocable Squad Coordinator dispatches HVE Core agents and persists ros
 
 Compact contracts and scripts own routine coordination; cold procedures preserve
 compatibility. Instructions use artifact-specific scopes, not all squad state.
+
+## Responsible Use
+
+Read [Responsible Use](references/responsible-use.md) before work.
 
 ## Prerequisites
 

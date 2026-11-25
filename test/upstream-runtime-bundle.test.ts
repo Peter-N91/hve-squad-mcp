@@ -37,7 +37,7 @@ test("complete dependency tree contains upstream orchestration, FinOps and licen
     assert.ok(files.has(".github/skills/squad/" + file), file);
   }
   assert.ok(manifest.files.filter(file => file.path.endsWith("/SKILL.md")).length > 90);
-  for (const repo of ["Peter-N91/hve-squad", "microsoft/hve-core", "github/awesome-copilot"]) {
+  for (const repo of ["microsoft/hve-squad", "microsoft/hve-core", "github/awesome-copilot"]) {
     assert.ok(manifest.files.some(file => file.path.startsWith("licenses/" + repo + "/LICENSE")));
   }
 });

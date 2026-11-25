@@ -3,7 +3,7 @@ name: squad-gates-and-modes
 description: "Operator procedures for the discovery, intake, council, and implementation gates and for the autonomous, autopilot, and notification modes."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.1"
   last_updated: "2026-08-19"
 ---
@@ -77,7 +77,7 @@ The Implementation Gate is what makes the squad a methodology instead of a route
 
 The methodology does not end at the deliverable. After any producing role lands its output, dispatch `tester` (review) as the closing stage before reporting the work complete — in every mode. Review is `auto`-tier and non-destructive, so it needs no separate gate. This is what makes the cycle symmetric: research and plan precede the work, review follows it, so **Research → Plan → Implement → Review** holds end-to-end.
 
-* Resolve `tester` through the roster Selection Cue — `Code Review Functional` for a correctness diff, `Code Review Security` for a security diff — and fold its findings into the turn summary. With no sub-type cue, the Primary `Squad Reviewer` reviews the output against the plan.
+* Resolve `tester` to the Primary `Squad Reviewer`, fold its findings into the turn summary, and review the output against the plan.
 * When the user has explicitly removed `tester` from the roster, report that the work closed unreviewed and recommend re-adding the role. Never drop the stage silently.
 
 ## Cost Preflight Procedure

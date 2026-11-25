@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseTables } from "../markdown-table.js";
 
@@ -15,10 +15,20 @@ export interface EconomyPick {
   rationale: string;
 }
 
+function readSquadRef(root: string, filename: string): string {
+  for (const candidate of [
+    join(root, "skills", "squad", "references", filename),
+    join(root, "references", "squad", filename),
+  ]) {
+    if (existsSync(candidate)) return readFileSync(candidate, "utf8");
+  }
+  return readFileSync(join(root, "skills", "squad", "references", filename), "utf8");
+}
+
 /** Intersect pinned upstream fit/cost routing with verified account availability. */
 export function selectEconomyModel(root: string, role: string, floor: string, available: readonly string[]): EconomyPick {
-  const catalog = parseTables(readFileSync(join(root, "references", "squad", "model-catalog.md"), "utf8"));
-  const routing = parseTables(readFileSync(join(root, "references", "squad", "model-routing.md"), "utf8"));
+  const catalog = parseTables(readSquadRef(root, "model-catalog.md"));
+  const routing = parseTables(readSquadRef(root, "model-routing.md"));
   const assignment = routing.find(table => table.headers[0] === "Class" && table.headers.includes("Roles"));
   const key = role.replace(/^council-/, "");
   const cls = role.startsWith("council-") ? "council" : clean(assignment?.rows.find(row =>

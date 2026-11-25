@@ -3,7 +3,7 @@ name: squad-federation-templates
 description: "Federation-root seed templates: routing, decisions, state, aggregate rate table, and autopilot meta-run summary."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-08-14"
 ---

@@ -19,10 +19,23 @@ export interface CoordinatorRequest {
   request: string;
   /** Optional squad profile hint. */
   profile?: string;
+  /**
+   * Optional comma-separated add-on pack hint(s) layered onto the profile
+   * (`power-platform`, `m365-copilot`, `aws`, `foundry`, `fabric`, `dotnet`,
+   * `aks`, `azure-functions`, `azure-cloud`). Honored on the DELEGATED path;
+   * ignored on the unattended embedded path.
+   */
+  pack?: string;
   /** Optional model-tier hint (`fast` | `default`). */
   tier?: string;
   /** Optional Member Name to pick a specific named member. */
   owner?: string;
+  /**
+   * Optional post-classification connector execution choice (`original` |
+   * `connector:<binding-id>` | `both`). Honored on the DELEGATED path; ignored
+   * on the unattended embedded path.
+   */
+  execution?: string;
   /** Optional autonomy mode (`autonomous` | `autopilot`). */
   mode?: string;
   /**
@@ -33,6 +46,22 @@ export interface CoordinatorRequest {
    * ignores it (`squad-discovery-gate.instructions.md`, *Unattended Runs*).
    */
   discovery?: string;
+  /**
+   * Optional per-role model routing mode (`off` | `ranked` | `economy` | `manual`).
+   *
+   * Honored only on the DELEGATED path, where the host's coordinator owns
+   * `team.md` and its `Model` column (`references/model-routing.md`,
+   * `references/economy-mode.md`). The embedded engine runs its own configured
+   * backend and ignores it.
+   */
+  routing?: string;
+  /**
+   * Optional per-turn workflow depth (`quick` | `standard`).
+   *
+   * Honored only on the DELEGATED path (`references/quick-depth.md`); ignored on
+   * the unattended embedded path.
+   */
+  depth?: string;
   /** Optional free-form context. */
   context?: string;
   /** Explicit independent review; never changes the project's seeded roster. */

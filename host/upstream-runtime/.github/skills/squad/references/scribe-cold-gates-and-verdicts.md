@@ -3,7 +3,7 @@ name: squad-scribe-cold-gates-and-verdicts
 description: "Scribe cold fallback for unsupported Council/Intake/Discovery verdict writes, plus autonomous-loop/autopilot summaries and notifications."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-10-19"
 ---

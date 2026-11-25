@@ -3,7 +3,7 @@ name: squad-connector-role-modes
 description: "Normative 1.1 connector contract for work-role bindings, persisted autopilot defaults, protected governance, council bypass, and trusted provenance."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.1"
   last_updated: "2026-11-18"
 ---

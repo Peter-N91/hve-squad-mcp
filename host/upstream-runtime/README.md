@@ -5,12 +5,12 @@ integration. Copilot deployments use it for new projects after explicit user
 initialization; existing native projects retain `host/cast` and native
 orchestration. Vendoring this tree alone does not enable its execution.
 
-`../upstream-pin.json` pins HVE Squad `v0.21.0` to commit
-`8921a36faf7402686bd3b2b64f6e70be70a0523c`. `manifest.json` records every resolved
+`../upstream-pin.json` pins `microsoft/hve-squad` `v0.22.0` to commit
+`a8cc33d5973fb00f7f47ddb069d26db8fd8eed5f`. `manifest.json` records every resolved
 source, immutable commit, Git blob, SHA-256 and byte count.
 
 The snapshot includes every declared APM dependency tree, not just agent files:
-106 Agent Skills, their reference/script/asset trees, squad prompts and instructions,
+107 Agent Skills, their reference/script/asset trees, squad prompts and instructions,
 and source repository license notices. Binary assets retain their original bytes.
 Do not hand-edit vendored files or run their scripts against live project state.
 

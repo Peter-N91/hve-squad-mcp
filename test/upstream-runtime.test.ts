@@ -171,7 +171,7 @@ test("default roster and model picks come from complete upstream templates and e
   const proposal = prepareUpstreamRoster(bundle, "default", "2026-10-10", models);
   assert.deepEqual(proposal.roster.map(r => r.role), ["researcher", "lead", "developer", "tester", "scribe"]);
   assert.match(proposal.teamMarkdown, /Model routing: economy/);
-  assert.match(proposal.teamMarkdown, /Code Review Walkback/);
+  assert.match(proposal.teamMarkdown, /Codebase Profiler, Meeting Analyst/);
   assert.match(proposal.teamMarkdown, /\| Model Tier \| Model \| Deliverable Root \|/);
   assert.match(proposal.routingMarkdown, /Routing/);
   assert.ok(proposal.roster.every(r => bundle.paths().includes(r.charterPath)));

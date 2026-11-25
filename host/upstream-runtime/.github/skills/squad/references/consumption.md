@@ -3,7 +3,7 @@ name: squad-consumption
 description: "Squad consumption ledger templates, the dispatch-size cost estimator, cost formula, and Cost Preflight; the per-model rate table, tier fallback, and calibration block live in consumption-rates-template.md."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-10-27"
 ---

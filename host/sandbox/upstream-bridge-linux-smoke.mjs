@@ -60,4 +60,4 @@ assert.deepEqual([...committed.committedPaths].sort(), [squad + "consumption-rat
 assert.equal(files.get(squad+"decisions.md").content, "# Decisions\n");
 assert.equal(JSON.parse(files.get(squad+"state.json").content).currentRun.costPreflight.decision,"not-requested");
 assert.equal(JSON.parse(files.get(squad+"state.json").content).updated,stateUpdated);
-console.log(JSON.stringify({test:"genuine Linux script/storage bridge",upstreamCommit:"8921a36faf7402686bd3b2b64f6e70be70a0523c",scripts:[preflightResult.script,seeded.script,measured.script],validatedBeforeCommit:true,atomic:false,unitEconomics:finops.unitEconomics,productionUsage:false}));
+console.log(JSON.stringify({test:"genuine Linux script/storage bridge",upstreamCommit:"a8cc33d5973fb00f7f47ddb069d26db8fd8eed5f",scripts:[preflightResult.script,seeded.script,measured.script],validatedBeforeCommit:true,atomic:false,unitEconomics:finops.unitEconomics,productionUsage:false}));

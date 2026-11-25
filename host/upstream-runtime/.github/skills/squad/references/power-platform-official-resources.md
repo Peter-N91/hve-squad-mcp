@@ -3,7 +3,7 @@ name: squad-power-platform-official-resources
 description: "Opt-in Power Platform official skill ownership, prerequisites, and action boundaries."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-11-11"
 ---
@@ -44,7 +44,7 @@ Use the shared **Pack Resource Preflight** in `profiles-and-packs.md` at Init, p
 4. Require a `PASS` receipt, then stop for a host reload. `PLANNED` is not installation, and an on-disk skill is not yet host-visible. After reload, rerun preflight with the actual native host inventory and record every listed skill as `available` or explicitly `declined`, including both preview skills when the user accepted their bundle. Pass the preview approval's decision reference or current explicit request with its dispatch; an `available` flag alone is not preview permission. A declined preview does not prevent applying the pack or using the other approved resources.
 5. Check the support roots below before claiming the requested job is ready. Report installed payloads, host visibility, missing support/prerequisites, and tenant readiness separately. Resume a failed setup at the failed step, without inventing availability or overwriting existing files.
 
-The shared installer can run the exact pinned APM entries without a PP-specific installer. APM takes **skill directories**, not `SKILL.md` file paths. Give the user the published [English setup guide](https://peter-n91.github.io/hve-squad/usage.html#power-platform-setup) or [French setup guide](https://peter-n91.github.io/hve-squad/fr/usage.html#power-platform-setup) for detailed commands and troubleshooting; the consumer repository need not contain this project's documentation.
+The shared installer can run the exact pinned APM entries without a PP-specific installer. APM takes **skill directories**, not `SKILL.md` file paths. Give the user the published [English setup guide](https://microsoft.github.io/hve-squad/usage.html#power-platform-setup) or [French setup guide](https://microsoft.github.io/hve-squad/fr/usage.html#power-platform-setup) for detailed commands and troubleshooting; the consumer repository need not contain this project's documentation.
 
 ### Complete support roots
 

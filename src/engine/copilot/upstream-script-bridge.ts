@@ -8,8 +8,8 @@ import type { UpstreamBundle } from "./upstream-bundle.js";
 import { buildRunBillingLog, type RunBillingSnapshot } from "./run-billing-log.js";
 import type { CompletionUsageRecord } from "../model-backend.js";
 
-export const UPSTREAM_SCRIPT_PIN = "8921a36faf7402686bd3b2b64f6e70be70a0523c";
-const MANIFEST_HASH = "18d18f16c028db2c95cef48b6c0cfa60364b33e6985de90c27aa05e536b60cee";
+export const UPSTREAM_SCRIPT_PIN = "a8cc33d5973fb00f7f47ddb069d26db8fd8eed5f";
+const MANIFEST_HASH = "f5cbed46102d432f06e5bb79ffa729d5f9880a7eae84ecf1e8213ff79074d412";
 const SQUAD_ROOT = ".copilot-tracking/squad";
 const MAX_FILE_BYTES = 256_000;
 const MAX_TREE_BYTES = 8_000_000;
@@ -861,7 +861,7 @@ try {
   Regular $manifestPath
   if ((FileHash $manifestPath) -ne '__MANIFEST_HASH__') { throw 'Manifest integrity mismatch' }
   $manifest = [IO.File]::ReadAllText($manifestPath) | ConvertFrom-Json -AsHashtable -DateKind String
-  if ($manifest.sourceCommit -ne '8921a36faf7402686bd3b2b64f6e70be70a0523c') { throw 'Wrong pin' }
+  if ($manifest.sourceCommit -ne 'a8cc33d5973fb00f7f47ddb069d26db8fd8eed5f') { throw 'Wrong pin' }
   Regular '/opt/hve-upstream/apm.yml'
   if ((FileHash '/opt/hve-upstream/apm.yml') -ne $manifest.manifestSha256) { throw 'APM integrity mismatch' }
   $phase = 'inventory'

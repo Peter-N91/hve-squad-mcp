@@ -3,7 +3,7 @@ name: squad-connector-contract
 description: "Connector contract: capability manifest schema, delegation-request and result-envelope shapes, the file-drop invocation mode, statuses, validation rules, the untrusted-data guard, and the unmetered-accounting convention for a consumer-owned external coordinator."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.1"
   last_updated: "2026-10-21"
 ---

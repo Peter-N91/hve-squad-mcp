@@ -3,7 +3,7 @@ name: squad-reference-index
 description: "Maps squad jobs to reference files and companion instructions."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-10-26"
 ---

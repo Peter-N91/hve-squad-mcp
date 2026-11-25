@@ -12,7 +12,7 @@ Licensed under the MIT license.
 **HVE Squad Studio** runs as an interactive side-panel canvas in the **GitHub Copilot app** (and any Copilot host that renders SDK extension canvases).
 
 - **Plugin installation (`hve-squad`) — ready automatically:**
-  Add `Peter-N91/hve-squad#plugin` under **Customize → Plugins** in the GitHub Copilot app and install `hve-squad`, then start a new project session. `plugin.json` registers `skills/squad/extensions`, so **HVE Squad Studio** is available right away with no extra setup.
+  Add `microsoft/hve-squad#plugin` under **Customize → Plugins** in the GitHub Copilot app and install `hve-squad`, then start a new project session. `plugin.json` registers `skills/squad/extensions`, so **HVE Squad Studio** is available right away with no extra setup.
 - **APM repository fallback (`apm install`) — one-time helper step:**
   Because APM `0.29.0` deploys skill directories under `.agents/skills/squad/` rather than `.github/extensions/`, materialize the extension once into your repository (`.github/extensions/hve-squad-studio/`) or user profile (`~/.copilot/extensions/hve-squad-studio/`):
 

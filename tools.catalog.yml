@@ -26,9 +26,9 @@
 # Per-tool `input` mirrors the `/squad` prompt arguments
 # (squad-src/.github/prompts/squad/squad.prompt.md):
 #   request (required), profile, tier, owner, mode, context, the optional
-#   project + projectContext bridge checkpoint, the discovery-gate depth on the
-#   two catch-all tools, and the optional federation `squad` sub-squad target
-#   (plus `init` on squad_federate).
+#   project + projectContext bridge checkpoint, the discovery-gate depth and
+#   model-routing mode on the two catch-all tools, and the optional federation
+#   `squad` sub-squad target (plus `init` on squad_federate).
 #
 # Execution model (Phase 0): DELEGATED. The tool returns the Coordinator
 # persona + matched routing + framed request; the calling host (VS Code GitHub
@@ -41,13 +41,26 @@ schemaVersion: "0.1.0"
 # for documentation; each tool restates them inline so every tool input is a
 # complete, self-contained JSON Schema.
 conventions:
-  profiles: [default, full, security, design, architecture, azure, product, brd]
+  profiles: [default, full, security, design, accessibility, architecture, azure, modernization, compliance, operations, product, brd]
+  packs: [power-platform, m365-copilot, aws, foundry, fabric, dotnet, aks, azure-functions, azure-cloud]
   tiers: [fast, default]
   modes: [autonomous, autopilot]
   # Discovery-gate depths, offered only on the attended (delegated) path — the
   # gate interviews a human, so an unattended run ignores the input entirely.
   # See squad-src/.github/instructions/squad/squad-discovery-gate.instructions.md.
   discoveryDepths: [quick, standard, deep, skip]
+  # Per-role model routing modes (hve-squad 0.18.0+; economy added in 0.19.0),
+  # forwarded to the coordinator on the attended (delegated) path only; the
+  # embedded engine runs its own configured backend and ignores the input.
+  # See squad-src/.github/skills/squad/references/{model-routing,economy-mode}.md.
+  modelRouting: [off, ranked, economy, manual]
+  # Per-turn workflow depths (hve-squad 0.20.0+), forwarded on the attended
+  # (delegated) path only; ignored unattended.
+  # See squad-src/.github/skills/squad/references/quick-depth.md.
+  depths: [quick, standard]
+  # Post-classification connector execution choice (Contract 1.1, hve-squad 0.19.0+).
+  # See squad-src/.github/skills/squad/references/connector-role-modes.md.
+  executionPattern: "^(original|both|connector:[a-z0-9][a-z0-9-]*)$"
   stateRoot: ".copilot-tracking/squad/"
   # Federation (opt-in): a repo may host several named sub-squads, each an
   # ordinary squad rooted at the sub-squad root below. The optional `squad`
@@ -138,7 +151,7 @@ tools:
           description: "The research question or topic for the squad this turn."
         profile:
           type: string
-          enum: [default, full, security, design, architecture, azure, product, brd]
+          enum: [default, full, security, design, accessibility, architecture, azure, modernization, compliance, operations, product, brd]
           description: "Optional squad profile to seed when the project has no squad yet."
         tier:
           type: string
@@ -190,7 +203,7 @@ tools:
           description: "The work to plan this turn."
         profile:
           type: string
-          enum: [default, full, security, design, architecture, azure, product, brd]
+          enum: [default, full, security, design, accessibility, architecture, azure, modernization, compliance, operations, product, brd]
           description: "Optional squad profile to seed when the project has no squad yet."
         tier:
           type: string
@@ -216,13 +229,16 @@ tools:
   - id: squad_review
     title: Squad Review
     # Seeded from the `tester` role -> Squad Reviewer; council row adds the
-    # multi-domain go/no-go reviewers (architect, security, cost, product, rai).
+    # task-fit go/no-go reviewers (one per lens: architect, security, cost,
+    # product, rai).
     description: >-
       Run the squad's review stage. Routes to the Squad Reviewer (squad `tester`
       role) at the `auto` tier for quality, correctness, and standards review.
-      When the request asks for a pre-implementation go/no-go or crosses two or
-      more council domains, it engages the council row (architect, security,
-      cost-manager, product-owner, and optionally rai) at the `confirm` tier.
+      When the request asks for a pre-implementation go/no-go, crosses two or
+      more council domains, or raises any responsible-AI concern, it engages a
+      task-fit council at the `confirm` tier: only the seats whose lens the work
+      touches (architect, security, cost-manager, product-owner, rai), with every
+      lens left out recorded in the verdict.
       Delegated execution: returns the Coordinator persona, matched routing, and
       a framed dispatch request. Use for "review", "validate", "check quality",
       "council", or "go/no-go" requests.
@@ -255,7 +271,7 @@ tools:
           description: "What to review, validate, or take to council this turn."
         profile:
           type: string
-          enum: [default, full, security, design, architecture, azure, product, brd]
+          enum: [default, full, security, design, accessibility, architecture, azure, modernization, compliance, operations, product, brd]
           description: "Optional squad profile to seed when the project has no squad yet."
         tier:
           type: string
@@ -307,7 +323,7 @@ tools:
           description: "The architecture or system-design question this turn."
         profile:
           type: string
-          enum: [default, full, security, design, architecture, azure, product, brd]
+          enum: [default, full, security, design, accessibility, architecture, azure, modernization, compliance, operations, product, brd]
           description: "Optional squad profile to seed when the project has no squad yet."
         tier:
           type: string
@@ -363,8 +379,12 @@ tools:
           description: "The work for the squad this turn (any intent; the Coordinator classifies it)."
         profile:
           type: string
-          enum: [default, full, security, design, architecture, azure, product, brd]
+          enum: [default, full, security, design, accessibility, architecture, azure, modernization, compliance, operations, product, brd]
           description: "Optional squad profile to seed when the project has no squad yet."
+        pack:
+          type: string
+          pattern: "^(power-platform|m365-copilot|aws|foundry|fabric|dotnet|aks|azure-functions|azure-cloud)(,(power-platform|m365-copilot|aws|foundry|fabric|dotnet|aks|azure-functions|azure-cloud))*$"
+          description: "Optional comma-separated add-on pack(s) layered onto the profile (power-platform, m365-copilot, aws, foundry, fabric, dotnet, aks, azure-functions, azure-cloud). A pack carries specialist roles, scoped guidance, or both and never replaces the profile. Ignored on an unattended run."
         tier:
           type: string
           enum: [fast, default]
@@ -372,6 +392,10 @@ tools:
         owner:
           type: string
           description: "Optional Member Name from team.md to pick a specific named member."
+        execution:
+          type: string
+          pattern: "^(original|both|connector:[a-z0-9][a-z0-9-]*)$"
+          description: "Optional post-classification connector execution choice (original, connector:<binding-id>, or both) per team.md Connector Bindings (Contract 1.1). Coordinator, Scribe, and Council always remain internal. Ignored on an unattended run."
         mode:
           type: string
           enum: [autonomous, autopilot]
@@ -380,6 +404,14 @@ tools:
           type: string
           enum: [quick, standard, deep, skip]
           description: "Optional discovery-gate depth for a request that states a goal with no requirement artifact behind it: quick (analyst), standard (designer then analyst), deep (designer, then challenger and experimenter, then analyst), or skip. An explicit depth beats the coordinator's one-time offer. Ignored on an unattended run, which has nobody for the gate to interview."
+        routing:
+          type: string
+          enum: ["off", ranked, economy, manual]
+          description: "Optional per-role model routing mode, persisted in team.md until changed: ranked (capability-first picks from the squad model catalog), economy (cost-first across every routed role within its floor after consent, with one ranked escalation after a failed review), manual (ask you to choose each role's model from the models this host can run), or off (no Model column; dispatch with no model parameter). Omit to keep the recorded mode. Ignored on an unattended run."
+        depth:
+          type: string
+          enum: [quick, standard]
+          description: "Optional per-turn workflow depth (quick or standard; omission is standard, never inferred). Controls how much work runs (bounded lane, shrink budgets, plan-driven parallelism), never which model runs, and never skips review, council, intake, or human gates. Ignored on an unattended run."
         context:
           type: string
           description: "Optional free-form context to frame the pipeline."
@@ -473,8 +505,12 @@ tools:
           description: "When true on an existing single-squad project (a top-level team.md, no federation.md), run Federation Promotion Mode: adopt the existing squad into a federation as its first sub-squad, relocating its state intact, before routing."
         profile:
           type: string
-          enum: [default, full, security, design, architecture, azure, product, brd]
+          enum: [default, full, security, design, accessibility, architecture, azure, modernization, compliance, operations, product, brd]
           description: "Optional profile hint forwarded to a sub-squad's Init when it has no squad yet."
+        pack:
+          type: string
+          pattern: "^(power-platform|m365-copilot|aws|foundry|fabric|dotnet|aks|azure-functions|azure-cloud)(,(power-platform|m365-copilot|aws|foundry|fabric|dotnet|aks|azure-functions|azure-cloud))*$"
+          description: "Optional comma-separated add-on pack(s) forwarded to the selected sub-squad's run (power-platform, m365-copilot, aws, foundry, fabric, dotnet, aks, azure-functions, azure-cloud). Ignored on an unattended run."
         tier:
           type: string
           enum: [fast, default]
@@ -482,6 +518,10 @@ tools:
         owner:
           type: string
           description: "Optional Member Name forwarded to the selected sub-squad's run."
+        execution:
+          type: string
+          pattern: "^(original|both|connector:[a-z0-9][a-z0-9-]*)$"
+          description: "Optional post-classification connector execution choice (original, connector:<binding-id>, or both), forwarded only to selected child sub-squad runs (binding authority remains member-local). Ignored on an unattended run."
         mode:
           type: string
           enum: [autonomous, autopilot]
@@ -490,6 +530,14 @@ tools:
           type: string
           enum: [quick, standard, deep, skip]
           description: "Optional discovery-gate depth, asked once at the federation level and applied per qualifying sub-squad: quick (analyst), standard (designer then analyst), deep (designer, then challenger and experimenter, then analyst), or skip. Each qualifying sub-squad runs its own session and writes its own brief and verdict under its own root. Ignored on an unattended run."
+        routing:
+          type: string
+          enum: ["off", ranked, economy, manual]
+          description: "Optional per-role model routing mode (off, ranked, economy, or manual), forwarded verbatim to every selected sub-squad's coordinator run; each sub-squad persists it in its own team.md and may only narrow it, never widen or substitute it. Ignored on an unattended run."
+        depth:
+          type: string
+          enum: [quick, standard]
+          description: "Optional per-turn workflow depth (quick or standard; omission is standard), forwarded to each selected sub-squad with depthSource=federation; a child never widens it. Changes work, not models, and never skips gates. Ignored on an unattended run."
         context:
           type: string
           description: "Optional free-form context to frame the federation turn."

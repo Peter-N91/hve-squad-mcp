@@ -228,13 +228,13 @@ export type PublishedLocalSpecialistReceipt = LocalSpecialistReceipt & {
   reference?: { metadataPath: string; blobPath: string; mediaType: string };
 };
 export const UPSTREAM_RUNTIME_EVIDENCE_MATRIX = [
-  { surface: "106-skill / 1740-file pinned bundle integrity", evidence: "verified local immutable resource reads", live: false },
+  { surface: "107-skill / 1743-file pinned bundle integrity", evidence: "verified local immutable resource reads", live: false },
   { surface: "schema 1.4 init, stage histories, routing, handoff and estimated ledger", evidence: "unchanged scripts executed in isolated PowerShell", live: false },
   { surface: "coordinator and child continuation", evidence: "durable checkpoint + atomic held-response claim + structural SDK resume tests", live: false },
   { surface: "Copilot account / Linux RPC production orchestration", evidence: "requires production smoke by parent; structural fake SDK tests do not certify it", live: false },
   { surface: "core RPI research/planning", evidence: "fixed named RPI Researcher source-gathering lanes, independent source verification, and pinned Squad Challenger plan critique; structural SDK execution tests, not live model conformance certification", live: false },
   { surface: "core RPI implementation/review", evidence: "bounded text-artifact execution and exact-hash review plumbing tested; full skill-method conformance, source edits and executable validation are not certified", live: false },
-  { surface: "all 106 skill workflows, connectors, cloud/tracker actions, binary reports", evidence: "bundle access only, not comprehensive live workflow support; browser/shell helpers and specialist scripts unavailable unless separately wired; never success defaults", live: false },
+  { surface: "all 107 skill workflows, connectors, cloud/tracker actions, binary reports", evidence: "bundle access only, not comprehensive live workflow support; browser/shell helpers and specialist scripts unavailable unless separately wired; never success defaults", live: false },
   { surface: "Linux local specialist capsule", evidence: "two fixed operations only: markdown-to-docx and graphviz-to-png; factory-bound trusted binary sink required; authenticated connections deferred and Windows automation unsupported", live: false },
 ] as const;
 export type UpstreamRuntimeSelection = PreparedUpstreamRuntime | {
