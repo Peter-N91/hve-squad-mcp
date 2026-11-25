@@ -1,7 +1,0 @@
----
-bump: minor
-type: Changed
----
-
-- **Upstream package references still pointed at `Peter-N91/hve-squad` after the repository moved to `microsoft/hve-squad`.** Updated `PACKAGE_REPO` and public-read token handling in `.github/workflows/bump-on-package-release.yml` (so personal tokens without `microsoft` SAML SSO authorization cannot 403 public release lookups or cast snapshots, and pin bumps rewrite both `.package` and `.version`), updated `scripts/release-prep.ts` to refresh the `CHANGELOG.md` preamble link on release, and updated `NOTICE`, `CONTRIBUTING.md`, `README.md`, `site/_includes/footer.njk`, and the bilingual `docs/` pages to `microsoft/hve-squad`.
-- **Aligned the bundled cast and delegated coordinator with `microsoft/hve-squad@0.22.0`.** Re-pinned `host/cast/package-pin.json` to `microsoft/hve-squad@0.22.0` (`91` agent files across `90` named personas, `15` instruction files, and `3` skill references), bundled `skills/squad/references/responsible-use.md` via `host/snapshot-cast.ts` alongside `roster-catalog.md`, dropped the eight retired `Code Review *` subagents (`tester` now resolves directly to `Squad Reviewer`), and surfaced the shared responsible-use, approved-engineering-scope, read-only worker-data, and no-reporting safeguards across delegated turns (`host/cast/`, `host/snapshot-cast.ts`, `src/engine/persona.ts`, `src/engine/delegated.ts`, `test/cast-bundle.test.ts`, `test/delegated.test.ts`).
