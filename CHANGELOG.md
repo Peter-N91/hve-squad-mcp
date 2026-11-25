@@ -10,6 +10,252 @@ APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
 
+## [0.12.0] - 2026-11-25
+
+> Built against `microsoft/hve-squad@0.22.0` (see `host/cast/package-pin.json`).
+
+### Added
+
+- **Advisory stages can run on the GitHub Copilot agent runtime instead of the
+  built-in one (opt-in).** With `SQUAD_MCP_STAGE_EXECUTOR=copilot`, each
+  tool-enabled stage drives a Copilot runtime (`copilot --headless`) in a
+  separate, disposable Linux sandbox through the Copilot SDK, giving HVE agents
+  Copilot's model selection, shell, file and web tools. The built-in runtime
+  remains the default and stays vendor-neutral; the SDK is an optional
+  dependency loaded only when selected (`src/engine/copilot/`, `host/sandbox/`).
+- **The project persists across sandboxes.** The server is the runtime's
+  session filesystem: `view`, `create` and `edit` on `/workspace` read and
+  write the project artifact store directly, within the stage's write scope,
+  create-only for unseen files and compare-and-swap after a read; server-side
+  `list_project_files` and `search_project_files` find earlier artifacts; text
+  files `bash` writes inside the write scope are copied back when the stage
+  completes. The runtime's conversation log and checkpoints are kept in a
+  server-side session-state store, so a stage that fails part-way resumes the
+  same session in a new sandbox and can still cite evidence issued before.
+- **The server keeps ownership of evidence and permissions.** Project reads
+  earn `server_store` receipts hashed by the server, other tool output earns
+  `sandbox_tool_output` receipts, and drafts, writes, failed commands and
+  `bash` reads of project paths earn none; completion requires a stored primary
+  artifact citing server-issued receipts. A deny-by-default permission handler
+  admits only public `https` URLs (optionally an operator host allow-list),
+  screens shell commands for metadata, private-network and credential paths,
+  and never grants a sandbox bypass. A deadline, a model-call budget, bounded
+  abort/disconnect calls, and a runtime liveness probe end the stage
+  fail-closed.
+- **Stages fan out pinned agents as parallel Copilot sub-agents.** A
+  coordinator stage dispatches the agents its charter permits (read-only RPI
+  Researcher lanes for research) through Copilot's `task` tool, and independent
+  dispatches run side by side. The server attributes every sub-agent tool call
+  through the tool hooks and keeps the built-in delegation rules: only pinned
+  agents, at most six dispatches, the parent's artifact first, each writing
+  sub-agent confined to its own delegate folder, no shell and no further
+  fan-out for sub-agents, per-agent evidence and usage, no receipt for a
+  sub-agent's reply, and no completion while a sub-agent runs or with an
+  unreported gap. Set `SQUAD_MCP_COPILOT_SUBAGENTS=false` to turn it off.
+- **The server owns the Copilot sign-in, so sandboxes never log in.** One
+  server-held GitHub identity is supplied to every session through the SDK
+  token provider and never enters the sandbox environment, logs, readiness
+  responses, or stored session state. The server proves Copilot entitlement
+  before it listens and refuses to start with a missing or rejected token; an
+  unreachable sandbox only delays readiness, retried every 30 seconds. The
+  identity is re-verified in the background, runtime token refreshes re-read
+  the source so rotation needs no restart, a dropped sandbox connection is
+  re-established, and stages are refused with `copilot_identity_unavailable`
+  while the identity is not verified.
+- **Platform probes.** `GET /healthz` reports liveness and `GET /readyz`
+  answers 200 only when the Copilot identity is verified and the sandbox
+  answers (503 otherwise), with per-check booleans only. With the built-in
+  executor the instance is always ready. Logs also redact anything shaped like
+  a GitHub token.
+- **The sandbox image strips platform-injected variables.** Its entrypoint
+  starts the Copilot runtime from an allowlisted environment, so identity
+  endpoints and secret headers a hosting platform injects into every container
+  never reach the agent's shell.
+- New settings: `SQUAD_MCP_COPILOT_CLI_URL` and a required 32-character
+  `SQUAD_MCP_COPILOT_CONNECTION_TOKEN`; a required identity source, one of
+  `SQUAD_MCP_COPILOT_GITHUB_TOKEN_COMMAND` (for example `gh auth token`),
+  `SQUAD_MCP_COPILOT_GITHUB_TOKEN_FILE`, or `SQUAD_MCP_COPILOT_GITHUB_TOKEN`
+  (selected with `SQUAD_MCP_COPILOT_GITHUB_TOKEN_SOURCE` when several are set);
+  plus optional `SQUAD_MCP_COPILOT_IDENTITY_REVERIFY_MS`,
+  `SQUAD_MCP_COPILOT_MODEL`, `SQUAD_MCP_COPILOT_TOOLS`,
+  `SQUAD_MCP_COPILOT_ALLOW_SHELL`, `SQUAD_MCP_COPILOT_SUBAGENTS`,
+  `SQUAD_MCP_COPILOT_ALLOWED_HOSTS`,
+  `SQUAD_MCP_COPILOT_SANDBOX_WORKSPACE`, and
+  `SQUAD_MCP_COPILOT_SESSION_STATE_DIR`. A sandbox binds to the first server
+  that connects, so restart it with the server. Hosted multi-tenant use still
+  needs a per-run sandbox, a replicated session-state store, an egress proxy,
+  and per-user credentials; see `host/sandbox/README.md`.
+
+- **Advisory stages now run as server-owned tool loops instead of single model
+  completions.** The embedded engine executes each stage through a research
+  runtime that scopes every read and write to the actor, records the content
+  hash of every source it reads as server-issued evidence, and refuses
+  completion until the cited evidence was actually retrieved. Model calls, tool
+  calls, cost, and stage deadlines are bounded per stage and per run. Research
+  follows the hve-squad v0.17 contract: delegated `RPI Researcher` workers are
+  read-only and return unverified source suggestions, and the parent must read
+  and cite sources itself (`src/engine/research-runtime.ts`).
+- **Research, plan, and BRD artifacts are gated on structure and independent
+  review.** Research and plan artifacts are validated against the pinned RPI
+  template structure, a plan needs phase details plus one fresh independent
+  critique, and a BRD needs a passing review of its current, unaltered draft
+  (`src/engine/advisory-contracts.ts`, `src/engine/brd-review.ts`). When the
+  pinned roster defines no `brd` profile but casts `BRD Builder`, a focused
+  `brd` profile is derived from it (`src/engine/profiles.ts`).
+- **A run can pause to ask a person one question and resume the same run.** The
+  question and checkpoint survive restarts, and a resumed stage stops rather
+  than restarting when its artifacts, authority, tenant, budget, or deadline no
+  longer match (`src/engine/advisory-checkpoint.ts`).
+- **Model failures are diagnosable without exposing provider detail.** Requests
+  are preflighted, provider responses validated, error metadata reduced to safe
+  allow-listed fields, and per-attempt usage recorded with stage, actor, and
+  outcome. Missing usage or pricing is reported as unknown, never as zero cost.
+- **Project identity and MCP tool annotations.** Calls may bind to a durable
+  project UUID (`src/engine/project-context-bridge.ts`), and `tools/list`
+  publishes standard read-only/destructive annotations for remote MCP clients
+  (`src/transports/remote-tool-metadata.ts`).
+- **New optional operator settings; existing deployments keep their behavior.**
+  `SQUAD_MCP_AUDIENCE` accepts a comma-separated list of exact-match aliases for
+  one protected resource. `SQUAD_MCP_MODEL_API` (`chat-completions` default, or
+  `responses`), `SQUAD_MCP_MODEL_CHAT_PROFILE`,
+  `SQUAD_MCP_MODEL_MAX_OUTPUT_TOKENS`, `SQUAD_MCP_MODEL_REASONING_EFFORT`, and
+  `SQUAD_MCP_MODEL_VERBOSITY` select model capabilities and fail fast on
+  incompatible combinations. `SQUAD_MCP_PRICE_CACHED_INPUT_PER_MTOK` and
+  `SQUAD_MCP_PRICE_CACHE_WRITE_PER_MTOK` join the existing input/output rates.
+- The pinned cast bundle additionally ships the hve-squad
+  `untrusted-content-boundary` instruction that the runtime loads as authority
+  (`host/cast`). `undici` becomes a runtime dependency for bounded model
+  transport timeouts.
+
+- **Advisory runs write a report before review.** When no deliverable fan-out
+  replaces it, the advisory pipeline runs a bounded, text-only report stage
+  between Plan and Review. It may read project artifacts and write one Markdown
+  report under `.copilot-tracking/changes/`, with no shell, network or
+  delegation, and a budget of 10 model calls and 12 tool calls (agentic
+  runtimes spend one model call per tool round trip), so the reviewer no longer
+  fails runs for a missing developer artifact.
+- **Copilot research can read full pages through curl or a real browser.** The
+  Copilot sandbox image includes pinned Playwright 1.63.0 and Chromium, exposed
+  as `squad-browser`. Researchers are told that `web_fetch` may return only a
+  summary or an app shell, and to fall back to `curl` for static text or to
+  `squad-browser` for JavaScript-rendered pages and ordinary click,
+  search-field and scroll navigation. Each workflow uses a fresh browser
+  context with at most 12 actions; afterwards the page is scrolled so lazy
+  content renders, and visible text including open shadow roots is extracted.
+  Output is one `HVE_BROWSER_RESULT` metadata line followed by up to 30,000
+  characters of text and links. Requests are limited to public HTTPS hosts
+  (checked after DNS resolution) and the optional host allow-list, which the
+  sandbox reads from `COPILOT_BROWSER_ALLOWED_HOSTS`. Sign-in, passwords,
+  paywalls and CAPTCHAs are out of scope. Browser results are recorded as
+  `browser-reported:` evidence with the visited URLs; output redirected or
+  piped by the agent is recorded as `browser-output-redirected:`, so reviewers
+  know that receipt has no page text.
+- IPv4-mapped IPv6 addresses written in hex (`::ffff:a00:1`) are treated as
+  non-public by the sandbox network policy.
+- Files under `host/sandbox/` are pinned to LF, because a CRLF shebang stops
+  the launcher from running in the Linux image.
+
+- Bundle inert roster and model-routing references under `.github/skills/squad/references/`
+  and load the split roster catalog consistently in runtime routing, profiles and manifest generation.
+  Native orchestration remains authoritative; upstream PowerShell skills are
+  not executed.
+- Add opt-in Copilot economy model routing through
+  SQUAD_MCP_COPILOT_ROUTING=economy, defaulting to off. Intersect pinned fit/cost
+  tables with verified model availability and roster floors. Protected roles
+  retain fit-first ranking; only eligible implementation roles use cost-first
+  picks. Apply selections to stage sessions and delegates and record provenance
+  and roster model picks without weakening pipeline or approval gates.
+- Unrostered delegate workers inherit the parent's ranked model without lowering
+  its floor. Unavailable known-role delegates are omitted and explicitly refused,
+  with reasons retained in source manifests.
+- Give text-only reports 32 tool calls, 16 model calls and 180 seconds, subject
+  to lower operator limits. Reserve finalization calls, name current-run inputs,
+  and require explicit gap reporting rather than unsaved chat-only reports.
+- Isolate product-owner handoffs and source manifests below the run's
+  plans/handoff subtree in both executors, preserving the Lead plan and evidence.
+- Clarify independent advisory review: canonical reports retain mandatory
+  evidence citations and honest pending-review status without predicting future
+  approval. Substantive source, accuracy, accessibility and safety findings remain
+  enforced.
+
+- Expand Copilot execution with the byte-exact 107-skill, 1743-file `microsoft/hve-squad`
+  `v0.22.0` bundle at `a8cc33d5973fb00f7f47ddb069d26db8fd8eed5f`.
+  New Copilot projects use the full upstream coordinator after explicit user
+  initialization. Existing native projects and their schemas remain unchanged.
+- Offer ranked, economy and manual fixed-model routing at Init. Persist the
+  chosen mode/model in the project binding and preserve it across runs and
+  resumes. All modes retain availability checks, roster floors, review and
+  approval gates. Legacy explicit economy confirmations remain compatible.
+- Honor the economy-only upstream rate seeder: ranked/manual use the pinned
+  Scribe cold seed and read-only genuine ledger validation with explicit
+  native-Scribe provenance, never a temporary mode override or fabricated script
+  receipt. Preserve existing calibration and operator rates.
+- Port the isolated PowerShell/storage bridge, exact timestamp handling,
+  chunked hash-verified transport, no-ceiling preflight semantics, controlled
+  handoffs and partial-commit recovery receipts.
+- Port named research/critique helpers, complete-source critique coverage,
+  exact-hash independent review, bounded correction/rereview and read-only
+  artifact hashing. Missing required capabilities remain explicit blockers.
+- Add a full Linux sandbox with pinned/locked specialist prerequisites and
+  scoped Markdown-to-DOCX and DOT-to-PNG conversions. Publish verified binary
+  outputs through server-owned Blob storage and authenticated history chunks;
+  keep credentials, external integrations and arbitrary scripts out of the
+  sandbox's authority.
+- Preserve SDK usage event IDs, surface accounting persistence failures and
+  record service-reported Copilot credits separately from configured USD
+  estimates. Add run-scoped deduplicated billing/value projections without
+  treating partial totals or provider stop events as complete acceptance.
+
+- **Run remote Copilot work as the signed-in user.** Cowork and Copilot Studio share a validated Entra tenant/object identity, a separately consented encrypted GitHub account link, private run and artifact partitions, account lifecycle guards, and generated host packages. Per-user mode is opt-in and requires explicit trust, durable state and operator provisioning; existing service and local modes remain supported. See the deployment runbook for host validation and migration boundaries.
+
+- **Added the v1.29 dynamic Microsoft 365 Copilot Cowork + Code plugin (`cowork/`), local `deploy-output/` workspace, and post-deployment Cowork compiler (`npm run cowork:compile`).** Agents deploying the MCP server now follow `.github/skills/deploy-mcp-cowork/SKILL.md` and `.github/instructions/mcp-deployment.instructions.md` (referenced from `.github/copilot-instructions.md`) to persist live MCP endpoints and credential references locally in gitignored `deploy-output/` (`mcp-deployment.local.json`, `mcp-credentials.local.env`) while refusing tracked repository paths, optionally verify live `initialize` + `tools/list` discovery, and compile an uploadable v1.29 `deploy-output/hve-squad-cowork.zip` (`generators/build-cowork-plugin.ts`, `scripts/compile-cowork-plugin.ts`, `cowork/pack.ps1`).
+
+### Changed
+
+- **Aligned `host/cast/` and `host/upstream-runtime/` with `microsoft/hve-squad@v0.22.0` (`a8cc33d5973fb00f7f47ddb069d26db8fd8eed5f`).** Extended `host/snapshot-cast.ts` to bundle `skills/squad/references/{model-routing,model-catalog,economy-mode}.md` alongside `responsible-use.md` and `roster-catalog.md`, refreshed the full immutable upstream runtime snapshot (107 skills, 1,743 files), aligned `UpstreamScriptBridge` workspace `RepoRoot` resolution and `run-billing-log` / `run-billing-projection` exact-native session accounting with `0.22.0`, and updated the Linux specialist environment and transport manifests (`src/engine/copilot/local-specialists.ts`, `host/sandbox/upstream-transport-files.json`).
+
+### Fixed
+
+- **Status polls no longer hold the connection past the ingress ceiling.**
+  Without a background worker, a `squad_status` poll that claimed a run drove
+  the whole advisory pipeline inside the request. Long stages (for example on
+  the Copilot runtime) kept it open past the 240-second Azure Container Apps
+  ingress limit, which MCP clients report as an unreachable connector. The poll
+  now waits up to 30 seconds, then answers `run_already_in_flight` while the
+  run continues in the same process; later polls report it in flight and then
+  return the stored result. An in-process guard prevents a second drive even if
+  the claim lease lapses. Worker deployments are unchanged
+  (`src/engine/embedded.ts`, `src/server-http.ts`).
+- **Fetched documentation is parsed as text, not stripped with regular
+  expressions.** `fetch_documentation` converts the page with `html-to-text`
+  (scripts, styles and navigation skipped, entities left encoded), replacing a
+  regex tag strip that static analysis flagged as incomplete sanitization.
+- **HTTP responses declare their content type.** String bodies are served as
+  `text/plain` unless a handler explicitly marks them `text/html`, and object
+  bodies as `application/json`, so a reflected string can never be interpreted
+  as markup (`src/transports/http.ts`).
+- **The background worker no longer leaks an abort listener per tick**
+  (`src/engine/run-worker.ts`).
+- **A declining backlog handoff no longer fails a reviewed run.** When the
+  optional backlog-handoff agent stops because the request has nothing to plan
+  (for example a research question), the run completes and records the stage as
+  skipped. Runtime failures and limits in that stage still halt the run.
+
+- Probe Copilot web deployments through SDK-aware readiness every ten seconds, exercising the runtime connection during idle periods and withholding traffic from unready replicas. Builtin deployments retain their existing probe configuration.
+
+- Preserve the browser's same-origin Origin header on GitHub linking and account-switch confirmation forms, and permit the initial consent POST to redirect only to the configured Entra authorization origin. Cross-origin referrers remain suppressed and CSRF checks remain enforced.
+- Request Entra's identity-only `profile` scope alongside `openid` so the browser ownership check receives the immutable `oid` claim required for per-user binding.
+
+### Consumer install
+
+Pin to this version:
+
+```powershell
+npm install "Peter-N91/hve-squad-mcp#v0.12.0"
+```
+
+[0.12.0]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.12.0
+
 ## [0.11.0] - 2026-11-25
 
 > Built against `microsoft/hve-squad@0.22.0` (see `host/cast/package-pin.json`).
