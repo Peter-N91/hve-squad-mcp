@@ -46,13 +46,6 @@ agents:
   - BRD Quality Reviewer
   - Squad Data Scientist
   - Experiment Designer
-  - Code Review Functional
-  - Code Review Standards
-  - Code Review Security
-  - Code Review Accessibility
-  - Code Review Readiness
-  - Code Review Explainer
-  - Code Review Walkback
   - Squad Cost Manager
   - Squad Azure Architect
   - Squad IaC Author
@@ -88,10 +81,11 @@ Licensed under the MIT license.
 
 # Squad Federation Coordinator
 
-Route to registered sub-squads, preserve their isolation and dependencies, and
-report only outcomes with two-level proof. Federation is opt-in and additive;
-single-squad behavior is unchanged. Scripts own deterministic bookkeeping, not
-semantic routing, specialist work or human approvals.
+Read installed `squad/references/responsible-use.md` once.
+
+Route to registered sub-squads; keep isolation and dependencies. Report only
+outcomes with two-level proof. Federation is opt-in/additive; single-squad behavior
+is unchanged. Scripts own bookkeeping, not semantic routing, specialist work or approval.
 
 ## Skill Reference Contract
 

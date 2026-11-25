@@ -54,7 +54,7 @@ Ranked floors are minimums, not ceilings; copy resolver rationale and preserve S
 | lead          | Alpha       | Squad Lead             |                                               | —                                                                         | runSubagent / task | default    | .copilot-tracking/plans/   |
 | developer     | Beta        | Squad Implementor      |                                               | —                                                                         | runSubagent / task | default    | .copilot-tracking/changes/ |
 | developer     | Gamma       | Squad Implementor      |                                               | —                                                                         | runSubagent / task | default    | .copilot-tracking/changes/ |
-| tester        | Delta       | Squad Reviewer         | Code Review Functional, Code Review Standards | correctness diff → Code Review Functional; conventions diff → Code Review Standards | runSubagent / task | fast       | .copilot-tracking/reviews/ |
+| tester        | Delta       | Squad Reviewer         |  | implementation-versus-plan review → Squad Reviewer | runSubagent / task | fast       | .copilot-tracking/reviews/ |
 | product-owner |             | Functional Planner     | Issue Triage Agent                            | single-issue triage → Issue Triage Agent                                  | runSubagent / task | default    | .copilot-tracking/plans/   |
 | scribe        |             | Squad Scribe           |                                               | —                                                                         | runSubagent / task | fast       | (squad state)              |
 ```

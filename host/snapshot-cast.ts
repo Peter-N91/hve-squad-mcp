@@ -69,12 +69,17 @@ const BOUNDARY_SKILL_DEST = "skills/untrusted-content-boundary/SKILL.md";
 /** The squad skill directory, as `apm.yml` declares it (a directory, not a file). */
 const SQUAD_SKILL_DIR = "/skills/squad";
 /**
- * The squad skill files the server parses at runtime. `hve-squad@0.18.0` moved the
- * Cast Catalog (role -> Primary/Alternate agents) out of `squad-roster.instructions.md`
- * into this reference, so routing, profiles, and the generator cannot resolve a role
- * without it.
+ * The squad skill files the server and bundled personas rely on at runtime.
+ * `hve-squad@0.18.0` moved the Cast Catalog (role -> Primary/Alternate agents) out
+ * of `squad-roster.instructions.md` into `references/roster-catalog.md`, and
+ * `hve-squad@0.22.0` introduced `references/responsible-use.md` as the shared
+ * responsible-use, no-reporting, and customer-control policy read directly by every
+ * Squad entrypoint.
  */
-export const SQUAD_SKILL_REFERENCES = ["references/roster-catalog.md"] as const;
+export const SQUAD_SKILL_REFERENCES = [
+  "references/responsible-use.md",
+  "references/roster-catalog.md",
+] as const;
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
 /** Bounded so a snapshot cannot look like abuse to the origin. */
@@ -467,8 +472,8 @@ function buildManifest(pin: Pin, resolution: Resolution, generatedAt: string): C
     })),
     note:
       "Skill file trees are DEFERRED to the execution expansion; personas + squad instructions " +
-      "plus the untrusted-content-boundary skill and the squad skill references the server parses " +
-      "(skills/squad/references/roster-catalog.md) only.",
+      "plus the untrusted-content-boundary skill and the squad skill references " +
+      "(skills/squad/references/responsible-use.md, skills/squad/references/roster-catalog.md) only.",
   };
 }
 

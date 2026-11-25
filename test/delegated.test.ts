@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import { loadCatalog, type CatalogTool } from "../src/catalog/catalog.js";
 import { DelegatedCoordinator } from "../src/engine/delegated.js";
+import { insertSection } from "../scripts/release-prep.js";
 import type { SquadMemoryEntry, SquadMemoryStore } from "../src/engine/squad-memory-state.js";
 
 const catalog = loadCatalog();
@@ -138,4 +139,35 @@ test("Step 4.1: an injected store with prior entries adds a bounded prior-contex
   // Latest per-agent history line only.
   assert.match(result.stateContext, /- history\/architect: newest architect line/);
   assert.doesNotMatch(result.stateContext, /old line/);
+});
+
+test("every delegated tool systemPrompt carries the 0.22.0 responsible-use contract", async () => {
+  for (const id of ["squad_research", "squad_run", "squad_federate"] as const) {
+    const tool = byId(id);
+    const result = await engine.handle(tool, { toolId: tool.id, request: "Inspect repo" });
+    assert.match(result.systemPrompt, /squad\/references\/responsible-use\.md/);
+    assert.match(result.systemPrompt, /never perform independent usage reporting/i);
+    assert.match(result.systemPrompt, /preserve human decision, approval, and `Stop` gates/i);
+  }
+});
+
+test("release-prep insertSection rewrites the preamble package link without touching historical releases", () => {
+  const changelog = [
+    "# Changelog",
+    "",
+    "This server is a companion to the [hve-squad](https://github.com/Peter-N91/hve-squad)",
+    "APM package.",
+    "",
+    "## [0.10.0] - 2026-11-19",
+    "",
+    "> Built against `Peter-N91/hve-squad@0.21.0` (see `host/cast/package-pin.json`).",
+    "",
+  ].join("\n");
+  const updated = insertSection(
+    changelog,
+    "## [0.11.0] - 2026-11-25\n\n> Built against `microsoft/hve-squad@0.22.0`.\n",
+    "microsoft/hve-squad",
+  );
+  assert.match(updated, /\[hve-squad\]\(https:\/\/github\.com\/microsoft\/hve-squad\)/);
+  assert.match(updated, /Built against `Peter-N91\/hve-squad@0\.21\.0`/);
 });

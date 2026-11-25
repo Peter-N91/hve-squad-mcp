@@ -536,7 +536,7 @@ planning and action is structured and explicit.
 - `SERVER_VERSION` in `src/server.ts`, `package.json`, and `package-lock.json`
   are kept in step by `npm run version:set` and verified by `test/generator.test.ts`.
 - The bundled cast snapshot under `host/cast/.github/` is pinned to
-  `Peter-N91/hve-squad@0.21.0` (`host/cast/package-pin.json`) and verified both
+  `microsoft/hve-squad@0.22.0` (`host/cast/package-pin.json`) and verified both
   offline (`test/cast-bundle.test.ts`) and online (`npm run snapshot:cast:check`).
 - Attended-only prompt controls (`discovery`, `pack`, `execution`, `routing`,
   `depth`) are forwarded on the local delegated path and ignored (with an info

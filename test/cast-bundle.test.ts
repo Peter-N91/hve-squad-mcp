@@ -88,6 +88,13 @@ function bundledPaths(dir = BUNDLE_ROOT, acc: string[] = []): string[] {
  * the squad skill's `references/roster-catalog.md`, not the roster instructions.
  */
 const ROSTER_FILE = join(BUNDLE_ROOT, "skills", "squad", "references", "roster-catalog.md");
+const RESPONSIBLE_USE_FILE = join(
+  BUNDLE_ROOT,
+  "skills",
+  "squad",
+  "references",
+  "responsible-use.md",
+);
 
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
@@ -273,6 +280,18 @@ test("cast bundle carries the squad roster catalog the router parses", () => {
     "skills/squad/references/roster-catalog.md must be present in the bundle — routing, " +
       "profiles, and the generator resolve every role through it (re-run `npm run snapshot:cast`).",
   );
+});
+
+test("cast bundle carries the shared responsible-use policy referenced by squad entrypoints", () => {
+  assert.ok(
+    existsSync(RESPONSIBLE_USE_FILE),
+    "skills/squad/references/responsible-use.md must be present in the bundle — every " +
+      "bundled squad persona reads it once per context (re-run `npm run snapshot:cast`).",
+  );
+  const policy = readFileSync(RESPONSIBLE_USE_FILE, "utf8");
+  assert.match(policy, /No independent usage reporting/);
+  assert.match(policy, /Preserve human gates and Stop decisions/);
+  assert.match(policy, /not professional advice or authorization to deploy high-consequence/);
 });
 
 test("every bundled file hashes to what the manifest records", () => {

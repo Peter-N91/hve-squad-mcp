@@ -4,7 +4,7 @@
 
 # hve-squad MCP server
 
-An outbound [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes the **hve-squad** as coarse, model-invocable tools (five per-role intent tools plus `squad_federate` for the opt-in federation of sub-squads) so MCP hosts can call the squad directly.
+An outbound [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes [hve-squad](https://github.com/microsoft/hve-squad) as coarse, model-invocable tools (five per-role intent tools plus `squad_federate` for the opt-in federation of sub-squads) so MCP hosts can call the squad directly.
 
 This is the outbound inverse of the squad's existing inbound MCP template (`squad-src/.github/skills/squad/mcp.template.json`, which registers servers the squad *consumes*). This package ships the squad's *own* server, which other hosts consume.
 
@@ -17,14 +17,14 @@ This server has **two execution modes**, at different maturity levels. Be precis
 | Mode | Host | State | Behaves as the full APM package? |
 | --- | --- | --- | --- |
 | **Delegated** (stdio) | VS Code GitHub Copilot (local) | Works | **Yes** — VS Code dispatches the real deployed cast. Needs the built package + `apm install` of the cast; install with `npx -y @hve-squad/mcp` or a local build. |
-| **Embedded advisory hero tools** (`squad_research`, `squad_review`, `squad_plan`, `squad_architect`) | Copilot Studio (remote HTTP) | Works, deployable via [host/RUNBOOK.md](host/RUNBOOK.md) | **Advisory parity.** Each runs one server-side dispatch via Azure OpenAI, resolving the **real from-disk persona from the full bundled cast** (99 agents), under Entra auth, gates, tenant isolation and cost caps. Advisory (text) output only — no code execution or deploy. |
+| **Embedded advisory hero tools** (`squad_research`, `squad_review`, `squad_plan`, `squad_architect`) | Copilot Studio (remote HTTP) | Works, deployable via [host/RUNBOOK.md](host/RUNBOOK.md) | **Advisory parity.** Each runs one server-side dispatch via Azure OpenAI, resolving the **real from-disk persona from the full bundled cast** (91 agents), under Entra auth, gates, tenant isolation and cost caps. Advisory (text) output only — no code execution or deploy. |
 | **Embedded async advisory pipeline** (`squad_run`, `squad_status`) | Copilot Studio (remote HTTP) | **Works end-to-end; single-replica (file) or multi-replica (Azure Table)** | **Advisory parity — full cast, full advisory stages.** Data-driven routing runs research → plan → council → review → backlog over the real cast. Advisory (text) only; code-executing implement/deploy is a deferred execution expansion. |
 | **Deterministic render** (`squad_render_pptx`) | Copilot Studio (remote HTTP) | Opt-in (`SQUAD_MCP_ENABLE_RENDER_PPTX=true`) | **First file-output tool.** Renders content YAML to a `.pptx` with in-image `python-pptx` and returns a short-lived Azure Blob **user-delegation SAS** download link (tenant-scoped path, SAS never logged, `Squad.Render` fail-closed scope, caller YAML is DATA). No model call. |
 
 **The async pipeline (`squad_run`) runs the full advisory squad** — data-driven routing over the full bundled cast, sequencing research → plan → (council) → review → backlog-handoff and producing a finished, sectioned advisory artifact. It is **advisory parity**: finished text deliverables, not code-executing implement/deploy (that is a separate, deferred execution expansion). Specifics:
 
 - **Off by default** (`SQUAD_MCP_REMOTE_PIPELINE_ENABLED=false`); the default remote surface is the advisory hero tools. Enabling the async pipeline requires a durable run-state backend.
-- **Full cast + routing.** Requests are routed to the real roster roles (researcher → lead → council members → tester) resolved from the SHA-pinned 99-agent cast bundle; the council is task-fit (one seat per lens the request touches) and synthesizes a most-restrictive-wins Council Verdict (Go / Go-With-Conditions / Stop). It honors `mode` (interactive pauses per stage; `autopilot`/`autonomous` run to one compiled artifact).
+- **Full cast + routing.** Requests are routed to the real roster roles (researcher → lead → council members → tester) resolved from the SHA-pinned 91-agent cast bundle; the council is task-fit (one seat per lens the request touches) and synthesizes a most-restrictive-wins Council Verdict (Go / Go-With-Conditions / Stop). It honors `mode` (interactive pauses per stage; `autopilot`/`autonomous` run to one compiled artifact).
 - **Releasable by an operator.** `squad_run` holds at a non-bypassable Human Gate; an operator with the distinct `Squad.Operate` app role releases a held run via the out-of-band `POST /admin/approve` route (never a `tools/call`), after which a `squad_status` poll drives it to completion. Approvals are audited (approver + timestamp) and tenant-scoped.
 - **Two run-state backends** (`SQUAD_MCP_RUN_STATE_BACKEND`): `file` (single-replica, local dir) or `table` (Azure Table Storage, cross-replica ETag compare-and-swap). The `table` backend + a store-backed approval channel make release visible across replicas, so a **multi-replica / scale-to-zero** deployment is supported (WI-06). Per-stage artifacts, the Council Verdict, and caller `request`/`context` are AES-256-GCM encrypted at rest when a key is configured.
 - **Long runs (>240s)** are handled by an optional background **worker** (an ACA Job): with `SQUAD_MCP_WORKER_ENABLED=true` the status poll is read-only and the worker drives approved runs off the request path (WI-1b4-WORKER).
@@ -122,6 +122,10 @@ The **embedded/advisory pipeline** (`squad_run`) applies the same sizing in `rou
 - **`execution`** (`original`, `connector:<binding-id>`, or `both` on **`squad_run`** and **`squad_federate`**) — post-classification connector selection against `team.md` `## Connector Bindings` (Contract 1.1); Coordinator, Scribe, and Council always stay internal.
 
 The **embedded** path runs unattended on the operator-configured backend, so it ignores `routing`, `depth`, `pack`, and `execution` and logs `*_ignored_unattended`.
+
+### Responsible use and no-reporting safeguards
+
+`hve-squad@0.22.0` introduced a canonical policy (`squad/references/responsible-use.md`, bundled under `host/cast/.github/skills/squad/references/responsible-use.md`) shared across every Squad entrypoint and forwarded to isolated workers: assistance is scoped to authorized software-engineering work (never professional advice, high-consequence deployment authorization, or independent consequential decisions about people), human approval and `Stop` gates cannot be waived by an agent or council, source/retrieved/tool outputs stay read-only data, local accounting never phones home, and opted-in notifications carry only scrubbed payloads with in-chat fallback.
 
 ## Execution model — delegated (local VS Code)
 

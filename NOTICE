@@ -18,7 +18,7 @@ and a SHA-256 digest in `host/cast/manifest.json`.
 The snapshot resolves through the hve-squad APM package (see
 `host/cast/package-pin.json`), which composes content from:
 
-- Peter-N91/hve-squad (MIT License)
+- microsoft/hve-squad (MIT License)
 - microsoft/hve-core (MIT License; some content CC BY-SA 4.0)
 - github/awesome-copilot (MIT License)
 
