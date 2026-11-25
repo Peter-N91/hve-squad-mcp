@@ -150,14 +150,22 @@ export function listPersonaNames(roots: string[] = resolveSquadAgentsRoots()): s
   return [...names].sort();
 }
 
+const IMPLICIT_QUALITY_REVIEWERS: Readonly<Record<string, readonly string[]>> = {
+  "BRD Builder": ["BRD Quality Reviewer"],
+  "PRD Builder": ["PRD Quality Reviewer"],
+};
+
 /**
  * Bundled agents a persona's charter allows it to delegate to: those listed in
- * its `agents:` frontmatter (`*` for any), or every bundled agent when it
- * declares a generic agent tool and no list. Never itself, an ancestor, or the
- * RPI Researcher (which serves only as a read-only research lane).
+ * its `agents:` frontmatter (`*` for any), every bundled agent when it declares
+ * a generic agent tool and no list, or the explicit quality-reviewer subagent
+ * for requirements builders whose upstream frontmatter omits `tools:`/`agents:`.
+ * Never itself, an ancestor, or the RPI Researcher (which serves only as a
+ * read-only research lane).
  */
 export function delegableAgentNames(persona: PersonaRecord, bundled: readonly string[], ancestors: readonly string[] = [persona.role]): string[] {
-  const declared = persona.agents;
+  if (persona.role === "RPI Researcher") return [];
+  const declared = persona.agents ?? (!persona.tools ? IMPLICIT_QUALITY_REVIEWERS[persona.role] : undefined);
   const genericAgentTool = persona.tools?.some((name) => /^(?:agent(?:\/|$)|runSubagent$)/.test(name));
   if (!declared && !genericAgentTool) return [];
   return bundled.filter((name) =>

@@ -29,7 +29,10 @@ function exercise(verdict: "Pass" | "Fail", billing?: readonly CompletionUsageRe
       ...(billing ? ["-SessionLog", logPath] : [])],{encoding:"utf8",timeout:60000});
     assert.equal(measured.status,0,measured.stderr);
     const output=JSON.parse(measured.stdout);
-    return output.unitEconomics;
+    return {
+      ...output.unitEconomics,
+      exactCreditsPerAccepted: output.unitEconomics.costBasis === "exact-native" ? output.unitEconomics.creditsPerAccepted : null,
+    };
   } finally { rmSync(dir,{recursive:true,force:true}); }
 }
 
@@ -38,7 +41,7 @@ test("genuine upstream FinOps counts a failed review as rejected, not accepted",
   assert.equal(value.accepted,0);
   assert.equal(value.rejected,1);
   assert.equal(value.estCreditsPerAccepted,null);
-  assert.equal(value.hostBilledCreditsPerAccepted,null);
+  assert.equal(value.exactCreditsPerAccepted,null);
 });
 
 function billing(id: string, nano?: number) {
@@ -50,14 +53,17 @@ function billing(id: string, nano?: number) {
 test("compatible SDK host log supplies aggregate billed credits per accepted value, not the last completion", options, () => {
   const value = exercise("Pass", [billing("a", 1_000_000_000), billing("b", 2_000_000_000)]);
   assert.equal(value.accepted, 1);
-  assert.equal(value.hostBilledCreditsPerAccepted, 3);
+  assert.equal(value.costBasis, "exact-native");
+  assert.equal(value.exactCreditsPerAccepted, 3);
 });
 test("genuine projection leaves partial and absent billing unavailable while preserving complete zero", options, () => {
   for (const records of [[], [billing("missing")], [billing("known", 1_000_000_000), billing("missing")]]) {
-    assert.equal(exercise("Pass", records).hostBilledCreditsPerAccepted, null);
+    const value = exercise("Pass", records);
+    assert.equal(value.costBasis, "estimated");
+    assert.equal(value.exactCreditsPerAccepted, null);
   }
-  assert.equal(exercise("Pass", [billing("zero", 0)]).hostBilledCreditsPerAccepted, 0);
-  assert.equal(exercise("Fail", [billing("known", 1_000_000_000)]).hostBilledCreditsPerAccepted, null);
+  assert.equal(exercise("Pass", [billing("zero", 0)]).exactCreditsPerAccepted, 0);
+  assert.equal(exercise("Fail", [billing("known", 1_000_000_000)]).exactCreditsPerAccepted, null);
 });
 test("genuine upstream FinOps counts explicitly reviewed deliverables only",options,()=>{
   const value=exercise("Pass");
@@ -66,5 +72,5 @@ test("genuine upstream FinOps counts explicitly reviewed deliverables only",opti
   assert.equal(value.deliverablesProduced,1,"Upstream value measures exclude review artifacts from produced business deliverables.");
   assert.equal(value.unreviewed,0);
   assert.equal(typeof value.estCreditsPerAccepted,"number");
-  assert.equal(value.hostBilledCreditsPerAccepted,null);
+  assert.equal(value.exactCreditsPerAccepted,null);
 });

@@ -3,8 +3,8 @@ bump: minor
 type: Added
 ---
 
-- Expand Copilot execution with the byte-exact 97-skill, 1682-file HVE Squad
-  v0.19.0-pre bundle at a8d863a9715f0738f69711421b1897269911f68f.
+- Expand Copilot execution with the byte-exact 107-skill, 1743-file `microsoft/hve-squad`
+  `v0.22.0` bundle at `a8cc33d5973fb00f7f47ddb069d26db8fd8eed5f`.
   New Copilot projects use the full upstream coordinator after explicit user
   initialization. Existing native projects and their schemas remain unchanged.
 - Offer ranked, economy and manual fixed-model routing at Init. Persist the

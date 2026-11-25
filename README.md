@@ -4,7 +4,7 @@
 
 # hve-squad MCP server
 
-An outbound [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes the **hve-squad** as coarse, model-invocable tools (five per-role intent tools plus `squad_federate` for the opt-in federation of sub-squads) so MCP hosts can call the squad directly.
+An outbound [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes [hve-squad](https://github.com/microsoft/hve-squad) as coarse, model-invocable tools (five per-role intent tools plus `squad_federate` for the opt-in federation of sub-squads) so MCP hosts can call the squad directly.
 
 This is the outbound inverse of the squad's existing inbound MCP template (`squad-src/.github/skills/squad/mcp.template.json`, which registers servers the squad *consumes*). This package ships the squad's *own* server, which other hosts consume.
 
@@ -17,19 +17,19 @@ This server has **two execution modes**, at different maturity levels. Be precis
 | Mode | Host | State | Behaves as the full APM package? |
 | --- | --- | --- | --- |
 | **Delegated** (stdio) | VS Code GitHub Copilot (local) | Works | **Yes** — VS Code dispatches the real deployed cast. Needs the built package + `apm install` of the cast; install with `npx -y @hve-squad/mcp` or a local build. |
-| **Embedded advisory hero tools** (`squad_research`, `squad_review`, `squad_plan`, `squad_architect`) | Copilot Studio (remote HTTP) | Works, deployable via [host/RUNBOOK.md](host/RUNBOOK.md) | **Advisory parity.** Each runs one server-side dispatch via Azure OpenAI, resolving the **real from-disk persona from the full bundled cast** (91 agent files, 90 named personas), under Entra auth, gates, tenant isolation and cost caps. Advisory (text) output only — no code execution or deploy. |
+| **Embedded advisory hero tools** (`squad_research`, `squad_review`, `squad_plan`, `squad_architect`) | Copilot Studio (remote HTTP) | Works, deployable via [host/RUNBOOK.md](host/RUNBOOK.md) | **Advisory parity.** Each runs one server-side dispatch via Azure OpenAI, resolving the **real from-disk persona from the full bundled cast** (91 agents), under Entra auth, gates, tenant isolation and cost caps. Advisory (text) output only — no code execution or deploy. |
 | **Embedded async advisory pipeline** (`squad_run`, `squad_status`) | Copilot Studio (remote HTTP) | **Works end-to-end; single-replica (file) or multi-replica (Azure Table)** | **Advisory parity — full cast, full advisory stages.** Data-driven routing runs research → plan → optional council → text-only report (or deliverable fan-out) → review → backlog over the real cast. Advisory (text) only; the single developer report stage cannot execute commands, access the network, delegate, or edit code, and code-executing implement/deploy is a deferred execution expansion. |
 | **Deterministic render** (`squad_render_pptx`) | Copilot Studio (remote HTTP) | Opt-in (`SQUAD_MCP_ENABLE_RENDER_PPTX=true`) | **First file-output tool.** Renders content YAML to a `.pptx` with in-image `python-pptx` and returns a short-lived Azure Blob **user-delegation SAS** download link (tenant-scoped path, SAS never logged, `Squad.Render` fail-closed scope, caller YAML is DATA). No model call. |
 
 **The async pipeline (`squad_run`) runs the full advisory squad** — data-driven routing over the full bundled cast, sequencing research → plan → (council) → a bounded text-only developer report (or deliverable fan-out) → review → backlog-handoff and producing a finished, sectioned advisory artifact. It is **advisory parity**: finished text deliverables, not code-executing implement/deploy (that is a separate, deferred execution expansion). Specifics:
 
 - **Off by default** (`SQUAD_MCP_REMOTE_PIPELINE_ENABLED=false`); the default remote surface is the advisory hero tools. Enabling the async pipeline requires a durable run-state backend.
-- **Full cast + routing.** Requests are routed to the real roster roles (researcher → lead → council members → tester) resolved from the immutable hve-squad `v0.19.0-pre` snapshot (its package manifest declares `0.18.1`), including the split roster catalog and inert model-routing references. See [host/cast](host/cast/README.md) for provenance. The council synthesizes a most-restrictive-wins Council Verdict (Go / Go-With-Conditions / Stop). It honors `mode` (interactive pauses per stage; `autopilot`/`autonomous` run to one compiled artifact).
+- **Full cast + routing.** Requests are routed to the real roster roles (researcher → lead → council members → tester) resolved from the SHA-pinned 91-agent `microsoft/hve-squad@0.22.0` cast bundle (including the split roster catalog, shared responsible-use policy, and inert model-routing references); the council is task-fit (one seat per lens the request touches) and synthesizes a most-restrictive-wins Council Verdict (Go / Go-With-Conditions / Stop). It honors `mode` (interactive pauses per stage; `autopilot`/`autonomous` run to one compiled artifact). See [host/cast](host/cast/README.md) for provenance.
 - **Copilot upstream execution and user-selected routing.** With `SQUAD_MCP_STAGE_EXECUTOR=copilot`, newly initialized projects use the full immutable upstream coordinator/skill bundle after explicit user Init. Users choose **ranked**, **economy**, or **manual fixed-model** routing; the chosen mode/model is persisted and retained across runs. Existing native projects remain native. `SQUAD_MCP_UPSTREAM_RUNTIME_ENABLED=false` disables the expansion. Native model selection remains unchanged: `SQUAD_MCP_COPILOT_ROUTING` defaults to `off`. See [upstream operator guidance](host/RUNBOOK.md#full-upstream-copilot-execution).
 - **Durable report completion.** Text-only report stages allow up to 32 tool calls, 16 model calls and 180 seconds (subject to lower operator limits), reserve the last two tool calls for saving and finishing, and point to current-run research and plan inputs. Product-owner handoffs use the run's `plans/<run-id>/handoff/` subtree rather than overwriting its Lead plan or evidence. Independent review preserves canonical evidence citations and truthful pending-review status without weakening substantive findings.
 
-The upstream expansion uses a separate byte-exact **97-skill, 1682-file** bundle
-at `a8d863a9715f0738f69711421b1897269911f68f`. It runs named upstream PowerShell
+The upstream expansion uses a separate byte-exact **107-skill, 1743-file** `microsoft/hve-squad@v0.22.0` bundle
+at `a8cc33d5973fb00f7f47ddb069d26db8fd8eed5f`. It runs named upstream PowerShell
 procedures through an isolated, hash-verified storage bridge, with exact source
 coverage for critique, final-artifact review, scoped correction/rereview and
 durable human-input continuation. Use the [full Linux sandbox](host/sandbox/README.md#full-upstream-execution),
@@ -113,6 +113,37 @@ The server surfaces it on the two catch-all entry points — a `discovery` input
 
 **The embedded path never runs it.** An unattended run has nobody to interview, so no offer is made, an explicit `discovery=` is ignored rather than honored (and logged as `discovery_ignored_unattended`), and the caller's payload becomes the intake gate's input instead. The unattended path is therefore never ungated — it is gated by validation rather than by ideation, the only one of the two it can honestly perform.
 
+### Task-fit council
+
+`hve-squad@0.18.0` replaced the fixed four-role council quorum with a **task-fit** council. Each lens the work touches maps to one role, and only those roles are dispatched:
+
+| Lens | Role | Dispatched when the request touches… |
+| --- | --- | --- |
+| Architecture | `architect` | structure, components, integration, or topology |
+| Security | `security` | identity, secrets, exposure, threats, or regulated data |
+| Cost | `cost-manager` | billable resources, budget, pricing, or FinOps |
+| Product-fit | `product-owner` | scope, user-facing behavior, priorities, or acceptance criteria |
+| RAI | `rai` | AI/ML behavior, model selection, training data, or agent autonomy |
+
+The trigger is two or more of the first four lenses, or **any** responsible-AI concern on its own. A council can therefore be two roles, all five, or `rai` alone. The Council Verdict lists every lens left out under `Council Members Not Proposed` with its reason, so a narrow council stays auditable.
+
+The **embedded/advisory pipeline** (`squad_run`) applies the same sizing in `route()`. When a needed council role is not in the seeded profile, the pipeline does not dispatch a partial council or synthesize a verdict for a lens it did not dispatch. Instead it records a `## Council Extension` section that names the roles to add (`full` seeds every council role) and continues to review, because the advisory pipeline has no implement stage to gate. In the **delegated** path, the coordinator persona carries the upstream contract: offer a missing role as a council extension, and treat a user's `## Council Waiver` as satisfying the Implementation Gate for that topic, never a Risk Gate.
+
+### Model routing and workflow controls
+
+`hve-squad@0.18.0` added per-role model routing, and `hve-squad@0.19.0`–`0.21.0` added `economy` routing, per-turn workflow `depth`, nine domain `pack` add-ons, and Contract 1.1 `execution` connector selection:
+
+- **`routing`** (`off`, `ranked`, `economy`, or `manual` on **`squad_run`** and **`squad_federate`**) — forwarded verbatim on the **delegated** path and persisted as the `Model routing:` line in `team.md`. `ranked` selects each role's model capability-first from the squad model catalog; `economy` selects the lowest-priced qualified model within each role's floor after consent (with one `ranked` escalation after a failed review); `manual` asks the user to choose from the models the host can run; `off` dispatches with no model parameter. Omit it to keep the recorded mode.
+- **`depth`** (`quick` or `standard` on **`squad_run`** and **`squad_federate`**) — per-turn workflow depth (`hve-squad@0.20.0+`). Controls how much work runs (bounded lane, shrink budgets, plan-driven parallelism), never which model runs, and never skips review, council, intake, or human gates.
+- **`pack`** (`power-platform`, `m365-copilot`, `aws`, `foundry`, `fabric`, `dotnet`, `aks`, `azure-functions`, `azure-cloud` on **`squad_run`** and **`squad_federate`**) — comma-separated add-on pack hint(s) layered onto any of the eleven squad profiles (`default`, `full`, `security`, `design`, `accessibility`, `architecture`, `azure`, `modernization`, `compliance`, `operations`, `product`).
+- **`execution`** (`original`, `connector:<binding-id>`, or `both` on **`squad_run`** and **`squad_federate`**) — post-classification connector selection against `team.md` `## Connector Bindings` (Contract 1.1); Coordinator, Scribe, and Council always stay internal.
+
+The **embedded** path runs unattended on the operator-configured backend, so it ignores `routing`, `depth`, `pack`, and `execution` and logs `*_ignored_unattended`.
+
+### Responsible use and no-reporting safeguards
+
+`hve-squad@0.22.0` introduced a canonical policy (`squad/references/responsible-use.md`, bundled under `host/cast/.github/skills/squad/references/responsible-use.md`) shared across every Squad entrypoint and forwarded to isolated workers: assistance is scoped to authorized software-engineering work (never professional advice, high-consequence deployment authorization, or independent consequential decisions about people), human approval and `Stop` gates cannot be waived by an agent or council, source/retrieved/tool outputs stay read-only data, local accounting never phones home, and opted-in notifications carry only scrubbed payloads with in-chat fallback.
+
 ## Execution model — delegated (local VS Code)
 
 The Step 0.1 delegated-drive spike validated this path (Question A = PASS): VS Code Copilot auto-invokes the tool and drives its own in-host dispatch loop. The spike was a disposable de-risking exercise; it is **not** shipped with the package (it is git-ignored — see `.gitignore`). In the delegated (local) mode the server runs **no model**; it returns:
@@ -193,7 +224,7 @@ The package never writes your `.vscode/mcp.json` — the template is an example 
 
 ## The manifest generator (drift check)
 
-`generators/build-manifests.ts` reads the authored catalog plus the deployed squad sources — `squad-routing.instructions.md`, `squad-roster.instructions.md`, and the `*.agent.md` personas — all **read-only**, validates them against each other, and emits the runtime descriptor `generated/mcp-tools.schema.json`.
+`generators/build-manifests.ts` reads the authored catalog plus the deployed squad sources — `squad-routing.instructions.md`, the roster Cast Catalog (`skills/squad/references/roster-catalog.md` since `hve-squad@0.18.0`; `squad-roster.instructions.md` before it), and the `*.agent.md` personas — all **read-only**, validates them against each other, and emits the runtime descriptor `generated/mcp-tools.schema.json`.
 
 The build **fails (exit non-zero)** when a catalog tool maps to a routing intent that is not a real routing row, or to a role/council agent that is not an installed agent. Run it with `npm run generate`; wire it into CI to catch catalog/cast drift.
 

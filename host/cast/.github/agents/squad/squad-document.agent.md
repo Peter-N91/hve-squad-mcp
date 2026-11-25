@@ -5,8 +5,14 @@ user-invocable: true
 disable-model-invocation: false
 argument-hint: "request=... [format={md|html|pdf|docx}] [outputPath=<path>] [squad=<name>]"
 ---
+<!--
+Copyright (c) Microsoft Corporation.
+Licensed under the MIT license.
+-->
 
 # Squad Document
+
+Read installed `squad/references/responsible-use.md` once.
 
 Search squad state — decisions, history, routing, roster, and any documentation under `docs/` — to answer a question or produce a focused document. The caller supplies a request in natural language; this agent finds the relevant artifacts, synthesizes a grounded answer, and writes it to a local file in the requested format.
 

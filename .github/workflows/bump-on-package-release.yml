@@ -39,7 +39,7 @@ permissions:
   contents: read
 
 env:
-  PACKAGE_REPO: Peter-N91/hve-squad
+  PACKAGE_REPO: microsoft/hve-squad
 
 jobs:
   bump:
@@ -55,18 +55,20 @@ jobs:
           persist-credentials: false
 
       - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
 
       - name: Install dependencies
         run: npm ci
 
-      # Reading a private package repo needs a PAT; the job token cannot see it.
+      # Both microsoft/hve-squad and microsoft/hve-core are public. Use the Actions
+      # job token rather than PACKAGE_SYNC_TOKEN here so a personal token lacking
+      # SAML SSO authorization for the microsoft organization cannot 403 public reads.
       - name: Resolve the target version
         id: target
         env:
-          GH_TOKEN: ${{ secrets.PACKAGE_SYNC_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
           INPUT_VERSION: ${{ inputs.version }}
           DISPATCH_VERSION: ${{ github.event.client_payload.version }}
         run: |
@@ -82,11 +84,12 @@ jobs:
             exit 1
           fi
           CUR=$(jq -r '.version' host/cast/package-pin.json)
+          CUR_PKG=$(jq -r '.package' host/cast/package-pin.json)
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "current=$CUR" >> "$GITHUB_OUTPUT"
-          if [ "$CUR" = "$V" ]; then
+          if [ "$CUR" = "$V" ] && [ "$CUR_PKG" = "$PACKAGE_REPO" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Already pinned to $V."
+            echo "Already pinned to $PACKAGE_REPO@$V."
             exit 0
           fi
           HIGH=$(printf '%s\n%s\n' "$CUR" "$V" | sort -V | tail -n1)
@@ -100,12 +103,12 @@ jobs:
       - name: Bump the pin and refresh the bundled cast
         if: steps.target.outputs.skip != 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.PACKAGE_SYNC_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
           TARGET: ${{ steps.target.outputs.version }}
         run: |
           set -euo pipefail
           tmp=$(mktemp)
-          jq --arg v "$TARGET" '.version = $v' host/cast/package-pin.json > "$tmp"
+          jq --arg pkg "$PACKAGE_REPO" --arg v "$TARGET" '.package = $pkg | .version = $v' host/cast/package-pin.json > "$tmp"
           mv "$tmp" host/cast/package-pin.json
           # The snapshot fails when the tag does not declare this version, so a
           # mistyped or moved tag stops here rather than producing a bundle

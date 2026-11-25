@@ -3,10 +3,8 @@ bump: minor
 type: Added
 ---
 
-- Pin HVE Squad v0.19.0-pre to immutable commit
-  5408860baaa91f92b23da2fb31509f0325928a05, whose package manifest declares
-  0.18.1. Bundle inert roster/model-routing references and load the split roster
-  catalog consistently in runtime routing, profiles and manifest generation.
+- Bundle inert roster and model-routing references under `.github/skills/squad/references/`
+  and load the split roster catalog consistently in runtime routing, profiles and manifest generation.
   Native orchestration remains authoritative; upstream PowerShell skills are
   not executed.
 - Add opt-in Copilot economy model routing through

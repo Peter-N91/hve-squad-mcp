@@ -18,9 +18,10 @@
  * value of the wrong type — an unparseable blob degrades to "no extra inputs",
  * which is exactly the pre-existing behavior.
  *
- * `discovery` is deliberately absent: only the attended delegated path runs the
- * discovery gate, and every run persisted here is unattended, so storing the input
- * would imply a resumed run might honor it.
+ * `discovery`, `pack`, `execution`, `routing`, and `depth` are deliberately
+ * absent: only the attended delegated path honors those host-coordinator
+ * controls, and every run persisted here is unattended, so storing them would
+ * imply a resumed run might honor them.
  */
 import type { CoordinatorRequest } from "./coordinator-engine.js";
 import { parseBrdReview, type BrdReviewRequest } from "./brd-review.js";

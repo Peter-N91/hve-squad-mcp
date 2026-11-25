@@ -3,16 +3,18 @@ name: sql-migration-advisor
 description: "Legacy compatibility fallback for SQL Server-to-Azure migration recommendations in HVE Squad. Use only when the preferred `recommend-migration-path` skill from the `sql-migration-advisor` plugin is unavailable. Runs a guided interview and recommends a target, method, downtime class, blockers, remediations, cost levers and Microsoft program fit. It cannot produce the plugin's prerequisite readiness plan."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "2.0"
-  last_updated: "2026-08-18"
-  skill_based_on: "fredgis/sql-migration-advisor (MIT)"
+  last_updated: "2026-11-16"
+  skill_based_on: "microsoft/microsoft-sql (MIT)"
 ---
 
 # SQL Migration Advisor — best path to Azure
 
+Read installed `squad/references/responsible-use.md` once.
+
 > **Compatibility fallback.** `Squad SQL Migration Advisor` prefers the upstream
-> `recommend-migration-path` plugin skill. Use this bundled copy only when that skill is unavailable,
+> `recommend-migration-path` skill from `microsoft/microsoft-sql` (`plugins/microsoft-sql-migration`). Use this bundled copy only when that skill is unavailable,
 > and do not use it to produce a prerequisite readiness plan.
 
 Help the user choose the **best migration path** for a SQL Server environment by
@@ -20,17 +22,17 @@ running a **short guided interview** and then producing a **grounded, determinis
 recommendation** (target + method + downtime + blockers + cost + program).
 
 This skill is **sourced from the knowledge base**
-[`docs/sql-server-to-azure-migration.md`](https://github.com/fredgis/sql-migration-advisor/blob/main/docs/sql-server-to-azure-migration.md)
+[`plugins/microsoft-sql-migration/skills/recommend-migration-path/references/knowledge-base.md`](https://github.com/microsoft/microsoft-sql/blob/eeb1c6867c2d128763516a1aad41671c593cc189/plugins/microsoft-sql-migration/skills/recommend-migration-path/references/knowledge-base.md)
 (FY27 SQL Motion, "SQL in a Day"). It mirrors the **AI Migration Agent I/O contract** in §14 of that doc.
 
-> Adapted for the HVE squad from [fredgis/sql-migration-advisor](https://github.com/fredgis/sql-migration-advisor) under the MIT License. Copyright notice retained per license terms.
+> Adapted for the HVE squad from [microsoft/microsoft-sql](https://github.com/microsoft/microsoft-sql) under the MIT License. Copyright notice retained per license terms.
 
 ## Source of truth (read this first)
 
-The **authoritative source** for every recommendation is the live document above. At the
+The **authoritative source** for every recommendation is the pinned official document above. At the
 start of a session, **fetch it** and use it as the ground truth:
 
-- Raw URL: `https://raw.githubusercontent.com/fredgis/sql-migration-advisor/main/docs/sql-server-to-azure-migration.md`
+- Raw URL: `https://raw.githubusercontent.com/microsoft/microsoft-sql/eeb1c6867c2d128763516a1aad41671c593cc189/plugins/microsoft-sql-migration/skills/recommend-migration-path/references/knowledge-base.md`
 - Use whatever fetch capability is available (e.g. the `fetch_webpage` tool, or `curl`/`Invoke-WebRequest`
   via a shell). Prefer the live doc so version gates, retirements and previews are always current.
 - **Fallback:** if the doc can't be fetched (offline / no network), use the bundled
@@ -75,7 +77,7 @@ start of a session, **fetch it** and use it as the ground truth:
    **next assessment tool to run**, the **blockers + remediations**, and the **cost +
    program** lines.
 6. **Offer follow-ups:** a per-database table for several DBs, a runbook outline, or a
-   one-slide summary (hand off to the `powerpoint` skill).
+   one-slide summary (slide production is out of scope: the `powerpoint` skill was removed upstream at hve-core f425e94; the report stays a Markdown deliverable).
 
 ## The questionnaire (ask one at a time)
 
@@ -221,4 +223,4 @@ SSAS → AAS / Power BI · SQL Agent → native (MI) / Elastic Jobs (SQL DB) · 
 - This skill is **advisory only.** It never runs data movement, schema migration, cutover, or
   deployment steps; those hand off to the appropriate execution role.
 
-> Brought to you by Peter-N91/hve-squad
+> Brought to you by microsoft/hve-squad

@@ -1,5 +1,5 @@
 {
-  "package": "Peter-N91/hve-squad",
-  "ref": "v0.19.0-pre",
-  "commit": "a8d863a9715f0738f69711421b1897269911f68f"
+  "package": "microsoft/hve-squad",
+  "ref": "v0.22.0",
+  "commit": "a8cc33d5973fb00f7f47ddb069d26db8fd8eed5f"
 }

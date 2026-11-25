@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
-# Copyright (c) 2026 Microsoft Corporation. All rights reserved.
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT license.
 # SPDX-License-Identifier: MIT
 #Requires -Version 7.0
 
@@ -9,6 +10,7 @@
     the shipped `references/consumption-rates-template.md`, so no model ever authors
     a rate table.
 .DESCRIPTION
+    AI cost: none; copies or validates the shipped rate template locally, with no pricing API call.
     `consumption-rates.md` is the only source of token rates, and the template says it
     is copied verbatim. A model asked to do that copy has instead invented rows (a
     `gpt-4o` table) or written a tier-fallback table with no per-model table at all,
@@ -37,21 +39,16 @@
     covering fast, default, and extended, a dispatch-size estimator, and a calibration
     yaml block with its five keys.
 
-    Exit code 0 means the file was seeded, or already valid, or passed -Check. Exit 7 means
-    refused: the squad is not under `Model routing: economy`, so nothing was read or written
-    and the Scribe seeds the table by hand as in v0.18.1. Any other outcome exits 1 after
-    naming what failed.
-
-    Economy only (references/economy-mode.md): the mode is the `Model routing:` line in
-    `<SquadRoot>/team.md`; during Init, before `team.md` exists, it is -Mode, which the
-    Scribe copies from the initialization payload.
+    Exit code 0 means the file was seeded, or already valid, or passed -Check.
+    Any other outcome exits 1 after naming what failed. Seeding and validation are
+    available in every routing mode.
 .PARAMETER SquadRoot
     A squad root: `.copilot-tracking/squad/` or a member root such as
     `.copilot-tracking/squad/members/<name>/`. Seed mode creates it when missing;
     -Check requires `consumption-rates.md` to exist.
 .PARAMETER Mode
-    The routing mode, consulted only while `<SquadRoot>/team.md` does not exist (Init).
-    Anything but `economy` refuses with exit 7. Defaults to `off`.
+    Accepted for backward compatibility with existing Init callers. Routing mode
+    does not change rate seeding or validation.
 .PARAMETER TemplatePath
     Override for the template file. Defaults to the shipped
     `references/consumption-rates-template.md` beside this script's skill.
@@ -74,6 +71,8 @@
     ./Initialize-SquadConsumptionRates.ps1 -SquadRoot .copilot-tracking/squad/members/product -Reseed
 #>
 [CmdletBinding()]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Mode',
+    Justification = 'Retained for backward compatibility; rate seeding is routing-independent.')]
 param(
     [Parameter(Mandatory)]
     [string]$SquadRoot,
@@ -340,11 +339,21 @@ function Get-ExistingOperatorRow {
     .SYNOPSIS
         Rows of the existing file's per-model table that the template does not list. Only a
         table with every structural column is read; any other shape carries no operator rows.
+        Historical retired rows (`—` Model ID with `(retired)`) and rows whose Model ID is
+        already governed by the template under a newer display name are skipped on reseed.
     #>
     param([string]$ExistingContent, [string]$SeedBlock)
 
     if (-not $ExistingContent) { return @() }
     $templateRates = Get-TemplateModelRates -SeedBlock $SeedBlock
+    $templateIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($tTable in (Get-MarkdownTableLocal -Content $SeedBlock)) {
+        if ('Model ID' -notin $tTable.Header) { continue }
+        foreach ($tRow in $tTable.Rows) {
+            $tid = ([string]$tRow['Model ID']).Trim()
+            if ($tid -and $tid -ne '—') { [void]$templateIds.Add($tid) }
+        }
+    }
     $table = @(Get-MarkdownTableLocal -Content $ExistingContent | Where-Object {
             $header = $_.Header
             'Model (as routed)' -in $header -and @($RateColumns + 'Model ID' + 'Tier' | Where-Object { $_ -notin $header }).Count -eq 0
@@ -353,7 +362,9 @@ function Get-ExistingOperatorRow {
 
     @($table.Rows | Where-Object {
             $name = $_['Model (as routed)']
-            $name -and $name -notmatch '^\(additional\)' -and -not $templateRates.ContainsKey($name)
+            $idCell = ([string]$_['Model ID']).Trim()
+            $isRetiredPlaceholder = ($idCell -eq '—' -and $name -match '(?i)\(retired\)$')
+            $name -and $name -notmatch '^\(additional\)' -and -not $templateRates.ContainsKey($name) -and -not $isRetiredPlaceholder -and -not $templateIds.Contains($idCell)
         })
 }
 
@@ -392,22 +403,13 @@ function Write-Findings {
     if ($Result.Failures.Count -eq 0) { Write-Host "OK: $Path passes the consumption-rates shape check." }
 }
 
+if ($MyInvocation.InvocationName -eq '.') { return }
+
 if ($Check -and $Reseed) { throw '-Check is read-only and cannot be combined with -Reseed.' }
 
 # Resolve against the PowerShell location: .NET file APIs use the process directory, which Set-Location does not change.
 $SquadRoot = $PSCmdlet.GetUnresolvedProviderPathFromPSPath($SquadRoot)
 $TemplatePath = $PSCmdlet.GetUnresolvedProviderPathFromPSPath($TemplatePath)
-
-$teamPath = Join-Path -Path $SquadRoot -ChildPath 'team.md'
-$effectiveMode = $Mode
-if (Test-Path -LiteralPath $teamPath -PathType Leaf) {
-    $modeMatch = [regex]::Match([System.IO.File]::ReadAllText($teamPath), '(?m)^Model routing:\s*`?(?<mode>off|ranked|economy|manual)`?\s*$')
-    $effectiveMode = if ($modeMatch.Success) { $modeMatch.Groups['mode'].Value } else { 'off' }
-}
-if ($effectiveMode -ne 'economy') {
-    [Console]::Error.WriteLine("Initialize-SquadConsumptionRates: refused: the squad routes as '$effectiveMode', not economy. Scripted rate seeding is economy-only; the Squad Scribe seeds consumption-rates.md itself.")
-    exit 7
-}
 
 $seedBlock = Get-TemplateSeedBlock -Path $TemplatePath
 $target = Join-Path -Path $SquadRoot -ChildPath 'consumption-rates.md'

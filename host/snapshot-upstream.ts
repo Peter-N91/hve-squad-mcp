@@ -25,8 +25,13 @@ export function verifyGitBlob(bytes: Uint8Array, expected: string): void {
 }
 
 async function fetchBytes(url: string): Promise<Buffer> {
+  const token = (process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? "").trim();
+  const auth = token.length > 0 ? { Authorization: `Bearer ${token}` } : {};
   for (let attempt = 0; attempt < 3; attempt++) {
-    const response = await fetch(url, { signal: AbortSignal.timeout(60_000), headers: { Accept: "application/vnd.github+json" } });
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(60_000),
+      headers: { Accept: "application/vnd.github+json", "User-Agent": "hve-squad-mcp-snapshot", ...auth },
+    });
     if (response.ok) return Buffer.from(await response.arrayBuffer());
     if (response.status < 500 && response.status !== 429) throw new Error(`Upstream snapshot GET ${url}: HTTP ${response.status}`);
     if (attempt === 2) throw new Error(`Upstream snapshot GET ${url}: HTTP ${response.status}`);

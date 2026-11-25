@@ -1,6 +1,6 @@
 # Contributing to hve-squad-mcp
 
-This repository ships the **outbound** MCP server for [hve-squad](https://github.com/Peter-N91/hve-squad): the squad's own server, which other hosts consume. Contributions reach consumers through a fork and pull request against this repository.
+This repository ships the **outbound** MCP server for [hve-squad](https://github.com/microsoft/hve-squad): the squad's own server, which other hosts consume. Contributions reach consumers through a fork and pull request against this repository.
 
 1. Fork the repository and create a branch.
 2. Make your change, and add a change fragment describing it (see [Recording your change](#recording-your-change)).

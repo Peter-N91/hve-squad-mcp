@@ -476,12 +476,61 @@ export class EmbeddedCoordinator {
     }
   }
 
+  /**
+   * Log any attended-only prompt controls supplied on an unattended embedded turn.
+   *
+   * `discovery` interviews a human; `pack`, `execution`, `routing`, and `depth`
+   * belong to the host coordinator's local roster, connector, and dispatch-plan
+   * contracts (`squad-discovery-gate.instructions.md`, `profiles-and-packs.md`,
+   * `connector-role-modes.md`, `model-routing.md`, `quick-depth.md`).
+   */
   private decrementHeld(tenantId: string): void {
     const current = this.heldCounts.get(tenantId) ?? 0;
     if (current <= 1) {
       this.heldCounts.delete(tenantId);
     } else {
       this.heldCounts.set(tenantId, current - 1);
+    }
+  }
+
+  /**
+   * Log any attended-only prompt controls supplied on an unattended embedded turn.
+   *
+   * `discovery` interviews a human; `pack`, `execution`, `routing`, and `depth`
+   * belong to the host coordinator's local roster, connector, and dispatch-plan
+   * contracts (`squad-discovery-gate.instructions.md`, `profiles-and-packs.md`,
+   * `connector-role-modes.md`, `model-routing.md`, `quick-depth.md`).
+   */
+  private logIgnoredUnattendedControls(toolId: string, request: CoordinatorRequest): void {
+    if (request.discovery) {
+      this.logger?.info("discovery_ignored_unattended", {
+        toolId,
+        requested: request.discovery,
+      });
+    }
+    if (request.pack) {
+      this.logger?.info("pack_ignored_unattended", {
+        toolId,
+        requested: request.pack,
+      });
+    }
+    if (request.execution) {
+      this.logger?.info("execution_ignored_unattended", {
+        toolId,
+        requested: request.execution,
+      });
+    }
+    if (request.routing) {
+      this.logger?.info("routing_ignored_unattended", {
+        toolId,
+        requested: request.routing,
+      });
+    }
+    if (request.depth) {
+      this.logger?.info("depth_ignored_unattended", {
+        toolId,
+        requested: request.depth,
+      });
     }
   }
 
@@ -495,6 +544,10 @@ export class EmbeddedCoordinator {
    * made, an explicit depth is ignored rather than honored, and the caller's
    * payload becomes the intake gate's input instead. An unattended run is gated by
    * validation, not by ideation.
+   *
+   * `request.routing` is ignored for the same reason: per-role model routing is
+   * a `team.md` decision the host's coordinator owns (and `manual` interviews the
+   * user), while this path runs on the operator-configured backend.
    */
   async handle(
     tool: CatalogTool,
@@ -506,12 +559,7 @@ export class EmbeddedCoordinator {
     }
     const matchedRouting = toMatchedRouting(tool);
     const tenantId = ctx.auth.tenantId;
-    if (request.discovery) {
-      this.logger?.info("discovery_ignored_unattended", {
-        toolId: tool.id,
-        requested: request.discovery,
-      });
-    }
+    this.logIgnoredUnattendedControls(tool.id, request);
 
     // SEC-9 / COST-1 / COST-2 — admit under quota before any work.
     const admit = this.quota.acquire(tenantId);
@@ -1002,6 +1050,7 @@ export class EmbeddedCoordinator {
   ): Promise<EmbeddedResult> {
     const matchedRouting = toMatchedRouting(tool);
     const tenantId = ctx.auth.tenantId;
+    this.logIgnoredUnattendedControls(tool.id, request);
 
     const admit = this.quota.acquire(tenantId);
     if (!admit.ok) {

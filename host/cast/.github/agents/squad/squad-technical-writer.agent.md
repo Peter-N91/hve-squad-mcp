@@ -2,10 +2,16 @@
 name: Squad Technical Writer
 description: "Non-user-invocable squad documentation author that runs the documentation skill to author and maintain project documentation for a squad deliverable"
 user-invocable: false
-model: Claude Haiku 4.5 (copilot)
+model: Claude Haiku 5.5 (copilot)
 ---
+<!--
+Copyright (c) Microsoft Corporation.
+Licensed under the MIT license.
+-->
 
 # Squad Technical Writer
+
+Read installed `squad/references/responsible-use.md` once.
 
 Author or update project documentation as a squad deliverable. Run the `documentation` skill against the assigned scope and return a structured outcome the Squad Coordinator can hand to the Squad Scribe.
 

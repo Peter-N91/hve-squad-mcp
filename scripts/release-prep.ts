@@ -153,13 +153,21 @@ export function renderSection(
 }
 
 /** Insert a section immediately above the first existing release heading. */
-export function insertSection(changelog: string, section: string): string {
+export function insertSection(changelog: string, section: string, pkg?: string): string {
+  const rewritePreamble = (text: string): string =>
+    pkg
+      ? text.replace(
+          /\[hve-squad\]\(https:\/\/github\.com\/[^/)]+\/hve-squad\)/g,
+          `[hve-squad](https://github.com/${pkg})`,
+        )
+      : text;
   const lines = changelog.split(/\r?\n/);
   const at = lines.findIndex((line) => /^## \[/.test(line));
   if (at < 0) {
-    return `${changelog.replace(/\s*$/, "")}\n\n${section}`;
+    return `${rewritePreamble(changelog).replace(/\s*$/, "")}\n\n${section}`;
   }
-  return [...lines.slice(0, at), ...section.split("\n"), ...lines.slice(at)].join("\n");
+  const preamble = rewritePreamble(lines.slice(0, at).join("\n")).split("\n");
+  return [...preamble, ...section.split("\n"), ...lines.slice(at)].join("\n");
 }
 
 function currentVersion(): string {
@@ -248,7 +256,8 @@ export function runCli(argv: string[]): number {
     ? resolveTarget(args.version, previous)
     : nextVersion(previous, args.bump ?? resolveBump(fragments));
   const date = new Date().toISOString().slice(0, 10);
-  const section = renderSection(version, date, fragments, castPin());
+  const pin = castPin();
+  const section = renderSection(version, date, fragments, pin);
 
   process.stdout.write(`${section}\n`);
   process.stdout.write(`Version: ${previous} -> ${version} (${args.bump ?? resolveBump(fragments)})\n`);
@@ -266,7 +275,7 @@ export function runCli(argv: string[]): number {
     return 0;
   }
 
-  writeFileSync(CHANGELOG, insertSection(readFileSync(CHANGELOG, "utf8"), section), "utf8");
+  writeFileSync(CHANGELOG, insertSection(readFileSync(CHANGELOG, "utf8"), section, pin?.pkg), "utf8");
   for (const fragment of fragments) {
     rmSync(join(FRAGMENT_DIR, fragment.file), { force: true });
   }

@@ -3,16 +3,20 @@ name: squad-federation-templates
 description: "Federation-root seed templates: routing, decisions, state, aggregate rate table, and autopilot meta-run summary."
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-08-14"
 ---
+<!--
+Copyright (c) Microsoft Corporation.
+Licensed under the MIT license.
+-->
 
 # Squad Federation Seed Templates
 
 ## Federation Seed Templates
 
-The Squad Federation Coordinator hands these templates to the Squad Scribe when it creates a federation. `federation.md`, `meta-routing.md`, `state.json`, and the root `consumption-rates.md` use replace semantics; `decisions.md` and `history/<sub-squad>.md` are append-only. Each `members/<name>/` sub-squad receives the ordinary templates rooted at `members/<name>/`.
+The Squad Federation Coordinator uses these templates when it creates or expands a federation. Supported promotion uses `Promote-SquadFederation.ps1`; fresh Init and additive Expansion use `Initialize-SquadFederation.ps1`. `federation.md`, `meta-routing.md`, `state.json`, and the root `consumption-rates.md` use replace semantics; Expansion preserves existing table bytes and appends new rows through the validated transaction. `decisions.md` and `history/<sub-squad>.md` are append-only. Each `members/<name>/` sub-squad receives the ordinary templates rooted at `members/<name>/`.
 
 ### federation.md
 
@@ -66,7 +70,7 @@ Entries are appended below in chronological order. Each entry records which sub-
 
 ### state.json (federation root)
 
-Machine-readable federation status. Replace semantics — the Scribe overwrites it as the federation advances.
+Machine-readable federation status. Replace semantics — validated federation writers or the Scribe overwrite it as the federation advances.
 
 ```json
 {

@@ -3,12 +3,18 @@ name: azure-scaffold
 description: 'Documentation-only reference templates for the Azure execution layer a consumer repo needs to author IaC, deploy to Azure with OIDC, and govern infrastructure. Use when a squad agent or the coordinator scaffolds a dev container, OIDC setup script, Bicep/Terraform deploy workflows, a governance policy baseline, or the infra/ folder convention into a consumer repo. Templates never run from this package.'
 license: MIT
 metadata:
-  authors: "Peter-N91/hve-squad"
+  authors: "microsoft/hve-squad"
   spec_version: "1.0"
   last_updated: "2026-06-12"
 ---
+<!--
+Copyright (c) Microsoft Corporation.
+Licensed under the MIT license.
+-->
 
 # Azure Scaffold
+
+Read installed `squad/references/responsible-use.md` once.
 
 ## Overview
 
@@ -133,5 +139,5 @@ capability):
 
 ## Attribution
 
-Part of [hve-squad](https://github.com/Peter-N91/hve-squad), built on
+Part of [hve-squad](https://github.com/microsoft/hve-squad), built on
 [Microsoft HVE Core](https://github.com/microsoft/hve-core) agents and conventions.

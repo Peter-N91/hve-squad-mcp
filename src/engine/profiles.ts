@@ -54,7 +54,6 @@ export const DELIVERABLE_PRODUCING_ROLES: readonly string[] = [
   "product-owner",
   "designer",
   "experimenter",
-  "presenter",
   "technical-writer",
   "data-scientist",
 ];
@@ -207,7 +206,7 @@ export function parseCastCatalog(markdown: string): Map<string, CastCatalogRow> 
     t.headers.some((h) => h.toLowerCase().includes("primary agent")),
   );
   if (!table) {
-    throw new Error("Could not find the Cast Catalog table in squad-roster.instructions.md.");
+    throw new Error("Could not find the Cast Catalog table in roster-catalog.md.");
   }
   const roleIdx = table.headers.findIndex((h) => h.trim().toLowerCase() === "role");
   const primaryIdx = table.headers.findIndex((h) => h.toLowerCase().includes("primary agent"));
@@ -298,7 +297,7 @@ export interface DeliverableRootOptions {
  * Resolve the directory a role writes its deliverable into.
  *
  * Returns `undefined` for a role the roster deliberately omits — `cost-manager`,
- * `intake-validator` and friends hand a structured result back to the coordinator
+ * `fact-checker` and friends hand a structured result back to the coordinator
  * instead of writing a standalone artifact, so having no root is correct for them
  * rather than a gap.
  */

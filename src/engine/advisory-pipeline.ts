@@ -40,8 +40,14 @@
  */
 import { composeEmbeddedPrompt } from "./embedded-prompt.js";
 import { resolvePersonaForRole, resolvePersonaForRosterRole } from "./embedded-roles.js";
-import { runCouncil, resolveCouncilMembers, type CouncilDeps, type CouncilVerdict } from "./council.js";
-import { loadRosterMap, route, type RoutePlan } from "./routing.js";
+import {
+  renderCouncilExtension,
+  runCouncil,
+  resolveCouncilMembers,
+  type CouncilDeps,
+  type CouncilVerdict,
+} from "./council.js";
+import { loadRosterMap, route, type CouncilLensOmission, type RoutePlan } from "./routing.js";
 import type { RunCostLedger } from "./gates.js";
 import type { PersonaRecord } from "./persona-loader.js";
 import type { HumanInputRequest, PersistedCouncilVerdict, PersistedStageArtifact } from "./run-state.js";
@@ -93,6 +99,10 @@ export interface AdvisoryStagePlan {
   persona?: PersonaRecord;
   /** The resolved council members (for a `council` stage). */
   members?: PersonaRecord[];
+  /** Council roles to offer when the task-fit council is not fully seated (no members dispatch). */
+  extension?: string[];
+  /** Council lenses left out, rendered under `Council Members Not Proposed`. */
+  notProposed?: CouncilLensOmission[];
   /** True when this persona stage is the appended backlog-handoff. */
   backlog?: boolean;
   /** Restrict the single developer stage to producing a bounded text report. */
@@ -302,8 +312,10 @@ function resolveBacklogPersona(
  *
  * The intake gate is prepended only for a profile that seeds `intake-validator`
  * (`product`, `full`); the council is interleaved between plan and review only
- * when engaged; deliverable fan-out replaces the single Implement stage for a
- * profile carrying two or more deliverable-producing roles. Without fan-out,
+ * when it triggers — as a dispatched task-fit council when every needed role is
+ * seated, or as a non-dispatching council extension offer when one is not;
+ * deliverable fan-out replaces the single Implement stage for a profile
+ * carrying two or more deliverable-producing roles. Without fan-out,
  * the developer role produces a bounded, text-only report (no code execution or
  * edits) before Review. A research-only route stays a single research stage.
  * Stages whose persona cannot be resolved are dropped (never a silent wrong
@@ -354,8 +366,20 @@ export function planAdvisoryStages(
   if (plan.council.engaged) {
     const members = resolveCouncilMembers(plan, roots);
     if (members.length > 0) {
-      ordered.push({ kind: "council", role: "Council Verdict", members });
+      ordered.push({
+        kind: "council",
+        role: "Council Verdict",
+        members,
+        notProposed: [...plan.council.notProposed],
+      });
     }
+  } else if (plan.council.extension.length > 0) {
+    ordered.push({
+      kind: "council",
+      role: "Council Extension",
+      extension: [...plan.council.extension],
+      notProposed: [...plan.council.notProposed],
+    });
   }
 
   // Deliverable fan-out: the profile's specialists each own a distinct artifact.
@@ -530,10 +554,25 @@ export async function runAdvisoryPipeline(
 
     const stage = orderedPlan[i];
 
-    if (stage.kind === "council" && stage.members) {
+    if (stage.kind === "council" && stage.extension && stage.extension.length > 0) {
+      const markdown = renderCouncilExtension(stage.extension, stage.notProposed ?? []);
+      stages.push({ kind: "council", role: "Council Extension", section: markdown, text: markdown });
+      try {
+        await deps.persistence?.recordStage({ role: "Council Extension", artifact: markdown });
+        await deps.ledger?.recordDecision(markdown);
+      } catch (error) {
+        throw new AdvisoryStageFailure(stage.role, stages, error, "persistence");
+      }
+    } else if (stage.kind === "council" && stage.members) {
       let verdict: CouncilVerdict;
       try {
-        verdict = await runCouncil(stage.members, priorArtifact ?? "", request, councilDeps);
+        verdict = await runCouncil(
+          stage.members,
+          priorArtifact ?? "",
+          request,
+          councilDeps,
+          stage.notProposed ?? [],
+        );
       } catch (error) {
         if (!(error instanceof StageBlockedError)) throw new AdvisoryStageFailure(stage.role, stages, error);
         return {

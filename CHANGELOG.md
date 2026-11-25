@@ -5,10 +5,135 @@ All notable changes to the hve-squad-mcp server are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-This server is a companion to the [hve-squad](https://github.com/Peter-N91/hve-squad)
+This server is a companion to the [hve-squad](https://github.com/microsoft/hve-squad)
 APM package. Each release pins the squad cast it bundles to a specific package
 version, recorded in `host/cast/package-pin.json` and enforced by
 `npm run snapshot:cast`.
+
+## [0.11.0] - 2026-11-25
+
+> Built against `microsoft/hve-squad@0.22.0` (see `host/cast/package-pin.json`).
+
+### Changed
+
+- **Upstream package references still pointed at `Peter-N91/hve-squad` after the repository moved to `microsoft/hve-squad`.** Updated `PACKAGE_REPO` and public-read token handling in `.github/workflows/bump-on-package-release.yml` (so personal tokens without `microsoft` SAML SSO authorization cannot 403 public release lookups or cast snapshots, and pin bumps rewrite both `.package` and `.version`), updated `scripts/release-prep.ts` to refresh the `CHANGELOG.md` preamble link on release, and updated `NOTICE`, `CONTRIBUTING.md`, `README.md`, `site/_includes/footer.njk`, and the bilingual `docs/` pages to `microsoft/hve-squad`.
+- **Aligned the bundled cast and delegated coordinator with `microsoft/hve-squad@0.22.0`.** Re-pinned `host/cast/package-pin.json` to `microsoft/hve-squad@0.22.0` (`91` agent files across `90` named personas, `15` instruction files, and `3` skill references), bundled `skills/squad/references/responsible-use.md` via `host/snapshot-cast.ts` alongside `roster-catalog.md`, dropped the eight retired `Code Review *` subagents (`tester` now resolves directly to `Squad Reviewer`), and surfaced the shared responsible-use, approved-engineering-scope, read-only worker-data, and no-reporting safeguards across delegated turns (`host/cast/`, `host/snapshot-cast.ts`, `src/engine/persona.ts`, `src/engine/delegated.ts`, `test/cast-bundle.test.ts`, `test/delegated.test.ts`).
+
+### Consumer install
+
+Pin to this version:
+
+```powershell
+npm install "Peter-N91/hve-squad-mcp#v0.11.0"
+```
+
+[0.11.0]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.11.0
+
+## [0.10.0] - 2026-11-19
+
+> Built against `Peter-N91/hve-squad@0.21.0` (see `host/cast/package-pin.json`).
+
+### Changed
+
+- **The bundled cast lagged behind HVE Squad 0.21.0.** Re-pinned and regenerated
+  the cast from the immutable `v0.21.0` tag (`99` agent files across `98` named
+  personas). The snapshot resolver now bundles `skills/untrusted-content-boundary/SKILL.md`
+  after `microsoft/hve-core` relocated `untrusted-content-boundary.instructions.md`
+  into a skill directory, drops the retired `PowerPoint Builder` and `PowerPoint
+  Subagent` personas and `presenter` deliverable-producing role, recognizes
+  `intake-validator`'s `.copilot-tracking/reviews/` capture root, and advances
+  seeded `state.json` records to schema `1.4` (`host/cast/package-pin.json`,
+  `host/snapshot-cast.ts`, `host/cast/.github/`, `host/cast/manifest.json`,
+  `src/engine/profiles.ts`, `src/engine/squad-ledger.ts`).
+- **The tool catalog and delegated coordinator now mirror HVE Squad 0.21.0's
+  profiles, packs, `economy` routing, workflow `depth`, and connector `execution`
+  controls.** Every catalog tool now exposes all eleven squad profiles
+  (`default`, `full`, `security`, `design`, `accessibility`, `architecture`,
+  `azure`, `modernization`, `compliance`, `operations`, `product`), and
+  `squad_run` and `squad_federate` accept `routing=economy`, per-turn
+  `depth=quick|standard`, comma-separated `pack` hints across all nine registered
+  packs (`power-platform`, `m365-copilot`, `aws`, `foundry`, `fabric`, `dotnet`,
+  `aks`, `azure-functions`, `azure-cloud`), and Contract 1.1
+  `execution=original|connector:<binding-id>|both` choices — forwarded verbatim
+  on the attended delegated path and ignored with `*_ignored_unattended` logs on
+  the unattended embedded path (`tools.catalog.yml`, `src/router/router.ts`,
+  `src/engine/coordinator-engine.ts`, `src/engine/persona.ts`,
+  `src/engine/delegated.ts`, `src/engine/embedded.ts`, `generated/`,
+  `README.md`, `docs/`).
+
+### Consumer install
+
+Pin to this version:
+
+```powershell
+npm install "Peter-N91/hve-squad-mcp#v0.10.0"
+```
+
+[0.10.0]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.10.0
+
+## [0.9.1] - 2026-10-23
+
+> Built against `Peter-N91/hve-squad@0.18.1` (see `host/cast/package-pin.json`).
+
+### Changed
+
+- **Bumped the bundled cast pin from `0.18.0` to `Peter-N91/hve-squad@0.18.1`** and refreshed `host/cast/` from that release's `apm.yml`. This tracks a patch release upstream, so it carries the same level here.
+
+### Consumer install
+
+Pin to this version:
+
+```powershell
+npm install "Peter-N91/hve-squad-mcp#v0.9.1"
+```
+
+[0.9.1]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.9.1
+
+## [0.9.0] - 2026-10-05
+
+> Built against `Peter-N91/hve-squad@0.18.0` (see `host/cast/package-pin.json`).
+
+### Changed
+
+- **The bundled cast lagged behind HVE Squad 0.18.0.** Re-pinned and regenerated
+  the cast from the immutable `v0.18.0` tag. The bundle now carries the new
+  `HVE Demo Material Builder` agent, the refreshed coordinator, Scribe, council, routing,
+  and roster instructions, and the scribe hand-off pipelining, scripted ledger,
+  and model-routing contracts the deployed cast follows
+  (`host/cast/package-pin.json`, `host/cast/.github/`, `host/cast/manifest.json`).
+- **The router could not find the Cast Catalog after HVE Squad moved it.**
+  `hve-squad@0.18.0` moved the role-to-agent table out of
+  `squad-roster.instructions.md` into the squad skill's
+  `references/roster-catalog.md`. The snapshot now bundles that reference, and
+  routing, profile resolution, the generator, and the bundle drift test read it
+  through `rosterCatalogPath()`, falling back to the roster instructions for an
+  older install (`host/snapshot-cast.ts`, `src/paths.ts`, `src/engine/routing.ts`,
+  `src/engine/profiles.ts`, `generators/build-manifests.ts`).
+- **The advisory council required a fixed four-role quorum.** The council is now
+  task-fit: it seats one role per lens the request touches, triggers on any
+  responsible-AI concern as well as on two or more of the other lenses, and lists
+  every lens left out under `Council Members Not Proposed`. When a needed role is
+  not in the seeded profile, `squad_run` records a `## Council Extension` naming
+  the roles to add instead of a partial verdict. `rai` now matches only as a
+  whole word, so `raise` no longer reads as a responsible-AI concern
+  (`src/engine/routing.ts`, `src/engine/council.ts`,
+  `src/engine/advisory-pipeline.ts`, `src/engine/persona.ts`).
+- **`squad_run` and `squad_federate` accept the new `routing` input.** It mirrors
+  the `routing=off|ranked|manual` argument HVE Squad 0.18.0 added to `/squad`
+  and `/squad-federation`. The delegated path forwards it to the coordinator,
+  which persists it in `team.md`; the embedded path ignores it and logs
+  `routing_ignored_unattended` (`tools.catalog.yml`, `src/engine/delegated.ts`,
+  `src/engine/embedded.ts`, `generated/`).
+
+### Consumer install
+
+Pin to this version:
+
+```powershell
+npm install "Peter-N91/hve-squad-mcp#v0.9.0"
+```
+
+[0.9.0]: https://github.com/Peter-N91/hve-squad-mcp/releases/tag/v0.9.0
 
 ## [0.8.0] - 2026-09-21
 

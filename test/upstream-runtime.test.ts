@@ -27,7 +27,7 @@ import { UPSTREAM_SCRIPT_PIN } from "../src/engine/copilot/upstream-script-bridg
 import { selectUpstreamEconomyRoute, parseUpstreamRouting, type UpstreamRoutingSelection } from "../src/engine/copilot/upstream-coordinator.js";
 
 const bundle = installedUpstreamBundle();
-const models = ["gpt-5.4", "gpt-5.4-mini", "gpt-5.6-sol"];
+const models = ["claude-sonnet-5", "claude-haiku-5.5", "gpt-5.6-sol"];
 const ROOT = ".copilot-tracking/squad";
 const hash = (content: string | Uint8Array) => createHash("sha256").update(content).digest("hex");
 class Store implements SquadArtifactStore {
@@ -89,7 +89,7 @@ test("disabled and native projects do not select or mutate upstream schema", asy
 });
 
 for (const routing of [
-  { mode: "ranked" }, { mode: "economy" }, { mode: "manual", model: "gpt-5.4" },
+  { mode: "ranked" }, { mode: "economy" }, { mode: "manual", model: "claude-sonnet-5" },
 ] satisfies UpstreamRoutingSelection[]) {
   test(`explicit ${routing.mode} routing persists the chosen mode and verified roster models`, async () => {
     const f = fixture();
@@ -118,8 +118,8 @@ test("routing choices validate exact shape, inventory, floors and fit-first vers
   assert.equal(selectUpstreamEconomyRoute(catalog, routing, "developer", "default", candidates, { mode: "economy" }).model, "claude-sonnet-5");
   assert.equal(selectUpstreamEconomyRoute(catalog, routing, "developer", "default", candidates, { mode: "manual", model: "claude-sonnet-5" }).rankedModel, "claude-sonnet-5");
   assert.throws(() => prepareUpstreamRoster(bundle, "default", "2026-10-10", models, undefined, { mode: "manual", model: "absent" }), /unavailable|verified available/);
-  assert.throws(() => selectUpstreamEconomyRoute(catalog, routing, "developer", "extended", models, { mode: "manual", model: "gpt-5.4-mini" }), /unavailable|verified available/);
-  for (const input of [{ mode: "off" }, { mode: "manual" }, { mode: "ranked", model: "gpt-5.4" }, { mode: "economy", extra: true }]) {
+  assert.throws(() => selectUpstreamEconomyRoute(catalog, routing, "developer", "extended", models, { mode: "manual", model: "claude-haiku-5.5" }), /unavailable|verified available/);
+  for (const input of [{ mode: "off" }, { mode: "manual" }, { mode: "ranked", model: "gpt-6.1-terra" }, { mode: "economy", extra: true }]) {
     assert.throws(() => parseUpstreamRouting(input));
   }
 });
@@ -139,21 +139,21 @@ test("ranked/manual Scribe rates preserve the pinned cold seed, calibration and 
 
 test("unavailable proposed ranked models do not prevent the user choosing eligible manual routing", async () => {
   const f = fixture();
-  f.options.modelIds = ["claude-opus-5"];
-  f.options.coordinatorModel = "claude-opus-5";
+  f.options.modelIds = ["claude-opus-5.5"];
+  f.options.coordinatorModel = "claude-opus-5.5";
   f.options.confirmInitialization = undefined;
   await assert.rejects(createUpstreamRuntime(f.options), (error: unknown) => error instanceof StageInputRequired);
   assert.ok(f.checkpoints[0].proposal.routingUnavailable?.length);
-  assert.ok(f.checkpoints[0].proposal.availableManualModels?.includes("claude-opus-5"));
+  assert.ok(f.checkpoints[0].proposal.availableManualModels?.includes("claude-opus-5.5"));
   assert.equal(f.store.writes.length, 0);
   f.options.confirmInitialization = async proposal => ({
     confirmed: true, profile: proposal.profile, naming: "skip", approvalChannel: "in-chat", actor: "actual-user",
-    routingAccepted: true, routing: { mode: "manual", model: "claude-opus-5" },
+    routingAccepted: true, routing: { mode: "manual", model: "claude-opus-5.5" },
   });
   const selected = await createUpstreamRuntime(f.options);
   assert.equal(selected.selection, "upstream");
   if (selected.selection === "upstream") {
-    assert.deepEqual(selected.proposal.routing, { mode: "manual", model: "claude-opus-5" });
+    assert.deepEqual(selected.proposal.routing, { mode: "manual", model: "claude-opus-5.5" });
     assert.deepEqual(selected.proposal.routingUnavailable, []);
   }
 });
@@ -171,7 +171,7 @@ test("default roster and model picks come from complete upstream templates and e
   const proposal = prepareUpstreamRoster(bundle, "default", "2026-10-10", models);
   assert.deepEqual(proposal.roster.map(r => r.role), ["researcher", "lead", "developer", "tester", "scribe"]);
   assert.match(proposal.teamMarkdown, /Model routing: economy/);
-  assert.match(proposal.teamMarkdown, /Code Review Walkback/);
+  assert.match(proposal.teamMarkdown, /Codebase Profiler, Meeting Analyst/);
   assert.match(proposal.teamMarkdown, /\| Model Tier \| Model \| Deliverable Root \|/);
   assert.match(proposal.routingMarkdown, /Routing/);
   assert.ok(proposal.roster.every(r => bundle.paths().includes(r.charterPath)));
@@ -258,7 +258,7 @@ class LocalProcedurePort {
         utimesSync(dest, new Date(f.updatedAt), new Date(f.updatedAt));
       }
       const args = { ...p.args, SquadRoot: join(dir, ".copilot-tracking", "squad"),
-        ...(p.script === "Get-SquadDispatchBrief" ? { RepoRoot: bundle.root } : {}),
+        ...(p.script === "Get-SquadDispatchBrief" ? { RepoRoot: dir } : {}),
         ...(p.billingLog ? { SessionLog: join(this.root, "billing-events.jsonl") } : {}),
       };
       if (p.billingLog) {
@@ -686,7 +686,7 @@ test("final runtime billing projection includes post-finish coordinator charges 
 });
 
 for (const routing of [
-  { mode: "ranked" }, { mode: "economy" }, { mode: "manual", model: "gpt-5.4" },
+  { mode: "ranked" }, { mode: "economy" }, { mode: "manual", model: "claude-sonnet-5" },
 ] satisfies UpstreamRoutingSelection[]) {
   test(`real upstream scripts and executor preserve user-selected ${routing.mode} routing through final review`, { skip: !pwshAvailable }, async () => {
     const scratch = join(process.cwd(), ".upstream-runtime-tests-" + randomUUID());
@@ -801,12 +801,12 @@ test("Init held response resumes into real executor/scripts without replaying in
 });
 
 test("handoff payload supplies all required upstream fields rather than native history records", () => {
-  const payload = upstreamStageHandoff(undefined, { runId: "r", project: "project-a", model: "gpt-5.4", availableModels: models, stages: [], signal: new AbortController().signal }, {
-    model: "gpt-5.4", model_source: "dispatch-reported", priced_as: "gpt-5.4", model_tier: "default",
+  const payload = upstreamStageHandoff(undefined, { runId: "r", project: "project-a", model: "gpt-6.1-terra", availableModels: models, stages: [], signal: new AbortController().signal }, {
+    model: "gpt-6.1-terra", model_source: "dispatch-reported", priced_as: "gpt-6.1-terra", model_tier: "default",
     internal_turns: 1, input_tokens: 10, cached_tokens: 2, cache_write_tokens: 0, output_tokens: 4, basis: "estimated",
   });
   assert.equal(payload.script, "Write-SquadHandoff");
-  assert.deepEqual(payload.args.payload.stateAdvance, { activeRoles: [], sessionModel: "gpt-5.4" });
+  assert.deepEqual(payload.args.payload.stateAdvance, { activeRoles: [], sessionModel: "gpt-6.1-terra" });
 });
 
 for (const pause of ["coordinator", "child"] as const) {
@@ -1019,7 +1019,7 @@ test("actual fixed RPI Researcher SDK helper is read-only, validates lane contra
   };
   const options = {
     client, bundle, store: f.store, sessionState: f.options.sessionState, tenantId: "tenant-a", project: "project-a", runId: "run-a",
-    model: "gpt-5.4", maxModelCalls: 3, deadlineAt: Date.now() + 30000, signal: new AbortController().signal,
+    model: "gpt-6.1-terra", maxModelCalls: 3, deadlineAt: Date.now() + 30000, signal: new AbortController().signal,
   };
   await assert.rejects(runUpstreamCoreHelper(options, { ...request, parentSha256: "0".repeat(64) }), /actual parent primary/);
   await assert.rejects(runUpstreamCoreHelper(options, { ...request, outputPath: "docs/lane-one.md" }), /exact server-derived/);
@@ -1084,7 +1084,7 @@ test("actual pinned Squad Challenger plan critique must independently read the e
   };
   const result = await runUpstreamCoreHelper({
     client, bundle, store: f.store, sessionState: f.options.sessionState, tenantId: "tenant-a", project: "project-a", runId: "run-a",
-    model: "gpt-5.4", maxModelCalls: 3, deadlineAt: Date.now() + 30000, signal: new AbortController().signal,
+    model: "gpt-6.1-terra", maxModelCalls: 3, deadlineAt: Date.now() + 30000, signal: new AbortController().signal,
   }, {
     kind: "plan-critique", helperId: "critique-one", parentPath, parentSha256: hash(plan),
     outputPath: ".copilot-tracking/reviews/2026-10-10/critique-one.md", depth: "standard",

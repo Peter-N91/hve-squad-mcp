@@ -12,7 +12,7 @@ import {
 import type { UpstreamScriptName, UpstreamScriptRequest } from "../src/engine/copilot/upstream-script-bridge.js";
 
 const bundle = installedUpstreamBundle();
-const models = ["gpt-5.4", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-6.1-sol"];
+const models = ["gpt-6.1-terra", "gpt-5.6-sol", "gpt-6.1-sol"];
 const sha = (content: string) => createHash("sha256").update(content).digest("hex");
 type Call = (name: typeof UPSTREAM_COORDINATOR_TOOLS[number], args: Record<string, unknown>, success?: boolean) => Promise<Record<string, unknown>>;
 const report = "docs/report.md";
@@ -169,7 +169,7 @@ test("authentic upstream coordinator contract dynamically selects direct owner a
   assert.equal(h.stages[1].model, selectUpstreamEconomyRoute(catalog, routing, reviewer.role, reviewer.floor, models).rankedModel);
   assert.ok(h.stages.every(s => !s.allowNestedDelegation && s.maxModelCalls > 0));
   assert.equal(result.metadata.outcome, "accepted");
-  assert.equal(result.metadata.rolloutVersion, "0.19.0-pre");
+  assert.equal(result.metadata.rolloutVersion, "0.22.0");
   assert.equal(result.metadata.productionSmokeVerified, false);
   assert.equal(result.metadata.reports[0].sha256, sha(h.files.get(report)!.content));
   assert.equal(result.usage?.inputTokens, 211);
@@ -189,7 +189,7 @@ test("immutable readers are bounded and reject traversal, unknown tools/args, un
   const h = harness(async call => {
     const resources = await call("list_upstream_resources", {});
     assert.equal((resources.paths as string[]).length, 100);
-    assert.equal(resources.total, 1682);
+    assert.equal(resources.total, 1743);
     await call("read_upstream_resource", { path: ".github/skills/squad/SKILL.md", maxLines: 10 });
     await call("read_upstream_resource", { path: "../secrets" }, false);
     await call("read_upstream_resource", { path: ".github/skills/rpi/rpi-plan/SKILL.md" }, false);
@@ -221,7 +221,7 @@ test("requires trusted verification, consent, roster confirmation and new-projec
 });
 
 for (const routing of [
-  { mode: "ranked" as const }, { mode: "economy" as const }, { mode: "manual" as const, model: "gpt-5.4" },
+  { mode: "ranked" as const }, { mode: "economy" as const }, { mode: "manual" as const, model: "gpt-6.1-terra" },
 ]) {
   test(`${routing.mode} coordinator dispatch uses the confirmed mode for scripts, owners and reviewers`, async () => {
     const h = harness(async (call, _emit, config) => {

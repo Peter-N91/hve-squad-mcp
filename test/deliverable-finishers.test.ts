@@ -26,7 +26,17 @@ import {
 const TENANT = "11111111-1111-1111-1111-111111111111";
 const PROJECT = "acme";
 const RUN = "run-9";
-const TABLES = loadProfileTables();
+const DEPLOYED_TABLES = loadProfileTables();
+// hve-squad@0.21.0 dropped the built-in `presenter` role after hve-core removed
+// PowerPoint Builder/Subagent, while SquadRunRecorder preserves the DeckRenderer
+// finisher for custom or connector-backed rosters that declare a presenter root.
+const TABLES = {
+  ...DEPLOYED_TABLES,
+  deliverableRoots: new Map([
+    ...DEPLOYED_TABLES.deliverableRoots,
+    ["presenter", ".copilot-tracking/ppt/<date>/<deck-slug>"],
+  ]),
+};
 const REQUEST: CoordinatorRequest = { toolId: "squad_run", request: "build the deck" };
 
 class FakeRenderer implements DeckRenderer {

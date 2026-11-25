@@ -4,7 +4,7 @@ import { installedUpstreamBundle } from "../src/engine/copilot/upstream-bundle.j
 
 const bundle = installedUpstreamBundle();
 test("installed full runtime discovers complete skills and reads upstream procedures with provenance", () => {
-  assert.equal(bundle.skills().length, 97);
+  assert.equal(bundle.skills().length, 107);
   const skill = bundle.skills().find(s => s.name === "squad");
   assert.ok(skill);
   const body = bundle.read(skill.path);
