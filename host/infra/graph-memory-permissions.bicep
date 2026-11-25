@@ -27,12 +27,12 @@
 // After this deployment the server can read and write ONLY the designated library.
 
 @description('Azure region for the deployment-script container instance.')
-param location string = resourceGroup().location
+param location string
 
 @description('Short prefix for resource names (match main.bicep).')
 @minLength(3)
 @maxLength(12)
-param namePrefix string = 'squadmcp'
+param namePrefix string
 
 @description('OBJECT (principal) id of the app managed identity — the appPrincipalId output of main.bicep.')
 param appPrincipalId string
@@ -41,19 +41,19 @@ param appPrincipalId string
 param appClientId string
 
 @description('Display name recorded on the per-site permission so an administrator can see who holds it.')
-param appDisplayName string = 'hve-squad-mcp'
+param appDisplayName string
 
 @description('Microsoft Graph application role to assign. Defaults to Sites.Selected — the least-privilege choice, which grants no site access by itself.')
-param graphAppRoleId string = '883ea226-0bf2-4a8f-9f9d-92c9162a727d'
+param graphAppRoleId string
 
 @description('SharePoint site id (the "hostname,siteCollectionId,siteId" triple returned by GET /sites/{hostname}:/sites/{path}) whose library holds squad memory. Empty assigns Sites.Selected only, leaving the server with access to nothing.')
-param sharePointSiteId string = ''
+param sharePointSiteId string
 
 @description('Resource id of a user-assigned managed identity that already holds AppRoleAssignment.ReadWrite.All and Sites.FullControl.All. It runs the grants; this template stores no credential.')
 param grantIdentityResourceId string
 
 @description('How long to retain the deployment-script result before Azure cleans it up.')
-param scriptRetentionInterval string = 'PT1H'
+param scriptRetentionInterval string
 
 // Well-known Microsoft Graph application id — identical in every tenant.
 var graphAppId = '00000003-0000-0000-c000-000000000000'
