@@ -369,23 +369,28 @@ var perUserEnv = enablePerUserGithub ? concat([
   { name: 'SQUAD_MCP_PER_USER_GITHUB_ENABLED', value: 'true' }
   { name: 'SQUAD_MCP_PUBLIC_BASE_URL', value: !empty(publicBaseUrl) ? publicBaseUrl : 'https://${namePrefix}-app.${environment.properties.defaultDomain}' }
   { name: 'SQUAD_MCP_GITHUB_CLIENT_ID', value: githubClientId }
+  // checkov:skip=CKV_SECRET_6:The match is a Container App secretRef identifier, not a secret value; the secret is resolved from Key Vault via managed identity.
   { name: 'SQUAD_MCP_GITHUB_CLIENT_SECRET', secretRef: 'github-client-secret' }
   { name: 'SQUAD_MCP_GITHUB_WEB_URL', value: githubWebBaseUrl }
   { name: 'SQUAD_MCP_GITHUB_API_URL', value: githubApiBaseUrl }
   { name: 'SQUAD_MCP_LINK_ENTRA_CLIENT_ID', value: linkEntraClientId }
+  // checkov:skip=CKV_SECRET_6:The match is a Container App secretRef identifier, not a secret value; the secret is resolved from Key Vault via managed identity.
   { name: 'SQUAD_MCP_LINK_ENTRA_CLIENT_SECRET', secretRef: 'link-entra-client-secret' }
   { name: 'SQUAD_MCP_LINK_ENTRA_TENANT_ID', value: linkEntraTenantId }
+  // checkov:skip=CKV_SECRET_6:The match is a Container App secretRef identifier, not a secret value; the secret is resolved from Key Vault via managed identity.
   { name: 'SQUAD_MCP_GITHUB_LINK_KEY_B64', secretRef: 'github-link-key' }
   { name: 'SQUAD_MCP_GITHUB_LINK_KEY_ID', value: githubLinkKeyId }
   { name: 'SQUAD_MCP_GITHUB_LINK_STORE', value: 'table' }
   { name: 'SQUAD_MCP_GITHUB_LINK_TABLE', value: githubLinkTableName }
   { name: 'SQUAD_MCP_GITHUB_LINK_FLOW_TABLE', value: githubLinkFlowTableName }
 ], !empty(githubLinkOldKeysSecretUri) ? [
+  // checkov:skip=CKV_SECRET_6:The match is a Container App secretRef identifier, not a secret value; the secret is resolved from Key Vault via managed identity.
   { name: 'SQUAD_MCP_GITHUB_LINK_OLD_KEYS', secretRef: 'github-link-old-keys' }
 ] : []) : []
 var runtimeEnv = concat([
   { name: 'SQUAD_MCP_STAGE_EXECUTOR', value: stageExecutor }
 ], enableCopilot ? [
+  // checkov:skip=CKV_SECRET_6:The match is a Container App secretRef identifier, not a secret value; the secret is resolved from Key Vault via managed identity.
   { name: 'SQUAD_MCP_COPILOT_CONNECTION_TOKEN', secretRef: 'copilot-connection-token' }
   { name: 'SQUAD_MCP_COPILOT_MODEL', value: copilotModel }
   { name: 'SQUAD_MCP_COPILOT_ROUTING', value: copilotRouting }
@@ -399,6 +404,7 @@ var runtimeEnv = concat([
   { name: 'SQUAD_MCP_COPILOT_SESSION_STATE_DIR', value: copilotSessionStateDir }
 ] : [], (enableCopilot && !enablePerUserGithub) ? [
   { name: 'SQUAD_MCP_COPILOT_GITHUB_TOKEN_SOURCE', value: 'env' }
+  // checkov:skip=CKV_SECRET_6:The match is a Container App secretRef identifier, not a secret value; the secret is resolved from Key Vault via managed identity.
   { name: 'SQUAD_MCP_COPILOT_GITHUB_TOKEN', secretRef: 'copilot-github-token' }
 ] : [])
 var webRuntimeEndpointEnv = enableCopilot ? [

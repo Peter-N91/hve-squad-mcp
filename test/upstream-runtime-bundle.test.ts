@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { upstreamDestination, verifyGitBlob } from "../host/snapshot-upstream.js";
@@ -29,7 +30,17 @@ test("complete preview bundle preserves every immutable Git blob, including bina
     verifyGitBlob(bytes, file.blob);
     assert.match(file.commit, /^[a-f0-9]{40}$/, file.source);
   }
-  assert.deepEqual(paths(root).sort(), [...manifest.files.map(file => file.path), "apm.yml", "manifest.json", "README.md"].sort());
+  const expectedPaths = [...manifest.files.map(file => file.path), "apm.yml", "manifest.json", "README.md"].sort();
+  assert.deepEqual(paths(root).sort(), expectedPaths);
+  if (existsSync(join(process.cwd(), ".git"))) {
+    const tracked = execFileSync("git", ["ls-files", "host/upstream-runtime"], { encoding: "utf8" })
+      .trim()
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map(line => line.slice("host/upstream-runtime/".length))
+      .sort();
+    assert.deepEqual(tracked, expectedPaths, "git index casing must match manifest.json paths for case-sensitive Linux runners");
+  }
 });
 test("complete dependency tree contains upstream orchestration, FinOps and license notices", () => {
   const files = new Set(manifest.files.map(file => file.path));
