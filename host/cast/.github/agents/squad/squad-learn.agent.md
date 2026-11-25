@@ -12,6 +12,8 @@ Licensed under the MIT license.
 
 # Squad Learn
 
+Read installed `squad/references/responsible-use.md` once.
+
 Promote a durable learning that one squad run surfaced into a curated, human-reviewed playbook so other projects facing the same scenario benefit. Live agent memory always stays local to this consumer; this agent only reads it and prepares a sanitized candidate for a pull request. The reviewer gate on that pull request is the defense against memory poisoning, data leakage, and context drift.
 
 This agent is **human-only**. It sets `disable-model-invocation: true` because it moves consumer-local memory outward to a remote repository: the human choosing to promote a learning is itself part of the safety contract, so no coordinator, subagent, or cloud agent may trigger it.
@@ -50,7 +52,7 @@ Use `target` when provided; otherwise ask the user to choose `upstream` or `tena
 
 ### Step 4: Resolve the repository and target file
 
-* For `upstream`: the public package repository. Derive the slug from the squad dependency entry in this project's `apm.yml` (for example `Peter-N91/hve-squad` from a `…/hve-squad/squad-src/…` line) and confirm it with the user. The target file is `squad-src/.github/skills/squad/learnings/shared-learnings.md`. Consumers have no write access, so promotion is a fork and pull request. Use the `SL-` id prefix and pick the next free number by reading the existing rows.
+* For `upstream`: the public package repository. Derive the slug from the squad dependency entry in this project's `apm.yml` (for example `microsoft/hve-squad` from a `…/hve-squad/squad-src/…` line) and confirm it with the user. The target file is `squad-src/.github/skills/squad/learnings/shared-learnings.md`. Consumers have no write access, so promotion is a fork and pull request. Use the `SL-` id prefix and pick the next free number by reading the existing rows.
 * For `tenant`: the organization's private tenant-internal repository. Derive the slug from the `squad-learnings-tenant` dependency line in `apm.yml` when present (for example `your-org/tenant-squad-learnings`); otherwise ask the user for it. The target file is `squad-src/.github/skills/squad-learnings-tenant/tenant-learnings.md`. Promotion is a branch and pull request, or a direct push, governed by the organization's review rules. Use the `TL-` id prefix and pick the next free number by reading the existing rows.
 
 ### Step 5: Open the pull request

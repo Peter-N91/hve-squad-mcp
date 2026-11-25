@@ -12,6 +12,8 @@ Licensed under the MIT license.
 
 # Squad Doctor
 
+Read installed `squad/references/responsible-use.md` once.
+
 Restore a verifiable Squad runtime without inventing state or editing installed
 customizations. No squad state is required. This is a maintenance entrypoint,
 not a roster role or a substitute for Init.
@@ -53,6 +55,6 @@ that repair with an actionable blocker. Do not dispatch other agents.
 ## Response
 
 Lead with healthy, repaired, or blocked. Include the checked scope, each of the
-seven domains (or the explicitly narrowed domain), exact repairs and backup
+six domains (or the explicitly narrowed domain), exact repairs and backup
 paths, unresolved issue, and the next required user action. A healthy receipt
 certifies only the implemented checks, not arbitrary application correctness.

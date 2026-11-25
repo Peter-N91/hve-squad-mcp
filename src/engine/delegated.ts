@@ -28,6 +28,7 @@ import {
   FEDERATION_COORDINATOR_PERSONA,
   FEDERATION_DETECTION_NOTE,
   GATE_INSTRUCTIONS,
+  RESPONSIBLE_USE_NOTE,
   depthInstructions,
   discoveryInstructions,
   executionInstructions,
@@ -58,7 +59,10 @@ function toMatchedRouting(tool: CatalogTool): MatchedRouting {
 
 function composeSystemPrompt(tool: CatalogTool, request: CoordinatorRequest): string {
   const federation = isFederationTool(tool);
-  const blocks: string[] = [federation ? FEDERATION_COORDINATOR_PERSONA : COORDINATOR_PERSONA];
+  const blocks: string[] = [
+    federation ? FEDERATION_COORDINATOR_PERSONA : COORDINATOR_PERSONA,
+    RESPONSIBLE_USE_NOTE,
+  ];
   // Gating instructions are load-bearing only for the pipeline/council tools.
   // Discovery precedes intake, which precedes implementation, so it leads.
   if (tool.gates || tool.council.length > 0) {

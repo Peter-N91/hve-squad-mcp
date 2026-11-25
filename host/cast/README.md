@@ -20,11 +20,16 @@ without the full repository or an `apm install` at runtime.
   boundary skill (`microsoft/hve-core` relocated it from
   `untrusted-content-boundary.instructions.md`) for personas that ingest
   external content (VF-07 / G6).
+- `.github/skills/squad/references/responsible-use.md` — the shared
+  responsible-use, no-reporting, and customer-control contract (`hve-squad@0.22.0+`)
+  read directly once per context by every Squad entrypoint and forwarded to
+  isolated workers.
 - `.github/skills/squad/references/roster-catalog.md` — the roster **Cast
   Catalog** and Registered External Cast. `hve-squad@0.18.0` moved them out of
   `squad-roster.instructions.md`, and the router, the profile resolver, and the
-  generator resolve every role through this file. It is the only file the
-  bundle takes from the squad skill, which `apm.yml` deploys as a directory.
+  generator resolve every role through this file. Together with
+  `responsible-use.md`, these are the only files the bundle takes from the squad
+  skill, which `apm.yml` deploys as a directory.
 - `manifest.json` — the integrity record: the resolved package and upstream
   commits, a SHA-256 per bundled file with the pinned source it came from, and
   the file counts.
@@ -78,5 +83,5 @@ commit the regenerated bundle + manifest.
 
 Bundling the full referenced **skill** file trees is deferred to the later
 execution expansion to keep image size and scope bounded. Personas, squad
-instructions, the untrusted-content-boundary skill, and the squad skill's roster
-catalog are bundled now.
+instructions, the untrusted-content-boundary skill, and the squad skill's
+`responsible-use.md` and `roster-catalog.md` references are bundled now.
