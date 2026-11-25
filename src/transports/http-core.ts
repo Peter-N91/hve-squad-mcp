@@ -36,6 +36,10 @@ import {
   SQUAD_FEDERATE_TOOL,
   SQUAD_BUSINESS_PLAN_TOOL,
   SQUAD_BACKLOG_TOOL,
+  SQUAD_GITHUB_STATUS_TOOL,
+  SQUAD_GITHUB_CONNECT_TOOL,
+  SQUAD_GITHUB_DISCONNECT_TOOL,
+  isGitHubIdentityTool,
   isBusinessExposed,
 } from "../auth/scopes.js";
 import {
@@ -64,7 +68,8 @@ import {
   type ProjectContextAcknowledgement,
 } from "../engine/project-context-bridge.js";
 import { SERVER_NAME, SERVER_VERSION } from "../server.js";
-import type { EmbeddedCoordinator } from "../engine/embedded.js";
+import type { EmbeddedCoordinator, EmbeddedContext } from "../engine/embedded.js";
+import type { RunOwnerRecord } from "../engine/run-state.js";
 import type { PptxRenderService } from "../engine/render/pptx-render-service.js";
 import { SquadMemoryResourceProvider } from "../engine/squad-memory-resources.js";
 import { isSafeMemoryPath, type SquadMemoryStore } from "../engine/squad-memory-state.js";
@@ -81,6 +86,35 @@ import type { RedactingLogger } from "../observability/logger.js";
 import type { SessionStore } from "./session-store.js";
 import { projectRemoteToolDescriptor } from "./remote-tool-metadata.js";
 import type { ReadinessProbe } from "./readiness.js";
+import type { UserIdentityGate } from "./user-identity-gate.js";
+import { withUserStoragePartition } from "../auth/user-storage-partition.js";
+
+const NO_ARGS_SCHEMA = { type: "object", additionalProperties: false, properties: {} } as const;
+
+export const SQUAD_GITHUB_STATUS_DESCRIPTOR = {
+  name: SQUAD_GITHUB_STATUS_TOOL,
+  title: "GitHub Connection Status",
+  description:
+    "Report whether your own GitHub account is connected for squad runs and whether it has GitHub Copilot access. " +
+    "Never returns a token.",
+  inputSchema: NO_ARGS_SCHEMA,
+};
+
+export const SQUAD_GITHUB_CONNECT_DESCRIPTOR = {
+  name: SQUAD_GITHUB_CONNECT_TOOL,
+  title: "Connect GitHub",
+  description:
+    "Start connecting your own GitHub account. Returns a single-use link to open in a browser; sign in with your " +
+    "work account there, then authorize GitHub. Runs use your own GitHub Copilot access once connected.",
+  inputSchema: NO_ARGS_SCHEMA,
+};
+
+export const SQUAD_GITHUB_DISCONNECT_DESCRIPTOR = {
+  name: SQUAD_GITHUB_DISCONNECT_TOOL,
+  title: "Disconnect GitHub",
+  description: "Remove your stored GitHub connection. Existing runs cannot adopt a later link; start new work after reconnecting.",
+  inputSchema: NO_ARGS_SCHEMA,
+};
 
 /** The MCP protocol revision this server speaks. */
 export const MCP_PROTOCOL_VERSION = "2025-06-18";
@@ -112,7 +146,7 @@ const SQUAD_STATUS_DESCRIPTOR = {
   },
 };
 
-const SQUAD_APPROVE_DESCRIPTOR = {
+export const SQUAD_APPROVE_DESCRIPTOR = {
   name: SQUAD_APPROVE_TOOL,
   title: "Approve Squad Run",
   description:
@@ -134,7 +168,7 @@ const SQUAD_APPROVE_DESCRIPTOR = {
   },
 };
 
-const SQUAD_RESPOND_DESCRIPTOR = {
+export const SQUAD_RESPOND_DESCRIPTOR = {
   name: SQUAD_RESPOND_TOOL,
   title: "Respond to Squad Question",
   description:
@@ -309,7 +343,7 @@ const SQUAD_MEMORY_READ_DESCRIPTOR = {
  * history — which is what makes a run auditable after the fact rather than only
  * resumable. Deterministic: no model call, no impactful action.
  */
-const SQUAD_HISTORY_DESCRIPTOR = {
+export const SQUAD_HISTORY_DESCRIPTOR = {
   name: SQUAD_HISTORY_TOOL,
   title: "Squad History",
   description:
@@ -666,6 +700,18 @@ export interface HttpMcpHandlerDeps {
   oauthResourceMetadataUrl?: string;
   /** Instance readiness served at `GET /readyz`; absent = ready whenever the process serves. */
   readiness?: ReadinessProbe;
+  /**
+   * Per-user GitHub identity. When set, Copilot-backed tools are admitted per
+   * signed-in user, owners are pinned onto runs, and the three connection tools
+   * are served. Absent = the previous single-identity behavior, unchanged.
+   */
+  userIdentity?: UserIdentityGate;
+  /**
+   * Unauthenticated browser routes under `/github/link/` (the account-link
+   * pages). They authenticate the user themselves with an Entra sign-in, so they
+   * deliberately sit outside the bearer-token gate that protects `/mcp`.
+   */
+  linkRoutes?: (req: HttpRequestLike) => Promise<HttpResponseLike | undefined>;
 }
 
 export class HttpMcpHandler {
@@ -681,6 +727,8 @@ export class HttpMcpHandler {
   private readonly businessToolsExposed: boolean;
   private readonly oauthResourceMetadataUrl?: string;
   readonly readiness?: ReadinessProbe;
+  private readonly userIdentity?: UserIdentityGate;
+  private readonly linkRoutes?: HttpMcpHandlerDeps["linkRoutes"];
   private readonly projectContexts?: ProjectContextBridge;
   /**
    * The named-destination view of {@link memoryStore}, present only when the
@@ -719,6 +767,8 @@ export class HttpMcpHandler {
     this.businessToolsExposed = deps.businessToolsExposed ?? false;
     this.oauthResourceMetadataUrl = deps.oauthResourceMetadataUrl;
     this.readiness = deps.readiness;
+    this.userIdentity = deps.userIdentity;
+    this.linkRoutes = deps.linkRoutes;
     this.projectContexts = deps.memoryStore
       ? new ProjectContextBridge(deps.memoryStore, deps.logger)
       : undefined;
@@ -901,6 +951,12 @@ export class HttpMcpHandler {
     }
 
     if (req.path !== "/mcp") {
+      // Browser account-link pages: they sign the user in themselves, so they sit
+      // outside the bearer gate. Only the `/github/link/` prefix is delegated.
+      if (this.linkRoutes && req.path.startsWith("/github/link/")) {
+        const linked = await this.linkRoutes(req);
+        if (linked) return linked;
+      }
       return { status: 404, headers: { "content-type": "application/json" }, body: { error: "not_found" } };
     }
 
@@ -924,6 +980,10 @@ export class HttpMcpHandler {
         req.headers["authorization"],
         req.tokenValidation,
       );
+      if (this.userIdentity) {
+        auth = withUserStoragePartition(auth);
+        this.embedded.bindUserQuota(auth);
+      }
     } catch (error) {
       if (error instanceof AuthError) {
         const challenge: Record<string, string> = {};
@@ -947,6 +1007,9 @@ export class HttpMcpHandler {
     };
 
     if (req.method === "DELETE") {
+      if (!this.sessions.validate(req.headers["mcp-session-id"], auth)) {
+        return { status: 404, headers: baseHeaders, body: { error: "invalid_session" } };
+      }
       this.sessions.delete(req.headers["mcp-session-id"]);
       return { status: 204, headers: baseHeaders };
     }
@@ -1005,6 +1068,9 @@ export class HttpMcpHandler {
         const tools = [
           ...this.router.listToolDescriptors().filter((descriptor) => this.isExposed(descriptor.name)),
           ...(this.pipelineExposed ? [SQUAD_STATUS_DESCRIPTOR, SQUAD_APPROVE_DESCRIPTOR, SQUAD_RESPOND_DESCRIPTOR] : []),
+          ...(this.userIdentity
+            ? [SQUAD_GITHUB_STATUS_DESCRIPTOR, SQUAD_GITHUB_CONNECT_DESCRIPTOR, SQUAD_GITHUB_DISCONNECT_DESCRIPTOR]
+            : []),
           ...(this.renderService ? [SQUAD_RENDER_PPTX_DESCRIPTOR] : []),
           ...(this.memoryBrokerEnabled
             ? [
@@ -1228,7 +1294,43 @@ export class HttpMcpHandler {
     const name = typeof params.name === "string" ? params.name : "";
     const args = params.arguments;
 
-    // squad_memory_read / squad_memory_write are the synthetic shared-state broker
+    // Per-user GitHub connection tools. Fail closed on scope before anything else;
+    // they touch only the caller's own link and never return a credential.
+    if (isGitHubIdentityTool(name)) {
+      if (!this.userIdentity) {
+        return { status: 200, headers: baseHeaders, body: rpcError(message.id, -32601, `Unknown or unavailable tool: ${name}`) };
+      }
+      if (args !== undefined && (!args || typeof args !== "object" || Array.isArray(args) || Object.keys(args).length)) {
+        return { status: 200, headers: baseHeaders, body: rpcError(message.id, -32602, "GitHub connection tools accept no arguments.") };
+      }
+      try {
+        this.authenticator.authorizeTool(auth, name);
+      } catch (error) {
+        if (error instanceof AuthError) {
+          return { status: error.status, headers: baseHeaders, body: { error: error.reason } };
+        }
+        throw error;
+      }
+      try {
+        const outcome = name === SQUAD_GITHUB_CONNECT_TOOL
+          ? await this.userIdentity.connectText(auth)
+          : name === SQUAD_GITHUB_DISCONNECT_TOOL
+            ? await this.userIdentity.disconnectText(auth)
+            : await this.userIdentity.statusText(auth);
+        const failed = "ok" in outcome ? !outcome.ok : false;
+        return {
+          status: 200,
+          headers: baseHeaders,
+          body: rpcResult(message.id, {
+            ...(failed ? { isError: true } : {}),
+            content: [{ type: "text", text: outcome.text }],
+          }),
+        };
+      } catch (error) {
+        this.logger.error("github identity tool failed", { tool: name, error: String(error) });
+        return { status: 200, headers: baseHeaders, body: rpcResult(message.id, dispatchErrorResult(error)) };
+      }
+    }
     // tools (not catalog tools). They are served only when the operator enabled
     // the memory feature (a backing store injected), are fail-closed on their own
     // dedicated scopes (Squad.Memory for read, Squad.MemoryWrite for write —
@@ -1600,11 +1702,24 @@ export class HttpMcpHandler {
         throw error;
       }
       try {
+        let businessContext: EmbeddedContext = { auth };
+        if (this.userIdentity) {
+          const admitted = await this.userIdentity.admit(auth);
+          if (!admitted.ok) {
+            return {
+              status: 200, headers: baseHeaders,
+              body: rpcResult(message.id, {
+                isError: true, content: [{ type: "text", text: `${admitted.code}: ${admitted.text}` }],
+              }),
+            };
+          }
+          businessContext = { auth, owner: admitted.owner };
+        }
         const bridge = await this.negotiateProjectContext(
           auth,
           coordinatorRequest,
         );
-        const result = await this.embedded.handleBusiness(spec, coordinatorRequest, { auth });
+        const result = await this.embedded.handleBusiness(spec, coordinatorRequest, businessContext);
         const contextBridge = await this.finalizeProjectContext(
           auth,
           bridge.acknowledgement,
@@ -2057,6 +2172,25 @@ export class HttpMcpHandler {
       throw error;
     }
     try {
+      // Per-user identity: prove the caller's own GitHub link and Copilot access
+      // BEFORE any run exists, so an unlinked user gets an actionable message
+      // instead of a half-started run or someone else's quota.
+      let owner: RunOwnerRecord | undefined;
+      if (this.userIdentity?.appliesTo(tool.id)) {
+        const admitted = await this.userIdentity.admit(auth);
+        if (!admitted.ok) {
+          return {
+            status: 200,
+            headers: baseHeaders,
+            body: rpcResult(message.id, {
+              isError: true,
+              content: [{ type: "text", text: `${admitted.code}: ${admitted.text}` }],
+            }),
+          };
+        }
+        owner = admitted.owner;
+      }
+      const runContext: EmbeddedContext = owner ? { auth, owner } : { auth };
       const bridge = await this.negotiateProjectContext(
         auth,
         coordinatorRequest,
@@ -2074,10 +2208,10 @@ export class HttpMcpHandler {
       //     embedded dispatch, unchanged.
       const result =
         tool.id === "squad_run" || tool.id === SQUAD_FEDERATE_TOOL
-          ? await this.embedded.startHttpRun(tool, coordinatorRequest, { auth })
+          ? await this.embedded.startHttpRun(tool, coordinatorRequest, runContext)
           : tool.id === "squad_plan" || tool.id === "squad_architect"
-            ? await this.embedded.handleAdvisory(tool, coordinatorRequest, { auth })
-            : await this.embedded.handle(tool, coordinatorRequest, { auth });
+            ? await this.embedded.handleAdvisory(tool, coordinatorRequest, runContext)
+            : await this.embedded.handle(tool, coordinatorRequest, runContext);
       const contextBridge = await this.finalizeProjectContext(
         auth,
         bridge.acknowledgement,

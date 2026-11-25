@@ -20,7 +20,7 @@
  * provider and registered with the logger for redaction.
  */
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, parse, resolve } from "node:path";
 
 /** The hard monthly cost ceiling per tenant (COST-2), default ~$500. */
 export const DEFAULT_TENANT_MONTHLY_COST_CEILING_USD = 500;
@@ -76,6 +76,13 @@ export interface OperatorConfig {
   allowedIssuers: string[];
   /** Tenants permitted to call (empty = any tenant whose token validates). */
   allowedTenants: string[];
+  /**
+   * Calling client applications (`azp`/`appid`) admitted per token audience. An
+   * audience with no entry admits any client, the previous behavior. Set one entry
+   * per host: the Microsoft Enterprise token store client for Cowork, and the
+   * connector's own app for Copilot Studio.
+   */
+  allowedClientsByAudience: Record<string, string[]>;
   /** Strict Origin allow-list for the HTTP transport (SEC-8). Never `*`. */
   allowedOrigins: string[];
   /** Azure OpenAI endpoints the embedded backend may call (SEC-3 allow-list). */
@@ -283,6 +290,23 @@ export interface OperatorConfig {
   stageExecutor: "builtin" | "copilot";
   /** Copilot sandbox settings; meaningful only when {@link stageExecutor} is `copilot`. */
   copilot: CopilotExecutorConfig;
+  /** Per-user GitHub identity; when enabled the shared GitHub token is not used. */
+  perUserGithub: PerUserGithubConfig;
+}
+
+export interface PerUserGithubConfig {
+  enabled: boolean;
+  /** Public https origin of this server; the browser link pages and OAuth callbacks live under it. */
+  publicBaseUrl: string;
+  /** The GitHub App (or OAuth App) users authorize. */
+  github: { clientId: string; clientSecret: string; webBaseUrl: string; apiBaseUrl: string };
+  /** Confidential Entra client used to re-authenticate the browser user during linking. */
+  entra: { clientId: string; clientSecret: string; tenantId: string };
+  /** Base64 32-byte key sealing stored GitHub tokens. Deliberately separate from the run key. */
+  linkKeyBase64: string;
+  linkKeyId: string;
+  previousLinkKeys: Record<string, string>;
+  linkStore: { kind: "file"; dir: string } | { kind: "table"; table: string; flowTable: string };
 }
 
 export type CopilotIdentitySourceConfig =
@@ -372,6 +396,96 @@ function parseModelApi(
   throw new Error(
     "SQUAD_MCP_MODEL_API must be 'chat-completions' or 'responses'.",
   );
+}
+
+function parseAllowedClients(value: string | undefined): Record<string, string[]> {
+  const raw = (value ?? "").trim();
+  if (raw.length === 0) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('SQUAD_MCP_ALLOWED_CLIENTS must be JSON such as {"api://app":["<client-id>"]}.');
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("SQUAD_MCP_ALLOWED_CLIENTS must be a JSON object keyed by audience.");
+  }
+  const result: Record<string, string[]> = {};
+  for (const [audience, clients] of Object.entries(parsed)) {
+    if (!Array.isArray(clients) || clients.length === 0 || !clients.every((c) => typeof c === "string" && c.trim().length > 0)) {
+      throw new Error(`SQUAD_MCP_ALLOWED_CLIENTS entry for ${audience} must be a non-empty array of client ids.`);
+    }
+    result[audience] = clients.map((c) => (c as string).trim().toLowerCase());
+  }
+  return result;
+}
+
+function parsePerUserGithub(env: NodeJS.ProcessEnv, stageExecutor: "builtin" | "copilot"): PerUserGithubConfig {
+  const enabled = (optionalChoice(env.SQUAD_MCP_PER_USER_GITHUB_ENABLED, ["true", "false"] as const,
+    "SQUAD_MCP_PER_USER_GITHUB_ENABLED") ?? "false") === "true";
+  const publicBaseUrl = (env.SQUAD_MCP_PUBLIC_BASE_URL ?? "").trim().replace(/\/+$/, "");
+  const github = {
+    clientId: (env.SQUAD_MCP_GITHUB_CLIENT_ID ?? "").trim(),
+    clientSecret: (env.SQUAD_MCP_GITHUB_CLIENT_SECRET ?? "").trim(),
+    webBaseUrl: (env.SQUAD_MCP_GITHUB_WEB_URL ?? "https://github.com").trim().replace(/\/+$/, ""),
+    apiBaseUrl: (env.SQUAD_MCP_GITHUB_API_URL ?? "https://api.github.com").trim().replace(/\/+$/, ""),
+  };
+  const entra = {
+    clientId: (env.SQUAD_MCP_LINK_ENTRA_CLIENT_ID ?? "").trim(),
+    clientSecret: (env.SQUAD_MCP_LINK_ENTRA_CLIENT_SECRET ?? "").trim(),
+    tenantId: (env.SQUAD_MCP_LINK_ENTRA_TENANT_ID ?? "").trim(),
+  };
+  const linkKeyBase64 = (env.SQUAD_MCP_GITHUB_LINK_KEY_B64 ?? "").trim();
+  const linkKeyId = (env.SQUAD_MCP_GITHUB_LINK_KEY_ID ?? "current").trim();
+  let previousLinkKeys: Record<string, string> = {};
+  if (env.SQUAD_MCP_GITHUB_LINK_OLD_KEYS) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(env.SQUAD_MCP_GITHUB_LINK_OLD_KEYS);
+    } catch {
+      throw new Error("SQUAD_MCP_GITHUB_LINK_OLD_KEYS contains invalid JSON.");
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) ||
+        Object.entries(parsed).some(([id, key]) => !/^[A-Za-z0-9_-]{1,32}$/.test(id) ||
+          typeof key !== "string" || !/^[A-Za-z0-9+/]{43}=$/.test(key) || Buffer.from(key, "base64").length !== 32)) {
+      throw new Error("SQUAD_MCP_GITHUB_LINK_OLD_KEYS must contain key IDs and base64 32-byte keys.");
+    }
+    previousLinkKeys = parsed as Record<string, string>;
+  }
+  const storeKind = optionalChoice(env.SQUAD_MCP_GITHUB_LINK_STORE, ["file", "table"] as const, "SQUAD_MCP_GITHUB_LINK_STORE") ?? "file";
+  const linkStore: PerUserGithubConfig["linkStore"] = storeKind === "table"
+    ? {
+        kind: "table",
+        table: (env.SQUAD_MCP_GITHUB_LINK_TABLE ?? "squadgithublinks").trim(),
+        flowTable: (env.SQUAD_MCP_GITHUB_LINK_FLOW_TABLE ?? "squadgithublinkflows").trim(),
+      }
+    : { kind: "file", dir: (env.SQUAD_MCP_GITHUB_LINK_DIR ?? "").trim() || join(tmpdir(), "hve-squad-github-links") };
+  if (enabled) {
+    if (!/^[A-Za-z0-9_-]{1,32}$/.test(linkKeyId) || previousLinkKeys[linkKeyId]) {
+      throw new Error("GitHub credential key ID must be valid and distinct from previous key IDs.");
+    }
+    if (stageExecutor !== "copilot") {
+      throw new Error("SQUAD_MCP_PER_USER_GITHUB_ENABLED requires SQUAD_MCP_STAGE_EXECUTOR=copilot.");
+    }
+    if (!/^https:\/\/[^/\s]+$/i.test(publicBaseUrl) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(publicBaseUrl)) {
+      throw new Error("SQUAD_MCP_PUBLIC_BASE_URL must be the https origin of this server (no path).");
+    }
+    const missing = [
+      ["SQUAD_MCP_GITHUB_CLIENT_ID", github.clientId], ["SQUAD_MCP_GITHUB_CLIENT_SECRET", github.clientSecret],
+      ["SQUAD_MCP_LINK_ENTRA_CLIENT_ID", entra.clientId], ["SQUAD_MCP_LINK_ENTRA_CLIENT_SECRET", entra.clientSecret],
+      ["SQUAD_MCP_LINK_ENTRA_TENANT_ID", entra.tenantId],
+    ].filter(([, value]) => !value).map(([name]) => name);
+    if (missing.length > 0) {
+      throw new Error(`SQUAD_MCP_PER_USER_GITHUB_ENABLED requires: ${missing.join(", ")}.`);
+    }
+    if (!/^[A-Za-z0-9+/]{43}=$/.test(linkKeyBase64) || Buffer.from(linkKeyBase64, "base64").length !== 32) {
+      throw new Error("SQUAD_MCP_GITHUB_LINK_KEY_B64 must be a base64 32-byte key (separate from the run encryption key).");
+    }
+    if (linkKeyBase64 === (env.SQUAD_MCP_RUN_ENCRYPTION_KEY_B64 ?? "").trim()) {
+      throw new Error("SQUAD_MCP_GITHUB_LINK_KEY_B64 must differ from SQUAD_MCP_RUN_ENCRYPTION_KEY_B64.");
+    }
+  }
+  return { enabled, publicBaseUrl, github, entra, linkKeyBase64, linkKeyId, previousLinkKeys, linkStore };
 }
 
 function optionalChoice<T extends string>(
@@ -692,6 +806,35 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
 
   const stageExecutor = optionalChoice(env.SQUAD_MCP_STAGE_EXECUTOR, ["builtin", "copilot"] as const,
     "SQUAD_MCP_STAGE_EXECUTOR") ?? "builtin";
+  const perUserGithub = parsePerUserGithub(env, stageExecutor);
+  const allowedClientsByAudience = parseAllowedClients(env.SQUAD_MCP_ALLOWED_CLIENTS);
+  if (perUserGithub.enabled) {
+    if (!allowedTenants.length || !allowedIssuers.length ||
+        audiences.some(audience => !allowedClientsByAudience[audience]?.length)) {
+      throw new Error("Per-user GitHub mode requires explicit tenants, issuers and calling clients for every accepted audience.");
+    }
+    if (allowedTenants.length !== 1 ||
+        allowedTenants[0].toLowerCase() !== perUserGithub.entra.tenantId.toLowerCase()) {
+      throw new Error("Per-user GitHub mode currently requires one Entra tenant shared by API access and browser linking.");
+    }
+    if (!remotePipelineEnabled) {
+      throw new Error("Per-user GitHub mode requires the durable remote pipeline.");
+    }
+    const sessionDirectory = (env.SQUAD_MCP_COPILOT_SESSION_STATE_DIR ?? "").trim();
+    if (!sessionDirectory || !isAbsolute(sessionDirectory) ||
+        resolve(sessionDirectory) === parse(resolve(sessionDirectory)).root) {
+      throw new Error("Per-user GitHub mode requires an explicitly provisioned persistent Copilot session-state directory.");
+    }
+    if (Buffer.from(env.SQUAD_MCP_RUN_ENCRYPTION_KEY_B64 ?? "", "base64").length !== 32) {
+      throw new Error("Per-user GitHub mode requires a separate 32-byte run-state encryption key.");
+    }
+    if (memoryBackend === "graph" || memoryTargets.some(target => target.backend === "graph")) {
+      throw new Error("Per-user GitHub mode does not delegate Graph file access. Use private server-owned Table or file artifacts.");
+    }
+    if (perUserGithub.linkStore.kind === "file" && workerEnabled) {
+      throw new Error("A separate worker requires shared Table GitHub link and flow stores.");
+    }
+  }
   const tokenSourceKind = optionalChoice(env.SQUAD_MCP_COPILOT_GITHUB_TOKEN_SOURCE, ["env", "file", "command"] as const,
     "SQUAD_MCP_COPILOT_GITHUB_TOKEN_SOURCE") ??
     ((env.SQUAD_MCP_COPILOT_GITHUB_TOKEN_FILE ?? "").trim() ? "file"
@@ -738,7 +881,9 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
       throw new Error("SQUAD_MCP_COPILOT_SANDBOX_WORKSPACE must be an absolute, non-root POSIX path.");
     }
     // The sandbox never logs in; without a server-owned identity no agentic stage could run.
-    if (identity.kind === "env" && !(env.SQUAD_MCP_COPILOT_GITHUB_TOKEN ?? "").trim()) {
+    // With per-user GitHub identity every run uses the caller's own linked account, so no
+    // shared credential is required, accepted or used.
+    if (!perUserGithub.enabled && identity.kind === "env" && !(env.SQUAD_MCP_COPILOT_GITHUB_TOKEN ?? "").trim()) {
       throw new Error(
         "SQUAD_MCP_STAGE_EXECUTOR=copilot requires a GitHub identity: set SQUAD_MCP_COPILOT_GITHUB_TOKEN, " +
           "SQUAD_MCP_COPILOT_GITHUB_TOKEN_FILE (a mounted secret), or SQUAD_MCP_COPILOT_GITHUB_TOKEN_COMMAND (e.g. \"gh auth token\").",
@@ -756,6 +901,7 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
     audiences: [...new Set(audiences)],
     allowedIssuers: [...new Set(allowedIssuers)],
     allowedTenants,
+    allowedClientsByAudience,
     allowedOrigins,
     allowedModelEndpoints,
     modelEndpoint,
@@ -805,5 +951,6 @@ export function loadOperatorConfig(env: NodeJS.ProcessEnv = process.env): Operat
     enableBusinessTools,
     stageExecutor,
     copilot,
+    perUserGithub,
   };
 }

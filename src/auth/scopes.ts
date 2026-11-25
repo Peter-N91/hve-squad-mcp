@@ -64,6 +64,12 @@ export const TOOL_SCOPES: Readonly<Record<string, string>> = {
   // agent loops into the native ADO/Jira connector. Separate scope from
   // Squad.Business so a backlog grant is independently revocable.
   squad_backlog: "Squad.Backlog",
+  // Per-user GitHub connection tools. They reuse Squad.Run on purpose: a caller who
+  // may start work may connect the GitHub account that work runs as, and neither
+  // host needs another scope exposed, pre-authorized and consented.
+  squad_github_status: "Squad.Run",
+  squad_github_connect: "Squad.Run",
+  squad_github_disconnect: "Squad.Run",
 };
 
 /**
@@ -71,9 +77,9 @@ export const TOOL_SCOPES: Readonly<Record<string, string>> = {
  * through `squad_approve` or `POST /admin/approve`. It is separate from
  * `Squad.Run` so a caller that may START or POLL a run (Squad.Run) still cannot
  * APPROVE one. Grant it as an Entra app role (application permission) to the
- * human/service principal that operates the deployment; the authenticator merges
- * `roles[]` into the resolved scopes, so the same check covers a delegated scope
- * or an app role. Never derivable from caller `request`/`context` or model output
+ * human/service principal that operates the deployment. Per-user mode checks
+ * app roles separately from delegated tool scopes; legacy service mode also
+ * supports its existing scope grants. Never derivable from caller `request`/`context` or model output
  * (SEC-6): explicit approval calls must pass this authorization check.
  */
 export const OPERATOR_APPROVAL_SCOPE = "Squad.Operate";
@@ -223,6 +229,27 @@ export const MEMORY_EXPOSED_TOOLS: ReadonlySet<string> = new Set([
  */
 export function isMemoryExposed(toolId: string): boolean {
   return MEMORY_EXPOSED_TOOLS.has(toolId);
+}
+
+/**
+ * The per-user GitHub connection tools. Synthetic transport tools like
+ * {@link SQUAD_STATUS_TOOL}: not squad routing intents, so not in the catalog and
+ * exempt from the generator drift check. Served only when per-user GitHub
+ * identity is configured.
+ */
+export const SQUAD_GITHUB_STATUS_TOOL = "squad_github_status";
+export const SQUAD_GITHUB_CONNECT_TOOL = "squad_github_connect";
+export const SQUAD_GITHUB_DISCONNECT_TOOL = "squad_github_disconnect";
+
+export const GITHUB_IDENTITY_TOOLS: ReadonlySet<string> = new Set([
+  SQUAD_GITHUB_STATUS_TOOL,
+  SQUAD_GITHUB_CONNECT_TOOL,
+  SQUAD_GITHUB_DISCONNECT_TOOL,
+]);
+
+/** CLASSIFICATION only; reachability is gated on the operator enabling per-user identity. */
+export function isGitHubIdentityTool(toolId: string): boolean {
+  return GITHUB_IDENTITY_TOOLS.has(toolId);
 }
 
 /** The federation meta tool id (a catalog tool, unlike the synthetic ids above). */

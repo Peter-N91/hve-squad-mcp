@@ -14,7 +14,7 @@ import type {
   CopilotSessionEvent,
   CopilotSessionPort,
 } from "./copilot-stage-executor.js";
-import { type CopilotEntitlementVerifier, CopilotRuntimeUnavailableError } from "./copilot-credentials.js";
+import { type CopilotEntitlementVerifier, CopilotRuntimeUnavailableError, isCredentialRejection } from "./copilot-credentials.js";
 
 export interface CopilotSdkClientOptions {
   /** `host:port` or URL of the sandbox runtime. */
@@ -28,7 +28,7 @@ export interface CopilotSdkClientOptions {
 export interface CopilotSdkClient extends CopilotClientPort {
   listModels(): Promise<string[]>;
   /** Proves a token can use Copilot without making it the runtime's account. */
-  entitlementVerifier(): CopilotEntitlementVerifier;
+  entitlementVerifier(options?: { requireFreshCredentialCheck?: boolean }): CopilotEntitlementVerifier;
   stop(): Promise<void>;
 }
 
@@ -38,6 +38,16 @@ type SdkSessionConfig = Parameters<SdkClient["createSession"]>[0];
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Cached model lists are not proof of a live user credential. */
+export function handleQuotaVerificationFailure(error: unknown, requireFresh: boolean): void {
+  if (isCredentialRejection(errorText(error))) throw error;
+  if (requireFresh) {
+    throw new CopilotRuntimeUnavailableError(
+      "Fresh GitHub credential verification is unavailable; cached model availability was not accepted.",
+    );
+  }
 }
 
 async function loadSdk(): Promise<Sdk> {
@@ -77,7 +87,7 @@ function toSdkConfig(sdk: Sdk, config: CopilotSessionConfig): SdkSessionConfig {
     onPermissionRequest: (request) => config.onPermissionRequest(request as unknown as Parameters<CopilotSessionConfig["onPermissionRequest"]>[0]),
     createSessionFsProvider: () => config.fileSystem as unknown as ReturnType<NonNullable<SdkSessionConfig["createSessionFsProvider"]>>,
     ...(config.gitHubTokenProvider
-      ? { gitHubTokenProvider: (args: { reason?: string }) => config.gitHubTokenProvider!({ reason: args.reason }) }
+      ? { gitHubTokenProvider: (args: { reason?: string; host?: string; sessionId?: string }) => config.gitHubTokenProvider!(args) }
       : config.gitHubToken ? { gitHubToken: config.gitHubToken } : {}),
     workingDirectory: config.workingDirectory,
     streaming: config.streaming,
@@ -177,7 +187,7 @@ export function lazyCopilotSdkClient(options: CopilotSdkClientOptions): CopilotS
         throw new CopilotRuntimeUnavailableError(`The Copilot sandbox runtime stopped answering: ${errorText(error)}`, { cause: error });
       }
     },
-    entitlementVerifier() {
+    entitlementVerifier(options = {}) {
       return {
         async verify(token: string) {
           const { client } = await connect();
@@ -194,8 +204,12 @@ export function lazyCopilotSdkClient(options: CopilotSdkClientOptions): CopilotS
             const quota = await client.rpc.account.getQuota({ gitHubToken: token });
             const premium = quota.quotaSnapshots.premium_interactions;
             if (premium && !premium.isUnlimitedEntitlement) premiumRemainingPercent = premium.remainingPercentage;
-          } catch {
-            // Quota is informational; entitlement is proven by the model list.
+          } catch (error) {
+            // The model list above can be answered from the runtime's cache after GitHub revoked
+            // the token, but the quota call always asks GitHub. A rejected credential here is
+            // authoritative. Per-user mode also refuses unavailable fresh validation;
+            // only legacy service mode treats other quota failures as informational.
+            handleQuotaVerificationFailure(error, options.requireFreshCredentialCheck === true);
           }
           return { models, ...(premiumRemainingPercent !== undefined ? { premiumRemainingPercent } : {}) };
         },

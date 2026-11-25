@@ -22,3 +22,8 @@ host/sandbox/** text eol=lf
 
 # Preserve upstream Git-blob bytes, including binary skill assets.
 host/upstream-runtime/** -text
+
+# Binary icons in cowork/ must not undergo line-ending conversion.
+cowork/*.png binary
+
+

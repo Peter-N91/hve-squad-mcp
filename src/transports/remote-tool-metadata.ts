@@ -3,7 +3,7 @@ import { SQUAD_GUIDED_BANNER } from "../engine/render-embedded.js";
 const DELEGATED_SENTENCE = /\s*Delegated execution:.*?(?=\s+Use for\b|$)/i;
 const DELEGATED_PIPELINE = /Research -> Plan -> Implement -> Review/gi;
 
-const MUTATING_TOOLS = new Set(["squad_memory_write", "squad_memory_sync", "squad_approve", "squad_respond"]);
+const MUTATING_TOOLS = new Set(["squad_memory_write", "squad_memory_sync", "squad_approve", "squad_respond", "squad_github_disconnect"]);
 const STATEFUL_TOOLS = new Set([
   "squad_research",
   "squad_plan",
@@ -14,6 +14,7 @@ const STATEFUL_TOOLS = new Set([
   "squad_business_plan",
   "squad_backlog",
   "squad_render_pptx",
+  "squad_github_connect",
 ]);
 
 export interface RemoteToolAnnotations {

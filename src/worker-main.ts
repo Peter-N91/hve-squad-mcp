@@ -68,6 +68,11 @@ export function buildWorker(
   const copilot = buildCopilotRuntime(config, memoryStack, { env, logger, runStateStore: stack.runStateStore });
   const prepareCopilot = async () => {
     if (!copilot) return;
+    if (!copilot.credentials) {
+      // Identity is per user and resolved from each run's owner; only the shared sandbox is checked here.
+      if (!(await copilot.readiness.check()).ready) throw new Error("Worker Copilot sandbox is unavailable.");
+      return;
+    }
     const status = await copilot.credentials.verify();
     if (!status.ready) throw new Error(`Worker Copilot identity is unavailable: ${status.reason}`);
     if (!(await copilot.readiness.check()).ready) throw new Error("Worker Copilot sandbox is unavailable.");
@@ -81,9 +86,14 @@ export function buildWorker(
     quota: new TenantQuotaTracker({
       concurrency: config.tenantConcurrency,
       monthlyCeilingUsd: config.tenantMonthlyCostCeilingUsd,
+      ...(config.perUserGithub.enabled ? {
+        userConcurrency: 1,
+        userMonthlyCeilingUsd: config.tenantMonthlyCostCeilingUsd / Math.max(1, config.tenantConcurrency),
+      } : {}),
     }),
     gates: new GateKeeper({ advisoryAutopilotEnabled: config.advisoryAutopilotEnabled }),
     runStateStore: stack.runStateStore,
+    runTtlMs: config.perUserGithub.enabled ? 7 * 24 * 60 * 60_000 : undefined,
     approvals: stack.approvals,
     autoMemory: config.memoryAutoEnabled && memoryStack
       ? new AutoMemory({ store: memoryStack.memoryStore, defaultProject: config.memoryDefaultProject, logger })
@@ -98,6 +108,7 @@ export function buildWorker(
       await prepareCopilot();
       return copilot.upstreamRun!(...args);
     } : undefined,
+    runPreflight: copilot?.runPreflight,
     logger,
   });
 

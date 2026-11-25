@@ -1,0 +1,49 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.28/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.28",
+  "version": "1.0.0",
+  "id": "00000000-0000-0000-0000-000000000000",
+  "developer": {
+    "name": "HVE Squad",
+    "websiteUrl": "https://example.invalid/",
+    "privacyUrl": "https://example.invalid/privacy",
+    "termsOfUseUrl": "https://example.invalid/terms"
+  },
+  "name": {
+    "short": "HVE Squad",
+    "full": "HVE Squad for Copilot Cowork"
+  },
+  "description": {
+    "short": "Research, planning, review and architecture with the HVE Squad.",
+    "full": "Connects Copilot Cowork to the HVE Squad MCP server. Complete actual Init and human questions, follow gated runs by run id and read the finished squad-guided artifact. AI-assisted output needs human review. Only an operator can release a held Human Gate."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#0b5394",
+  "agentSkills": [
+    {
+      "folder": "./skills/hve-squad-run"
+    }
+  ],
+  "agentConnectors": [
+    {
+      "id": "hve-squad-mcp",
+      "displayName": "HVE Squad MCP",
+      "description": "Calls carry your delegated Microsoft Entra identity. Optional GitHub linking happens through the server.",
+      "toolSource": {
+        "remoteMcpServer": {
+          "mcpServerUrl": "https://example.invalid/mcp",
+          "mcpToolDescription": {
+            "file": "./tools/hve-squad-tools.json"
+          },
+          "authorization": {
+            "type": "OAuthPluginVault",
+            "referenceId": "<AUTH_CONFIG_ID>"
+          }
+        }
+      }
+    }
+  ]
+}

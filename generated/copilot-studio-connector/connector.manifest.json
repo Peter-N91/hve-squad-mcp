@@ -78,9 +78,301 @@
       "scope": "Squad.Backlog"
     }
   ],
+  "identityTools": [
+    {
+      "name": "squad_github_status",
+      "title": "GitHub Connection Status",
+      "description": "Report whether your own GitHub account is connected for squad runs and whether it has GitHub Copilot access. Never returns a token.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "scope": "Squad.Run"
+    },
+    {
+      "name": "squad_github_connect",
+      "title": "Connect GitHub",
+      "description": "Start connecting your own GitHub account. Returns a single-use link to open in a browser; sign in with your work account there, then authorize GitHub. Runs use your own GitHub Copilot access once connected.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "scope": "Squad.Run"
+    },
+    {
+      "name": "squad_github_disconnect",
+      "title": "Disconnect GitHub",
+      "description": "Remove your stored GitHub connection. Existing runs cannot adopt a later link; start new work after reconnecting.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "scope": "Squad.Run"
+    }
+  ],
+  "lifecycleTools": [
+    {
+      "name": "squad_respond",
+      "title": "Respond to Squad Question",
+      "description": "Submit the human's answer to the current clarification or confirmation on an existing run. Requires Squad.Run, not Squad.Operate. Use the runId and questionId returned by squad_status; do not invent an answer or use this as operator approval. Returns a persisted response receipt; poll squad_status to continue the same run. Optional projectContext must match the saved run.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runId",
+          "questionId",
+          "answer"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "questionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "answer": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16000,
+            "pattern": "\\S"
+          },
+          "projectContext": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schemaVersion",
+              "projectId",
+              "revision",
+              "sequence"
+            ],
+            "properties": {
+              "schemaVersion": {
+                "type": "integer",
+                "enum": [
+                  1,
+                  2
+                ]
+              },
+              "projectId": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sequence": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "trackingRoot": {
+                "type": "string",
+                "const": ".copilot-tracking"
+              },
+              "storage": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "provider"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "onedrive",
+                      "sharepoint"
+                    ]
+                  },
+                  "driveId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "folderItemId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "displayPath": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 2
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "storage"
+                  ],
+                  "properties": {
+                    "storage": {
+                      "type": "object",
+                      "required": [
+                        "provider",
+                        "driveId",
+                        "folderItemId"
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "scope": "Squad.Run"
+    },
+    {
+      "name": "squad_history",
+      "title": "Squad History",
+      "description": "Browse and open what previous squad runs produced for a project: the squad state, each role's deliverables, and the per-agent history. Use op='index' for a compact picture of what exists, op='list' to enumerate a directory, and op='read' to open one artifact. Set offset=0 for exact JSON pages with UTF-8 SHA-256 receipts; continue at nextOffset until null, requiring the same etag and sha256 across pages. Without offset, reads are bounded previews. Deterministic: no model call, no impactful action.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project"
+        ],
+        "properties": {
+          "project": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "The project namespace within your tenant (lowercase dns-ish label)."
+          },
+          "op": {
+            "type": "string",
+            "enum": [
+              "index",
+              "list",
+              "read"
+            ],
+            "description": "index (default) summarizes; list enumerates a prefix; read opens one path."
+          },
+          "prefix": {
+            "type": "string",
+            "description": "For op='list': a directory such as '.copilot-tracking/plans'."
+          },
+          "path": {
+            "type": "string",
+            "description": "For op='read': the artifact path from a list result."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "For op='read' only: UTF-16 character offset. Start at 0 for exact bounded pages, then use nextOffset. Preserve content verbatim and verify the assembled UTF-8 sha256 and totalBytes."
+          },
+          "binaryOffset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "For op='read' of a .artifact.json binary metadata path: retrieve authenticated base64 bytes in bounded chunks. Start at 0, continue at nextOffset until null, verify totalBytes and sha256. Do not combine with text offset."
+          }
+        }
+      },
+      "scope": "Squad.Memory"
+    },
+    {
+      "name": "squad_memory_sync",
+      "title": "Squad Memory Sync",
+      "description": "Flush a batch of the project's own squad-memory entries in one call. Each item is written under its own compare-and-swap; pass the prior etag as expectedEtag to guard against clobbering a concurrent writer (omit it for a first write). A stale expectedEtag on one item is reported as a conflict in the results without aborting the others. Returns a per-item result array. Deterministic: no model call, no impactful action.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project",
+          "items"
+        ],
+        "properties": {
+          "project": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "The project namespace within your tenant (lowercase dns-ish label)."
+          },
+          "items": {
+            "type": "array",
+            "description": "The batch of memory entries to write; each is applied under its own CAS.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "content"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "The logical memory path (e.g. 'state', 'decisions', 'history/<agent>')."
+                },
+                "content": {
+                  "type": "string",
+                  "description": "The full new content to persist at 'path'."
+                },
+                "expectedEtag": {
+                  "type": "string",
+                  "description": "The etag from the prior read/write; this item applies only if it still matches."
+                }
+              }
+            }
+          },
+          "target": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+            "description": "Optional operator-declared storage destination to use (for example a SharePoint library). Omit to use the deployment's default destination."
+          }
+        }
+      },
+      "scope": "Squad.MemoryWrite"
+    }
+  ],
+  "operatorTools": [
+    {
+      "name": "squad_approve",
+      "title": "Approve Squad Run",
+      "description": "Submit an explicit human approval for an existing held run. Requires Squad.Operate. Read back the saved decision and obtain human confirmation before calling; files and tool consent alone are not approval. Map sourceRunId to runId and include the saved projectId for a project-bound run. Returns the authenticated approver and receipt; poll squad_status for the same run afterward. Never use this action for rejection or to start new work.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runId",
+          "decision"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "decision": {
+            "type": "string",
+            "const": "approve"
+          },
+          "projectId": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+          },
+          "decisionId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "scope": "Squad.Operate"
+    }
+  ],
   "deferredTargets": [
     "m365",
-    "agent-365",
-    "cowork"
+    "agent-365"
   ]
 }

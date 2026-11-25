@@ -34,6 +34,7 @@ import { createCapturingLogger } from "./log-capture.js";
 import { scriptedStageExecutor } from "../../helpers/scripted-stage-executor.js";
 import { MemoryBackedArtifactStore } from "../../../src/engine/artifact-store.js";
 import type { ReadinessProbe } from "../../../src/transports/readiness.js";
+import type { UserIdentityGate } from "../../../src/transports/user-identity-gate.js";
 
 const DEFAULT_ORIGIN = "https://copilotstudio.microsoft.com";
 
@@ -48,6 +49,8 @@ export interface HarnessOptions {
   audiences?: string[];
   allowedIssuers?: string[];
   allowedTenants?: string[];
+  /** Per-audience calling-client allow-list (`azp`/`appid`). */
+  allowedClientsByAudience?: Readonly<Record<string, readonly string[]>>;
   allowedOrigins?: string[];
   concurrency?: number;
   monthlyCeilingUsd?: number;
@@ -82,6 +85,14 @@ export interface HarnessOptions {
   runRecorder?: SquadRunRecorder;
   /** Default fakes isolate protocol/auth tests; opt in to test actual tool/artifact gates. */
   useRealStageExecutor?: boolean;
+  /** Replace the scripted stage executor, for example with a per-user one. */
+  stageExecutorFactory?: ConstructorParameters<typeof EmbeddedCoordinator>[0]["stageExecutorFactory"];
+  /** Per-user GitHub identity gate; absent = the single-identity behavior. */
+  userIdentity?: UserIdentityGate;
+  /** Guard run when an owned run is claimed for execution. */
+  runPreflight?: ConstructorParameters<typeof EmbeddedCoordinator>[0]["runPreflight"];
+  /** Browser account-link routes served under /github/link/. */
+  linkRoutes?: (req: HttpRequestLike) => Promise<HttpResponseLike | undefined>;
 }
 
 export interface Harness {
@@ -113,6 +124,7 @@ export function buildHarness(options: HarnessOptions = {}): Harness {
     audiences: options.audiences ?? [options.audience ?? TEST_AUDIENCE],
     allowedIssuers: options.allowedIssuers ?? [TEST_ISSUER],
     allowedTenants: options.allowedTenants ?? [],
+    allowedClientsByAudience: options.allowedClientsByAudience,
     verifier,
     logger,
   });
@@ -129,13 +141,15 @@ export function buildHarness(options: HarnessOptions = {}): Harness {
 
   const embedded = new EmbeddedCoordinator({
     backend,
-    stageExecutorFactory: options.useRealStageExecutor ? undefined : () => scriptedStageExecutor(backend),
+    stageExecutorFactory: options.stageExecutorFactory
+      ?? (options.useRealStageExecutor ? undefined : () => scriptedStageExecutor(backend)),
     researchArtifacts: options.useRealStageExecutor && options.memoryStore
       ? new MemoryBackedArtifactStore(options.memoryStore) : undefined,
     workspaceManager,
     quota,
     gates,
     runStateStore: options.runStateStore,
+    runPreflight: options.runPreflight,
     approvals,
     autoMemory: options.autoMemory,
     runRecorder: options.runRecorder,
@@ -162,6 +176,8 @@ export function buildHarness(options: HarnessOptions = {}): Harness {
     businessToolsExposed: options.businessToolsExposed ?? false,
     oauthResourceMetadataUrl: options.oauthResourceMetadataUrl,
     readiness: options.readiness,
+    userIdentity: options.userIdentity,
+    linkRoutes: options.linkRoutes,
   });
 
   return {

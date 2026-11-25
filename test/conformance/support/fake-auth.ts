@@ -32,6 +32,14 @@ export interface FakeIdentity {
   audience?: string;
   /** Override the issuer (default {@link TEST_ISSUER}). */
   issuer?: string;
+  /** Calling client application id (`azp`). Omitted = no `azp` claim. */
+  azp?: string;
+  /** Stable user object id (`oid`) when it differs from `subject`. */
+  oid?: string;
+  /** Pairwise `sub`; defaults to `subject`. Real Entra gives each client app a different value. */
+  sub?: string;
+  /** Issue an app-only token: `roles`, no `scp`, no user. */
+  appOnly?: boolean;
 }
 
 /** Build the JWT claims an identity resolves to. */
@@ -41,9 +49,10 @@ function claimsFor(identity: FakeIdentity): JwtClaims {
     iss: identity.issuer ?? TEST_ISSUER,
     aud: identity.audience ?? TEST_AUDIENCE,
     tid: identity.tenantId,
-    oid: identity.subject,
-    sub: identity.subject,
-    scp: identity.scopes.join(" "),
+    oid: identity.oid ?? identity.subject,
+    sub: identity.sub ?? identity.subject,
+    ...(identity.appOnly ? { roles: identity.scopes, idtyp: "app" } : { scp: identity.scopes.join(" ") }),
+    ...(identity.azp ? { azp: identity.azp } : {}),
     nbf: nowSec - 60,
     exp: nowSec + 3600,
   };

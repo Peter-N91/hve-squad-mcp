@@ -1,0 +1,2 @@
+# Preserve the official schema documents' original bytes for provenance hashes.
+fixtures/*.schema.json -text -whitespace

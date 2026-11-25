@@ -29,13 +29,22 @@ import { EntraAuthenticator } from "./auth/entra.js";
 import { createJoseVerifier } from "./auth/jose-verifier.js";
 import { EmbeddedCoordinator, type EmbeddedCoordinatorDeps } from "./engine/embedded.js";
 import { CopilotStageExecutor } from "./engine/copilot/copilot-stage-executor.js";
+import { perUserStageExecutor } from "./engine/copilot/per-user-executor.js";
+import { userSessionClient } from "./engine/copilot/user-session-client.js";
+import { buildPerUserStack, githubCredentialVault, SandboxReadiness, type PerUserStack } from "./server-per-user.js";
+import type { GitHubLinkStore, LinkFlowStore } from "./github-link/index.js";
+import { AzureTableGitHubLinkStore, AzureTableLinkFlowStore } from "./github-link/index.js";
+import type { ReadinessProbe } from "./transports/readiness.js";
 import { lazyCopilotSdkClient, type CopilotSdkClient } from "./engine/copilot/copilot-sdk-client.js";
 import {
   CommandCredentialSource,
   CopilotCredentials,
   EnvCredentialSource,
   FileCredentialSource,
+  type CopilotEntitlementVerifier,
+  type CopilotIdentityStatus,
   type GitHubCredentialSource,
+  type GitHubTokenProviderResult,
 } from "./engine/copilot/copilot-credentials.js";
 import { CopilotReadiness } from "./engine/copilot/copilot-readiness.js";
 import { FileCopilotSessionStateStore } from "./engine/copilot/session-state-store.js";
@@ -145,8 +154,13 @@ export const POLL_DRIVE_WAIT_MS = 30_000;
 /** The opt-in Copilot runtime: stage executor factory plus the readiness it depends on. */
 export interface CopilotRuntime {
   stageExecutorFactory: NonNullable<EmbeddedCoordinatorDeps["stageExecutorFactory"]>;
-  credentials: CopilotCredentials;
-  readiness: CopilotReadiness;
+  /** The shared GitHub identity; absent when identity is per user. */
+  credentials?: CopilotCredentials;
+  /** Per-user identity assembly; present when `perUserGithub` is enabled. */
+  perUser?: PerUserStack;
+  /** Engine guard for owned runs; present with per-user identity. */
+  runPreflight?: EmbeddedCoordinatorDeps["runPreflight"];
+  readiness: ReadinessProbe;
   upstreamRun?: EmbeddedCoordinatorDeps["upstreamRun"];
   localArtifactReference?: (tenantId: string, project: string, metadataPath: string) => Promise<{ downloadUrl: string; expiresAt: string; sha256: string; mediaType: string } | undefined>;
   localArtifactChunk?: (tenantId: string, project: string, metadataPath: string, offset: number) => Promise<{ base64: string; offset: number; nextOffset: number | null; totalBytes: number; sha256: string; mediaType: string } | undefined>;
@@ -168,7 +182,13 @@ export function buildCopilotCredentialSource(config: OperatorConfig, env: NodeJS
 export function buildCopilotRuntime(
   config: OperatorConfig,
   memoryStack: SquadMemoryStack | undefined,
-  options: { env?: NodeJS.ProcessEnv; logger?: RedactingLogger; client?: CopilotSdkClient; runStateStore?: RunStateStore } = {},
+  options: {
+    env?: NodeJS.ProcessEnv; logger?: RedactingLogger; client?: CopilotSdkClient; runStateStore?: RunStateStore;
+    /** Shared multi-replica stores for the account link; the file stores are used when absent. */
+    linkStore?: GitHubLinkStore; flowStore?: LinkFlowStore;
+    /** Trusted dependency injection for offline host-integration tests; never an MCP argument. */
+    perUserStack?: PerUserStack;
+  } = {},
 ): CopilotRuntime | undefined {
   if (config.stageExecutor !== "copilot") {
     return undefined;
@@ -185,20 +205,50 @@ export function buildCopilotRuntime(
     connectionToken: config.copilot.connectionToken,
     workspaceMount: config.copilot.sandboxWorkspace,
   });
-  const credentials = new CopilotCredentials({
-    source: buildCopilotCredentialSource(config, options.env),
-    verifier: {
-      async verify(token) {
-        const result = await client.entitlementVerifier().verify(token);
-        if (config.copilot.routing === "economy") {
-          const root = resolveSquadGithubRoot();
-          if (!root) throw new Error("Economy routing catalog root is unavailable.");
-          const picks = ["researcher", "lead", "developer", "tester"].map(role => selectEconomyModel(root, role, "default", result.models));
-          options.logger?.info("economy routing verification", { routing: "economy", picks: Object.fromEntries(picks.map(pick => [pick.role, pick.model])) });
-        }
-        return result;
-      },
+  // Proves Copilot access for whichever token is presented: the shared one, or a user's.
+  const entitlement: CopilotEntitlementVerifier = {
+    async verify(token) {
+      const result = await client.entitlementVerifier({
+        requireFreshCredentialCheck: config.perUserGithub.enabled,
+      }).verify(token);
+      if (config.copilot.routing === "economy") {
+        const root = resolveSquadGithubRoot();
+        if (!root) throw new Error("Economy routing catalog root is unavailable.");
+        const picks = ["researcher", "lead", "developer", "tester"].map(role => selectEconomyModel(root, role, "default", result.models));
+        options.logger?.info("economy routing verification", { routing: "economy", picks: Object.fromEntries(picks.map(pick => [pick.role, pick.model])) });
+      }
+      return result;
     },
+  };
+  // Per-user identity replaces the shared credential entirely; the two never coexist.
+  const perUserConfig = config.perUserGithub;
+  let linkStore = options.linkStore;
+  let flowStore = options.flowStore;
+  if (perUserConfig.enabled && perUserConfig.linkStore.kind === "table") {
+    // Several replicas and the worker must agree on links and on single-use flow state.
+    if (!config.storageAccount) throw new Error("SQUAD_MCP_GITHUB_LINK_STORE=table requires SQUAD_MCP_STORAGE_ACCOUNT.");
+    const connection = { account: config.storageAccount, getAccessToken: createManagedIdentityTokenProvider(STORAGE_SCOPE) };
+    linkStore ??= new AzureTableGitHubLinkStore({ ...connection, tableName: perUserConfig.linkStore.table });
+    flowStore ??= new AzureTableLinkFlowStore({
+      ...connection,
+      tableName: perUserConfig.linkStore.flowTable,
+      cipher: githubCredentialVault(perUserConfig),
+    });
+  }
+  const perUser = perUserConfig.enabled
+    ? options.perUserStack ?? buildPerUserStack(perUserConfig, {
+        verifier: entitlement,
+        logger: options.logger,
+        linkStore,
+        flowStore,
+      })
+    : undefined;
+  if (perUser && !options.runStateStore) {
+    throw new Error("Per-user GitHub identity requires the durable run-state store: a run's owner is read from its record.");
+  }
+  const credentials = perUser ? undefined : new CopilotCredentials({
+    source: buildCopilotCredentialSource(config, options.env),
+    verifier: entitlement,
     reverifyMs: config.copilot.identityReverifyMs,
   });
   const store = new MemoryBackedArtifactStore(memoryStack.memoryStore);
@@ -211,15 +261,16 @@ export function buildCopilotRuntime(
     !config.copilot.allowedHosts.length || config.copilot.allowedHosts.includes(new URL(origin).hostname));
   const upstreamService = upstreamBundle && options.runStateStore ? new UpstreamRunService({
     store: options.runStateStore,
-    runtimeOptions: ({ run, workspace, request }) => {
-      const identity = credentials.status();
-      if (!identity.ready || !identity.modelIds?.length) throw new Error("Upstream execution requires verified Copilot model availability.");
+    runtimeOptions: async ({ run, workspace, request }) => {
+      const identity = perUser ? await perUser.statusForRun(run) : credentials!.status();
+      if (!identity?.ready || !identity.modelIds?.length) throw new Error("Upstream execution requires verified Copilot model availability.");
+      const gitHubTokenProvider = perUser ? perUser.tokenProviderForRun(run) : credentials!.tokenProvider;
       const proposedRouting = config.copilot.routing === "economy" ? { mode: "economy" as const } : { mode: "ranked" as const };
-      return { enabled: true, client, bundle: upstreamBundle, store, workspace, sessionState,
+      return { enabled: true, client: perUser ? userSessionClient(client, perUser, run) : client, bundle: upstreamBundle, store, workspace, sessionState,
         routing: proposedRouting,
         tenantId: run.tenantId, project: request.project ?? config.memoryDefaultProject, runId: run.runId,
         // Init opens no SDK session. The runtime resolves the actual coordinator model after the user selects routing.
-        modelIds: identity.modelIds, coordinatorModel: identity.modelIds[0], gitHubTokenProvider: credentials.tokenProvider,
+        modelIds: identity.modelIds, coordinatorModel: identity.modelIds[0], gitHubTokenProvider,
         profile: request.profile, mode: "autopilot", deadlineMs: 2100000, maxModelCalls: 100, maxProcedureCalls: 100,
         sourceOrigins: upstreamSourceOrigins,
         sourceReader: (source, signal) => readUpstreamPublicSource(source.target, signal, upstreamSourceOrigins),
@@ -257,7 +308,8 @@ export function buildCopilotRuntime(
   }) : undefined;
   return {
     credentials,
-    readiness: new CopilotReadiness(credentials, client, options.logger),
+    perUser,
+    readiness: perUser ? new SandboxReadiness(client) : new CopilotReadiness(credentials!, client, options.logger),
     ...(localBinaryStore ? { localArtifactReference: async (tenantId, project, metadataPath) => {
       const stored = await store.get(tenantId, project, metadataPath);
       if (!stored) return undefined;
@@ -300,28 +352,46 @@ export function buildCopilotRuntime(
       if (result.status === "failed") return { ...common, outcome: "denied" as const, reason: result.reason };
       return { ...common, outcome: "completed" as const };
     } } : {}),
-    stageExecutorFactory: (workspace, project, runId, stageOptions) => new CopilotStageExecutor({
-      client,
-      workspace,
-      store,
-      sessionState,
-      project: project ?? config.memoryDefaultProject,
-      runId,
-      model: config.copilot.model || undefined,
-      routing: config.copilot.routing,
-      gitHubTokenProvider: credentials.tokenProvider,
-      identityStatus: () => credentials.status(),
-      builtInTools: config.copilot.upstreamRuntime
-        ? (config.copilot.tools.length ? config.copilot.tools : ["view", "create", "edit", "web_fetch"])
-          .filter(name => !["bash", "glob", "grep"].includes(name))
-        : config.copilot.tools.length > 0 ? config.copilot.tools : undefined,
-      allowShell: config.copilot.allowShell && !config.copilot.upstreamRuntime,
-      delegation: config.copilot.subagents,
-      network: { allowedHosts: config.copilot.allowedHosts },
-      sandboxWorkspace: config.copilot.sandboxWorkspace,
-      deadlineMs: stageOptions?.deadlineMs,
-      onCompletion: stageOptions?.onCompletion,
-    }),
+    stageExecutorFactory: (workspace, project, runId, stageOptions) => {
+      const make = (
+        gitHubTokenProvider: (args: { reason?: string }) => Promise<GitHubTokenProviderResult>,
+        identityStatus: () => CopilotIdentityStatus,
+        sessionClient = client,
+      ) => new CopilotStageExecutor({
+        client: sessionClient,
+        workspace,
+        store,
+        sessionState,
+        project: project ?? config.memoryDefaultProject,
+        runId,
+        model: config.copilot.model || undefined,
+        routing: config.copilot.routing,
+        gitHubTokenProvider,
+        identityStatus,
+        builtInTools: config.copilot.upstreamRuntime
+          ? (config.copilot.tools.length ? config.copilot.tools : ["view", "create", "edit", "web_fetch"])
+            .filter(name => !["bash", "glob", "grep"].includes(name))
+          : config.copilot.tools.length > 0 ? config.copilot.tools : undefined,
+        allowShell: config.copilot.allowShell && !config.copilot.upstreamRuntime,
+        delegation: config.copilot.subagents,
+        network: { allowedHosts: config.copilot.allowedHosts },
+        sandboxWorkspace: config.copilot.sandboxWorkspace,
+        deadlineMs: stageOptions?.deadlineMs,
+        onCompletion: stageOptions?.onCompletion,
+      });
+      if (!perUser) return make(credentials!.tokenProvider, () => credentials!.status());
+      // Per user: the owner is read from the run record when the first stage executes.
+      return perUserStageExecutor({
+        runs: options.runStateStore!,
+        credentials: perUser.credentials,
+        runId,
+        build: ({ tokenProvider, identity, run }) => make(
+          tokenProvider, () => identity,
+          { ...client, ...userSessionClient(client, perUser, run) },
+        ),
+      });
+    },
+    ...(perUser ? { runPreflight: perUser.runPreflight } : {}),
   };
 }
 
@@ -456,6 +526,8 @@ export function buildHttpHandler(
     audiences: config.audiences,
     allowedIssuers: config.allowedIssuers,
     allowedTenants: config.allowedTenants,
+    allowedClientsByAudience: config.allowedClientsByAudience,
+    requireDelegatedUser: config.perUserGithub.enabled,
     verifier: createJoseVerifier({
       jwksUri,
       issuer: config.allowedIssuers.length > 0 ? config.allowedIssuers : undefined,
@@ -514,9 +586,14 @@ export function buildHttpHandler(
     quota: new TenantQuotaTracker({
       concurrency: config.tenantConcurrency,
       monthlyCeilingUsd: config.tenantMonthlyCostCeilingUsd,
+      ...(config.perUserGithub.enabled ? {
+        userConcurrency: 1,
+        userMonthlyCeilingUsd: config.tenantMonthlyCostCeilingUsd / Math.max(1, config.tenantConcurrency),
+      } : {}),
     }),
     gates: new GateKeeper({ advisoryAutopilotEnabled: config.advisoryAutopilotEnabled }),
     runStateStore: stack?.runStateStore,
+    runTtlMs: config.perUserGithub.enabled ? 7 * 24 * 60 * 60_000 : undefined,
     approvals: stack?.approvals,
     // WI-1b4-WORKER: when a worker is enabled, the poll is read-only and the ACA
     // Job drives approved runs off the request path (runs may exceed 240s).
@@ -557,6 +634,7 @@ export function buildHttpHandler(
         : undefined,
     stageExecutorFactory: copilotRuntime?.stageExecutorFactory,
     upstreamRun: copilotRuntime?.upstreamRun,
+    runPreflight: copilotRuntime?.runPreflight,
     logger,
   });
 
@@ -573,6 +651,8 @@ export function buildHttpHandler(
     memoryStore: memoryStack?.memoryStore,
     businessToolsExposed: config.enableBusinessTools,
     readiness: copilotRuntime?.readiness,
+    userIdentity: copilotRuntime?.perUser?.gate,
+    linkRoutes: copilotRuntime?.perUser?.linkRoutes,
     localArtifactReference: copilotRuntime?.localArtifactReference,
     localArtifactChunk: copilotRuntime?.localArtifactChunk,
   });

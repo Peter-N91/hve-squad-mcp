@@ -79,6 +79,8 @@ interface RunEntity {
   status: RunStatus;
   createdAt: number;
   updatedAt?: number;
+  /** Owner identifiers, JSON-serialized (no credential). */
+  owner?: string;
   holdReason?: string;
   failureReason?: string;
   responsibleAi?: string;
@@ -352,6 +354,7 @@ export class AzureTableRunStateStore implements RunStateStore {
       createdAt: run.createdAt,
     };
     if (run.updatedAt !== undefined) entity.updatedAt = run.updatedAt;
+    if (run.owner !== undefined) entity.owner = JSON.stringify(run.owner);
     if (run.holdReason !== undefined) entity.holdReason = run.holdReason;
     if (run.failureReason !== undefined) entity.failureReason = run.failureReason;
     if (run.responsibleAi !== undefined) entity.responsibleAi = JSON.stringify(run.responsibleAi);
@@ -408,6 +411,7 @@ export class AzureTableRunStateStore implements RunStateStore {
       status: entity.status,
       createdAt: entity.createdAt,
       updatedAt: entity.updatedAt,
+      ...(entity.owner !== undefined ? { owner: JSON.parse(entity.owner) as RunState["owner"] } : {}),
       holdReason: entity.holdReason,
       failureReason: entity.failureReason,
       responsibleAi: entity.responsibleAi === undefined
@@ -468,6 +472,7 @@ export class AzureTableRunStateStore implements RunStateStore {
       createdAt: now,
       updatedAt: now,
       expiresAt: init.ttlMs !== undefined ? now + init.ttlMs : undefined,
+      ...(init.owner ? { owner: { ...init.owner } } : {}),
     };
     // WI-07 — create the backing table on first write (memoized).
     await this.ensureTable();
@@ -521,7 +526,7 @@ export class AzureTableRunStateStore implements RunStateStore {
 
   async update(
     runId: string,
-    patch: Partial<Omit<RunState, "runId" | "tenantId" | "toolId" | "createdAt">>,
+    patch: Partial<Omit<RunState, "runId" | "tenantId" | "toolId" | "createdAt" | "owner">>,
   ): Promise<RunState | undefined> {
     const entity = await this.fetchEntity(runId);
     if (!entity) {

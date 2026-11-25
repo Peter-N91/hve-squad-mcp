@@ -15,6 +15,7 @@ spike/
 host/infra/main.json
 
 .copilot-tracking/
+.playwright-mcp/
 
 # ---------------------------------------------------------------------------
 # Deployment-specific and secret material. THIS REPOSITORY IS PUBLIC — never
@@ -26,6 +27,16 @@ host/infra/main.json
 # placeholder versions are tracked.
 copilot-studio/connector/apiDefinition.swagger.json
 copilot-studio/connector/apiProperties.json
+
+# The packed Cowork plugin and local deployment output folder carry live MCP
+# endpoints, Entra tenant/app/auth-config IDs, and saved credentials. Only
+# tracked sources under cowork/ and templates/docs in deploy-output/ are kept.
+cowork/build/
+cowork/.pack-staging-*/
+deploy-output/*
+!deploy-output/.gitkeep
+!deploy-output/README.md
+!deploy-output/mcp-deployment.example.json
 
 # Bicep parameter files completed with real tenant/subscription values.
 host/infra/*.local.bicepparam
