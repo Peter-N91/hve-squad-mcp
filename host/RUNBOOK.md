@@ -309,6 +309,25 @@ A successful response returns `serverInfo.name = hve-squad-mcp` and an
 `Mcp-Session-Id` header. A `401` means the token audience/issuer is not accepted;
 a `403 origin_not_allowed` means the `Origin` is not on the allow-list.
 
+### Save local deployment state and compile the Cowork plugin
+
+Persist the deployed MCP endpoint and Entra/Cowork registration IDs locally into
+gitignored `deploy-output/mcp-deployment.local.json` and compile the uploadable
+v1.29 dynamic Cowork + Code plugin (`deploy-output/hve-squad-cowork.zip`):
+
+```powershell
+npm run cowork:compile -- --save-config --verify-live `
+  --fqdn "<mcpFqdn>" `
+  --oauth-reference-id "<OAUTH_CLIENT_REGISTRATION_ID>" `
+  --tenant-id "$TENANT_ID" `
+  --resource-client-id "<ENTRA_CLIENT_ID>" `
+  --bearer-token "$TOKEN"
+```
+
+See [cowork/SETUP.md](../cowork/SETUP.md) and
+[.github/skills/deploy-mcp-cowork/SKILL.md](../.github/skills/deploy-mcp-cowork/SKILL.md)
+for the Teams Developer Portal SSO registration and full agent deployment workflow.
+
 ## Step 8 — import the connector into Copilot Studio (PROD-1)
 
 The connector files are generated under

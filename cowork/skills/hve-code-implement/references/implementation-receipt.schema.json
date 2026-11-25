@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HVE native Code implementation evidence (not approval)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "kind", "receiptId", "projectId", "createdAt", "storage", "host", "mode", "capabilities", "authorization", "sourceRun", "inputs", "outputs", "tests", "openFindings"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "kind": {"const": "hve-code-implementation-receipt"},
+    "receiptId": {"$ref": "#/definitions/uuid"},
+    "projectId": {"$ref": "#/definitions/uuid"},
+    "createdAt": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"},
+    "storage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["provider", "driveId", "folderItemId"],
+      "properties": {"provider": {"enum": ["onedrive", "sharepoint"]}, "driveId": {"$ref": "#/definitions/text"}, "folderItemId": {"$ref": "#/definitions/text"}}
+    },
+    "host": {"const": "m365-copilot-code"},
+    "mode": {"enum": ["artifact-only", "squad-connected"]},
+    "capabilities": {
+      "type": "object", "additionalProperties": false,
+      "required": ["skill", "squadTools", "cloudReadWrite", "codeExecution"],
+      "properties": {
+        "skill": {"const": "available"},
+        "squadTools": {"enum": ["discovered", "unavailable"]},
+        "cloudReadWrite": {"const": "verified"},
+        "codeExecution": {"enum": ["verified", "unavailable"]}
+      }
+    },
+    "authorization": {
+      "type": "object", "additionalProperties": false,
+      "required": ["mode", "request", "recordedAt", "authorityVerified", "approvedInputEvidence"],
+      "properties": {
+        "mode": {"enum": ["approved-inputs", "experimental-draft"]},
+        "request": {"$ref": "#/definitions/text"},
+        "recordedAt": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"},
+        "authorityVerified": {"const": false},
+        "approvedInputEvidence": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/definitions/path"}}
+      }
+    },
+    "sourceRun": {
+      "type": "object", "additionalProperties": false, "required": ["runId", "status"],
+      "properties": {"runId": {"$ref": "#/definitions/uuid"}, "status": {"enum": ["succeeded", "failed", "held", "running", "unknown"]}}
+    },
+    "inputs": {"type": "array", "minItems": 1, "items": {"$ref": "#/definitions/file"}},
+    "outputs": {"type": "array", "minItems": 1, "items": {"$ref": "#/definitions/output"}},
+    "tests": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "status", "environment", "tool", "evidence"],
+        "properties": {
+          "id": {"$ref": "#/definitions/text"}, "status": {"enum": ["pass", "fail", "not-run"]},
+          "environment": {"enum": ["cloud-sandbox", "local-machine", "static-inspection"]},
+          "tool": {"$ref": "#/definitions/text"}, "evidence": {"$ref": "#/definitions/text"}
+        }
+      }
+    },
+    "openFindings": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/definitions/text"}}
+  },
+  "allOf": [
+    {"if": {"properties": {"mode": {"const": "squad-connected"}}}, "then": {"properties": {"capabilities": {"properties": {"squadTools": {"const": "discovered"}}}}}},
+    {"if": {"properties": {"authorization": {"properties": {"mode": {"const": "approved-inputs"}}}}}, "then": {
+      "properties": {
+        "authorization": {"properties": {"approvedInputEvidence": {"minItems": 1}}},
+        "sourceRun": {"properties": {"status": {"const": "succeeded"}}},
+        "openFindings": {"maxItems": 0}
+      }
+    }}
+  ],
+  "definitions": {
+    "uuid": {"type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"},
+    "text": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "path": {"type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\:%?#])(?!.*//)(?!.*\u0000)[^/]+(?:/[^/]+)*$"},
+    "file": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "itemId", "eTag", "sha256", "bytes"],
+      "properties": {
+        "path": {"$ref": "#/definitions/path"}, "itemId": {"$ref": "#/definitions/text"},
+        "eTag": {"$ref": "#/definitions/text"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "output": {
+      "allOf": [
+        {"$ref": "#/definitions/file"},
+        {"properties": {"path": {"pattern": "^implementation/(?!receipts/).+"}}}
+      ]
+    }
+  }
+}

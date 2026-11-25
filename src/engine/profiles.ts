@@ -54,7 +54,6 @@ export const DELIVERABLE_PRODUCING_ROLES: readonly string[] = [
   "product-owner",
   "designer",
   "experimenter",
-  "presenter",
   "technical-writer",
   "data-scientist",
 ];
@@ -298,7 +297,7 @@ export interface DeliverableRootOptions {
  * Resolve the directory a role writes its deliverable into.
  *
  * Returns `undefined` for a role the roster deliberately omits — `cost-manager`,
- * `intake-validator` and friends hand a structured result back to the coordinator
+ * `fact-checker` and friends hand a structured result back to the coordinator
  * instead of writing a standalone artifact, so having no root is correct for them
  * rather than a gap.
  */

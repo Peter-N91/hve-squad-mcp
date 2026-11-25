@@ -5,8 +5,12 @@ license: MIT
 metadata:
   authors: "Peter-N91/hve-squad"
   spec_version: "1.0"
-  last_updated: "2026-09-30"
+  last_updated: "2026-10-24"
 ---
+<!--
+Copyright (c) Microsoft Corporation.
+Licensed under the MIT license.
+-->
 
 # Seed Templates
 
@@ -16,9 +20,9 @@ They stay consistent with the three squad instruction files: `team.md` holds the
 
 ## team.md
 
-Seeded from the confirmed profile's members plus the roles of every applied pack; the template below shows the `full` profile with no pack applied. For other profiles, only the profile's rows are written, and each applied pack appends its own roles to them. The `Member Name` column is populated from the Init Mode naming step: it may be empty for roles the user chose not to name, and it must be unique within a `Role` when two rows share the same role. The role-to-agent relationship is many-to-many: each role names one **Primary** agent the coordinator dispatches by default plus optional **Alternate** agents it resolves to per the row's `Selection Cue`. **Seed the `Selection Cue` cell with the row's condition, and `—` when the role has no alternates**, because the full cast catalog is canonical in `references/roster-catalog.md`, a reference file that loads only when a role's Skill Reference Contract calls for it: a roster that lists alternates without saying when they apply invites the coordinator to pick the one that sounds closest, which swaps a role's methodology silently. The `devrel`, `networking`, `gcp`, and `identity` roles have no deployed HVE Core agent and no backing skill, so they stay unselectable until one exists. The opt-in `backlog-executor` role is absent from every profile and is appended to `team.md` only when the user accepts the coordinator's offer to add it. Pack roles such as `pp-architect` and `pp-connector` are likewise absent from every profile template and are appended only when a pack is applied, and `qa-engineer` and `release-engineer` are absent for the related reason that their Primaries are registered opt-in external agents — a registered-but-uninstalled role is never seeded.
+Seeded from the confirmed profile's members plus applied-pack roles; the template below shows `full` without packs. For other profiles, write only that profile's rows, then append each applied pack's rows. `Member Name` comes from Init naming and must be unique within a shared `Role`. Each role has one Primary plus optional Alternates selected by `Selection Cue`; seed `Selection Cue` explicitly (`—` when none). `devrel`, `networking`, and `identity` remain unselectable until a backing capability exists. `gcp` is seeded only through a validated additive connector binding (`Primary=Squad Connector`, unique `Member Name`, aligned role), never from profile defaults. `backlog-executor` and opt-in external roles are seeded only when explicitly accepted.
 
-The template below is the default `routing=off` shape. When Init runs with `routing=ranked`, `routing=economy`, or `routing=manual`, add the line `Model routing: <mode>` directly beneath the H1 and a `Model` column between `Model Tier` and `Deliverable Root`, filled with each role's Model ID as the coordinator resolved it (see `model-routing.md`). `intake-validator` seeds at `default`, not `fast`: its readiness verdict gates every later stage, and a lightweight model's judgment of whether requirements are complete is the wrong place to save cost.
+The template below is the default `routing=off` shape. With active packs, add `Packs: <comma-separated names>` directly beneath the H1; omit it with none. When Init runs with `routing=ranked`, `routing=economy`, or `routing=manual`, add `Model routing: <mode>` on the next line (directly beneath the H1 when there is no `Packs:` line) and a `Model` column between `Model Tier` and `Deliverable Root`, filled with each role's Model ID as the coordinator resolved it (see `model-routing.md`). `intake-validator` seeds at `default`, not `fast`: its readiness verdict gates every later stage, and a lightweight model's judgment of whether requirements are complete is the wrong place to save cost.
 
 ```markdown
 ---
@@ -58,14 +62,24 @@ description: "Squad roster: roles and the deployed HVE Core agents that fill the
 | prompt-engineer | Sigma       | Squad Prompt Engineer        | Vally Test Author, HVE Artifact Tester                 | conformance stimuli → Vally Test Author; artifact conformance run → HVE Artifact Tester                 | runSubagent / task | default                 | .copilot-tracking/prompts/            |
 | analyst         | Omega       | PRD Builder                  | BRD Builder, Meeting Analyst                           | business requirements → BRD Builder; transcript-to-requirements → Meeting Analyst                       | runSubagent / task | default                 | .copilot-tracking/plans/              |
 | product-owner   | Alpha-2     | Functional Planner           | Issue Triage Agent                                     | single-issue triage → Issue Triage Agent                                                                | runSubagent / task | default                 | .copilot-tracking/plans/              |
-| presenter       | Tau         | PowerPoint Subagent          | —                                                      | —                                                                                                       | runSubagent / task | default                 | .copilot-tracking/ppt/<date>/<slug>/  |
 | technical-writer | Upsilon    | Squad Technical Writer       | —                                                      | —                                                                                                       | runSubagent / task | fast                    | docs/                                 |
 | experimenter    | Beta-2      | Experiment Designer          | —                                                      | —                                                                                                       | runSubagent / task | default                 | .copilot-tracking/plans/              |
 | data-scientist  | Gamma-2     | Squad Data Scientist         | —                                                      | —                                                                                                       | runSubagent / task | default                 | outputs/                              |
-| intake-validator |            | PRD Quality Reviewer         | BRD Quality Reviewer                                   | BRD under review → BRD Quality Reviewer                                                                 | runSubagent / task | default                 | —                                     |
+| intake-validator |            | PRD Quality Reviewer         | BRD Quality Reviewer                                   | BRD under review → BRD Quality Reviewer                                                                 | runSubagent / task | default                 | .copilot-tracking/reviews/            |
 | scribe          |             | Squad Scribe                 | —                                                      | —                                                                                                       | runSubagent / task | fast                    | (squad state)                         |
 | devrel          |             | —                            | —                                                      | —                                                                                                       | —                  | — (no backing skill)    | —                                     |
 ```
+
+When connector role modes are configured, append this optional section after `## Members`; omit it entirely when empty:
+
+```markdown
+## Connector Bindings
+
+| Binding ID | Connector ID | Manifest | Endpoint Kind | Role Mode | Target Kind | Target | Member Name | Added Role | Aligned Role | Default Execution |
+|------------|--------------|----------|---------------|-----------|-------------|--------|-------------|------------|--------------|-------------------|
+```
+
+`Connector Bindings` is roster-owned authority (`connector-role-modes.md`), not an `Alternate Agents` rewrite.
 
 ## routing.md
 
@@ -103,7 +117,6 @@ description: "Squad routing: request patterns mapped to roles, autonomy tiers, a
 | create work items in ADO, push backlog to Azure DevOps, create Jira issues, apply the handoff, execute handoff, sync work items to the tracker | backlog-executor | confirm | no |
 | GitLab merge request, GitLab pipeline, GitLab issue, open an MR | product-owner        | escalate      | no                |
 | experiment, hypothesis, validate assumption, MVE, riskiest assumption | experimenter        | confirm | yes         |
-| presentation, deck, slides, executive summary, pitch | presenter                    | confirm       | no                |
 | document, write up, summarize for stakeholders, readme | technical-writer           | confirm       | no                |
 | data profile, data dictionary, EDA, exploratory analysis, notebook, dashboard, dataset, Power BI, DAX, semantic model, star schema, report design, Fabric, Lakehouse, OneLake | data-scientist | confirm | no |
 | architecture, system design, components    | architect                    | auto          | yes               |
@@ -122,10 +135,9 @@ description: "Squad routing: request patterns mapped to roles, autonomy tiers, a
 | re-platform, rewrite, port to, rebuild in, cross-stack rewrite, Node to .NET, React to Angular, convert to another language | modernizer | confirm | no |
 | Power Platform, Power Apps, canvas app, model-driven app, Power Automate, cloud flow, Dataverse, Power Pages, Copilot Studio, DLP policy, Power Platform environment, solution ALM | pp-architect | confirm | yes |
 | custom connector, connector certification, apiDefinition.swagger.json, apiProperties.json, script.csx, paconn, MCP connector, Copilot Studio MCP, agentic protocol | pp-connector | confirm | no |
-| declarative agent, Microsoft 365 Copilot agent, M365 Copilot agent, agent manifest, TypeSpec agent, API plugin, conversation starter, agent capability, Agents Toolkit | m365-agent-architect | confirm | yes |
-| Microsoft Graph, Graph SDK, Graph permission scope, MCP-backed Copilot agent, agent tool import, M365 admin center, Copilot agent rollout, agent governance in M365 | m365-agent-integrator | confirm | no |
+| declarative agent, Microsoft 365 Copilot agent, M365 Copilot agent, agent manifest, Teams app manifest, M365 evaluation suite, TypeSpec agent, API plugin, conversation starter, agent capability, Agents Toolkit | m365-agent-architect | confirm | yes |
+| Microsoft Graph, Graph SDK, Graph permission scope, Agents SDK OpenTelemetry, Agents SDK provisioning, Copilot MCP widget server, MCP-backed Copilot agent, agent tool import, M365 admin center, Copilot agent rollout, agent governance in M365 | m365-agent-integrator | confirm | no |
 | GitHub Actions, workflow file, CI pipeline, pipeline hardening, pin actions to SHA, OIDC in CI, CI minutes, build cost, deployment environment, release train, rollout plan, rollback plan, Azure DevOps pipeline | release-engineer | confirm | no |
 | AWS, Lambda, S3, DynamoDB, EC2, ECS, EKS, Fargate, API Gateway, EventBridge, Step Functions, CloudFormation, AWS CDK, SAM, AWS landing zone, AWS Organizations, Control Tower, AWS Well-Architected | aws-architect | confirm | yes |
 | CloudWatch alarm, AWS incident, AWS outage, Lambda throttling, Logs Insights, X-Ray trace, AWS root cause | aws-diagnose | auto | yes |
 ```
-

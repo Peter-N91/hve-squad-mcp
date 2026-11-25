@@ -59,17 +59,87 @@ export function buildRunBillingLog(runId: string, records: readonly CompletionUs
   const knownCreditsSubtotal = usage?.hostBilledCredits ?? null;
   const hostBilledCredits = billingStatus === "complete" ? knownCreditsSubtotal : null;
   const sourceSha256 = createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
-  const timestamp = canonical.map(record => record.recordedAt).sort().at(-1) ?? "1970-01-01T00:00:00.000Z";
-  const events: object[] = [{
-    type: "session.info", timestamp,
-    data: { runId, source: "server-sdk-completion-ledger", sourceSha256, billingStatus,
-      completionCount, billedCompletionCount, unreportedBillingCompletions, knownCreditsSubtotal },
-  }];
+  const timestamps = canonical.map(record => record.recordedAt).sort();
+  const firstTimestamp = timestamps[0] ?? "1970-01-01T00:00:00.000Z";
+  const timestamp = timestamps.at(-1) ?? "1970-01-01T00:00:00.000Z";
+  const events: object[] = [
+    { type: "session.start", timestamp: firstTimestamp, data: { sessionId: runId } },
+    {
+      type: "session.info", timestamp,
+      data: { runId, source: "server-sdk-completion-ledger", sourceSha256, billingStatus,
+        completionCount, billedCompletionCount, unreportedBillingCompletions, knownCreditsSubtotal },
+    },
+  ];
   if (hostBilledCredits !== null) {
     const totalNanoAiu = Math.round(hostBilledCredits * 1_000_000_000);
     if (!Number.isSafeInteger(totalNanoAiu)) throw new Error("Aggregated billing exceeds safe nano-AIU precision.");
-    // Squad reads the last checkpoint as cumulative, not a sum of per-call events.
+    const agentIds = new Map<string, string>();
+    let allocatedNanoAiu = 0;
+    for (let index = 0; index < canonical.length; index++) {
+      const record = canonical[index];
+      const actor = record.actor?.trim() ?? "";
+      const isOrchestration = !actor || actor === "Squad Coordinator" || actor === "coordinator";
+      let agentId: string | undefined;
+      if (!isOrchestration) {
+        agentId = agentIds.get(actor);
+        if (!agentId) {
+          agentId = `agent-${agentIds.size + 1}`;
+          agentIds.set(actor, agentId);
+          events.push({
+            type: "subagent.started", timestamp: record.recordedAt, agentId,
+            data: { agentName: actor, agentDisplayName: actor },
+          });
+        }
+      }
+      const recordUsage = record.usage!;
+      const recordNanoAiu = index === canonical.length - 1
+        ? totalNanoAiu - allocatedNanoAiu
+        : Math.round((recordUsage.hostBilledCredits ?? 0) * 1_000_000_000);
+      if (!Number.isSafeInteger(recordNanoAiu) || recordNanoAiu < 0) {
+        throw new Error("Invalid per-completion nano-AIU amount.");
+      }
+      allocatedNanoAiu += recordNanoAiu;
+      const cacheReadTokens = Math.max(0, Math.round(recordUsage.cacheReadTokens ?? 0));
+      const cacheWriteTokens = Math.max(0, Math.round(recordUsage.cacheWriteTokens ?? 0));
+      const inputTokens = Math.max(cacheReadTokens + cacheWriteTokens, Math.round(recordUsage.inputTokens ?? 0));
+      const outputTokens = Math.max(0, Math.round(recordUsage.outputTokens ?? 0));
+      events.push({
+        type: "session.usage_record",
+        timestamp: record.recordedAt,
+        ...(agentId ? { agentId } : {}),
+        data: {
+          usage: {
+            accounting: { sourceSessionId: runId, usageId: record.eventId },
+            aiCreditsStatus: "complete",
+            model: record.model?.trim() || "copilot-sdk",
+            inputTokens,
+            cacheReadTokens,
+            cacheWriteTokens,
+            outputTokens,
+            copilotUsage: { totalNanoAiu: recordNanoAiu },
+          },
+        },
+      });
+    }
+    for (const [actor, agentId] of agentIds) {
+      events.push({
+        type: "subagent.completed", timestamp, agentId,
+        data: { agentName: actor, agentDisplayName: actor, durationMs: 0 },
+      });
+    }
+    // Retained as a cumulative diagnostic trailer alongside complete usage records.
     events.push({ type: "session.usage_checkpoint", timestamp, data: { totalNanoAiu } });
+  } else if (canonical.length > 0) {
+    events.push({
+      type: "session.usage_record",
+      timestamp,
+      data: {
+        usage: {
+          accounting: { sourceSessionId: runId, usageId: canonical[0].eventId },
+          aiCreditsStatus: billingStatus,
+        },
+      },
+    });
   }
   return { version: 1, runId, billingStatus, completionCount, billedCompletionCount, unreportedBillingCompletions,
     hostBilledCredits, knownCreditsSubtotal, sourceSha256, eventsJsonl: events.map(event => JSON.stringify(event)).join("\n") + "\n" };

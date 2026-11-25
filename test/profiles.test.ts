@@ -48,7 +48,7 @@ test("the deployed roster yields every documented profile", () => {
   ]);
 });
 
-test("the product profile seeds exactly the roster's thirteen roles", () => {
+test("the product profile seeds exactly the roster's twelve roles", () => {
   const product = resolveProfile("product", TABLES);
   assert.equal(product.name, "product");
   assert.equal(product.requestedFound, true);
@@ -60,7 +60,6 @@ test("the product profile seeds exactly the roster's thirteen roles", () => {
     "analyst",
     "designer",
     "product-owner",
-    "presenter",
     "technical-writer",
     "experimenter",
     "data-scientist",
@@ -91,7 +90,7 @@ test("only product and full fan the implement stage out across deliverable speci
     .filter((name) => resolveProfile(name, TABLES).fansOut)
     .sort();
   assert.deepEqual(fanning, ["full", "product"]);
-  assert.equal(resolveProfile("product", TABLES).deliverableRoles.length, 7);
+  assert.equal(resolveProfile("product", TABLES).deliverableRoles.length, 6);
 });
 
 test("every deliverable-producing role is a real catalog role", () => {
@@ -117,14 +116,22 @@ test("deliverable roots resolve their date and deck-slug placeholders", () => {
     ".copilot-tracking/research/2026-08-07",
   );
   assert.equal(deliverableRootFor("lead", TABLES), ".copilot-tracking/plans");
+  assert.equal(deliverableRootFor("intake-validator", TABLES), ".copilot-tracking/reviews");
+  const customTables = {
+    ...TABLES,
+    deliverableRoots: new Map([
+      ...TABLES.deliverableRoots,
+      ["presenter", ".copilot-tracking/ppt/<date>/<deck-slug>"],
+    ]),
+  };
   assert.equal(
-    deliverableRootFor("presenter", TABLES, { date: "2026-08-07", slug: "q3-review" }),
+    deliverableRootFor("presenter", customTables, { date: "2026-08-07", slug: "q3-review" }),
     ".copilot-tracking/ppt/2026-08-07/q3-review",
   );
 });
 
 test("a role that returns findings rather than an artifact has no deliverable root", () => {
-  for (const role of ["cost-manager", "intake-validator", "fact-checker", "scribe"]) {
+  for (const role of ["cost-manager", "deployer", "fact-checker", "scribe"]) {
     assert.equal(deliverableRootFor(role, TABLES), undefined, `${role} should have no root`);
   }
 });

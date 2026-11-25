@@ -62,6 +62,7 @@ export const DISCLAIMER_DEST = "instructions/shared/disclaimer-language.instruct
 export const LICENSING_DEST = "instructions/hve-core/licensing-posture.instructions.md";
 
 const BOUNDARY_FILE = "untrusted-content-boundary.instructions.md";
+const BOUNDARY_SKILL_DIR = ".github/skills/shared/untrusted-content-boundary";
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
 /** Bounded so a snapshot cannot look like abuse to the origin. */
@@ -249,7 +250,11 @@ export function parseApmDependencies(apmYaml: string): Dependency[] {
  */
 export function bundleDestination(dep: Dependency, packageSlug: string): string | undefined {
   const file = dep.path.split("/").pop() ?? "";
-  if (file === BOUNDARY_FILE) {
+  if (
+    file === BOUNDARY_FILE ||
+    dep.path === BOUNDARY_SKILL_DIR ||
+    dep.path === `${BOUNDARY_SKILL_DIR}/SKILL.md`
+  ) {
     return `instructions/${BOUNDARY_FILE}`;
   }
   if (file.endsWith(".agent.md") && dep.path.includes("/agents/")) {
@@ -457,10 +462,11 @@ async function resolveBundle(pin: Pin): Promise<Resolution> {
           "A floating ref cannot produce a reproducible bundle.",
       );
     }
-    let entries = [{ path: dep.path, dest }];
-    if (dep.path.endsWith(`/${BOUNDARY_FILE}`)) {
+    const sourcePath = dep.path === BOUNDARY_SKILL_DIR ? `${dep.path}/SKILL.md` : dep.path;
+    const entries = [{ path: sourcePath, dest }];
+    if (dest === `instructions/${BOUNDARY_FILE}`) {
       // Keep the existing runtime probe and its original source-relative location.
-      entries.push({ path: dep.path, dest: `instructions/shared/${BOUNDARY_FILE}` });
+      entries.push({ path: sourcePath, dest: `instructions/shared/${BOUNDARY_FILE}` });
     }
     for (const entry of entries) {
       validateBundlePath(entry.dest);
@@ -477,16 +483,14 @@ async function resolveBundle(pin: Pin): Promise<Resolution> {
     }
   }
 
-  if (pin.ref) {
-    for (const name of ["roster-catalog.md", "model-routing.md", "model-catalog.md", "economy-mode.md"]) {
-      const path = `squad-src/.github/skills/squad/references/${name}`;
-      const dest = `references/squad/${name}`;
-      validateBundlePath(dest);
-      if (byDest.has(dest)) throw new Error(`Duplicate routing reference destination: ${dest}.`);
-      const file = { slug: pin.package, path, dest, commit: sourceCommit };
-      byDest.set(dest, file);
-      planned.push(file);
-    }
+  for (const name of ["roster-catalog.md", "model-routing.md", "model-catalog.md", "economy-mode.md"]) {
+    const path = `squad-src/.github/skills/squad/references/${name}`;
+    const dest = `references/squad/${name}`;
+    validateBundlePath(dest);
+    if (byDest.has(dest)) throw new Error(`Duplicate routing reference destination: ${dest}.`);
+    const file = { slug: pin.package, path, dest, commit: sourceCommit };
+    byDest.set(dest, file);
+    planned.push(file);
   }
 
   if (!planned.some((file) => file.dest.startsWith("agents/"))) {

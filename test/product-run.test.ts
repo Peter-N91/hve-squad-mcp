@@ -116,10 +116,6 @@ test("a product run writes each role's deliverable under its own roster root", a
       `no review deliverable in ${tree.join(", ")}`,
     );
     // The product specialists write real files, not just prose in the artifact.
-    assert.ok(
-      tree.some((p) => p.startsWith(".copilot-tracking/ppt/2026-08-07/")),
-      `no presenter deliverable in ${tree.join(", ")}`,
-    );
     assert.ok(tree.some((p) => p.startsWith("docs/")), `no technical-writer output in ${tree.join(", ")}`);
     assert.ok(tree.some((p) => p.startsWith("outputs/")), `no data-scientist output in ${tree.join(", ")}`);
   } finally {
@@ -189,7 +185,8 @@ test("a follow-up run reads the first run's output back without naming a key", a
     const block = await fixture.history.contextBlock(TENANT, PROJECT);
     assert.match(block ?? "", /Squad profile: product/);
     assert.match(block ?? "", /\.copilot-tracking\/plans\//);
-    assert.match(block ?? "", /\.copilot-tracking\/ppt\//);
+    assert.match(block ?? "", /docs\//);
+    assert.match(block ?? "", /outputs\//);
   } finally {
     fixture.cleanup();
   }

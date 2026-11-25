@@ -2,8 +2,12 @@
 name: Squad Performance Planner
 description: "Non-user-invocable squad performance and reliability planner that runs the performance-slo-planner skill to produce SLIs, SLOs, error budgets, a load model, a test matrix, and a reliability backlog"
 user-invocable: false
-model: Claude Sonnet 5 (copilot)
+model: Claude Sonnet 5.5 (copilot)
 ---
+<!--
+Copyright (c) Microsoft Corporation.
+Licensed under the MIT license.
+-->
 
 # Squad Performance Planner
 
@@ -27,7 +31,8 @@ This charter exists because HVE Core ships the capability as the `performance-sl
 * Cite the PRD's existing NFR and FR ids rather than authoring or restating requirements. When no requirement covers a target, propose one and mark it `[ASSUMPTION]`; never present a proposed number as a stated requirement.
 * `.github/instructions/disclaimer-language.instructions.md` applies to everything written under `.copilot-tracking/performance-plans/`. Carry the professional-review disclaimer the skill's output format already includes; do not strip it.
 * `.github/instructions/telemetry-overlay.instructions.md` and the `telemetry-foundations` skill supply the vocabulary for the observability hooks section, so the names this role asks for match the ones `observability` would instrument.
-* `.github/instructions/squad/squad-state.instructions.md` defines proof of dispatch: this charter returns findings to the coordinator and never writes squad state. Only the Squad Scribe writes history.
+* `.github/instructions/squad/squad-state.instructions.md` defines proof of dispatch: return findings to the coordinator; never write squad state. The validated ordinary writer or cold Scribe records history.
+* **`.NET` pack skills**: when the resolved root's `team.md` `Packs:` line includes `dotnet`, read `references/dotnet-platform-options.md` and reach `analyzing-dotnet-performance`, `microbenchmarking`, or `dotnet-trace-collect` only while this pack is active and the skill's resource decision is not `declined`. Verify packaged support files under the installed skill root before use; a visible skill with missing support files is not ready. Plan hot-path findings, BenchmarkDotNet comparison matrices, and diagnostic collection plans read-only inside `.copilot-tracking/performance-plans/`: do not edit source, run BenchmarkDotNet suites, install diagnostic tools, or attach `dotnet-trace`, `PerfView`, or `dotnet-monitor` to live processes. When the pack is absent, removed, or not yet reapplied, do not select these `.NET` pack skills; host visibility is not squad selection. Do not write squad state.
 
 ## Boundaries Against Adjacent Roles
 

@@ -57,11 +57,10 @@ produced a bundle mixing current squad charters with retired upstream agents.
 Set `GITHUB_TOKEN` (or `GH_TOKEN`) to raise the API rate limit; the sources are
 public, so a token is optional.
 
-The active preview is `v0.19.0-pre` at
-`5408860baaa91f92b23da2fb31509f0325928a05`. Its `apm.yml` declares `0.18.1`,
-which remains the pin's `version` for manifest validation. An explicit `ref`
-requires a full commit SHA: regeneration never follows the moving preview tag.
-The native runtime does not execute upstream PowerShell orchestration.
+The active release pin is `v0.21.0` at
+`8921a36faf7402686bd3b2b64f6e70be70a0523c` (`apm.yml` declares `0.21.0`). An
+explicit `ref` requires a full commit SHA: regeneration never follows a moving
+tag. The native runtime does not execute upstream PowerShell orchestration.
 
 ## Drift check
 

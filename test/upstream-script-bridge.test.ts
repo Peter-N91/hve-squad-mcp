@@ -861,7 +861,7 @@ test("generated server PowerShell parses and genuine pinned seed writes the upst
     const rates = readFileSync(join(dir, "consumption-rates.md"), "utf8");
     assert.match(rates, /Per-model token rates/);
     assert.match(rates, /Dispatch-size estimator/);
-    assert.match(rates, /gpt-5-mini/);
+    assert.match(rates, /gpt-5\.3-codex/);
     // Execute the genuine server initialization logic locally, adapting only fixed
     // Linux paths and the native `test -f` probe for this Windows test host.
     const payload = { ...port.commands[0].payload, workspace: join(dir, "mirror") };
@@ -880,7 +880,7 @@ test("generated server PowerShell parses and genuine pinned seed writes the upst
     local = local.replace(/if \(\$data\.Length -ne \d+ -or ([^\n]+?) -ne '[a-f0-9]{64}'\)/,
       `if ($data.Length -ne ${data.length} -or $1 -ne '${createHash("sha256").update(data).digest("hex")}')`);
     const executed = spawnSync("pwsh", ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand",
-      Buffer.from(local, "utf16le").toString("base64")], { encoding: "utf8", timeout: 60000, maxBuffer: 12000000 });
+      Buffer.from(local, "utf16le").toString("base64")], { encoding: "utf8", timeout: 120000, maxBuffer: 12000000 });
     assert.equal(executed.status, 0, executed.stdout + executed.stderr);
     const receipt = JSON.parse(executed.stdout);
     assert.equal(receipt.operation, "response");

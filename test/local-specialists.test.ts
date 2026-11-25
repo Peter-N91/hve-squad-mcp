@@ -87,7 +87,7 @@ test("discovery separates installed dependencies from callable, deferred, unsupp
   assert.deepEqual(capabilities.find(c => c.id === "pandoc"), { id: "pandoc", status: "unavailable", callable: false });
   assert.equal(capabilities.find(c => c.id === "authenticated-per-user-bindings")?.status, "auth-deferred");
   assert.equal(capabilities.find(c => c.id === "windows-desktop-automation")?.status, "windows-unsupported");
-  assert.equal(capabilities.filter(c => c.id.startsWith("python-env:")).length, 20);
+  assert.equal(capabilities.filter(c => c.id.startsWith("python-env:")).length, 19);
   assert.ok(capabilities.filter(c => c.id.startsWith("python-env:")).every(c => !c.callable));
   assert.equal(h.artifacts.length, 0);
   assert.doesNotMatch(h.port.calls[0].script, /Get-ChildItem\s+Env:|Get-Item\s+Env:|\$env:|GetEnvironmentVariables/i);

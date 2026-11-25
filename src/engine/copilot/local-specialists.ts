@@ -104,7 +104,7 @@ const PYTHON_ENVS = [
   "accessibility--accessibility", "data-science-engineering--data-catalog", "data-science-engineering--dataops",
   "data-science-engineering--evaluation-design", "data-science-engineering--feasibility",
   "experimental--copilot-otel-metrics", "experimental--customer-card-render", "experimental--demo-video",
-  "experimental--hve-demo-material", "experimental--mural", "experimental--powerpoint",
+  "experimental--hve-demo-material", "experimental--mural",
   "experimental--tts-voiceover", "experimental--vscode-playwright", "hve-core--architecture-diagrams",
   "hve-core--vally-tests", "project-planning--adr-author", "project-planning--gitlab",
   "project-planning--jira", "project-planning--security-planning", "security--vex",
@@ -116,7 +116,7 @@ const PROBES: readonly { id: string; path: string }[] = [
   { id: "pandoc", path: "/usr/bin/pandoc" },
   { id: "chromium-runtime", path: "/opt/ms-playwright" },
   ...PYTHON_ENVS.map(id => ({ id: `python-env:${id}`, path: `/opt/hve-specialists/${id}/bin/python` })),
-  ...["accessibility--accessibility--scripts--runtime_a11y", "hve-slides--templates--deck", "md-to-docx--scripts"]
+  ...["accessibility--accessibility--scripts--runtime_a11y", "experimental--hve-slides--templates--deck", "md-to-docx--scripts"]
     .map(id => ({ id: `node-env:${id}`, path: `/opt/hve-specialist-node/${id}/node_modules` })),
 ];
 

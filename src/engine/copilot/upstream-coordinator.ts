@@ -195,7 +195,7 @@ export interface UpstreamCoordinatorResult extends BackendResult {
   metadata: {
     upstreamCommit: string;
     upstreamVersion: string;
-    rolloutVersion: "0.19.0-pre";
+    rolloutVersion: "0.21.0";
     routing: "ranked" | "economy" | "manual";
     outcome: "accepted" | "findings";
     gaps: string[];
@@ -324,8 +324,8 @@ export class UpstreamCoordinator {
       if (typeof options[name] !== "function") throw new Error(`Missing trusted upstream seam: ${name}`);
     }
     if (!options.availableModels.includes(options.coordinatorModel)) throw new Error("Coordinator model is not verified available.");
-    if (options.bundle.identity.sourceCommit !== UPSTREAM_SCRIPT_PIN || options.bundle.identity.files.length !== 1682 || options.bundle.skills().length !== 97) {
-      throw new Error("Full upstream orchestration requires the complete 97-skill, 1682-file a8d863a bundle.");
+    if (options.bundle.identity.sourceCommit !== UPSTREAM_SCRIPT_PIN || options.bundle.identity.files.length !== 1740 || options.bundle.skills().length !== 106) {
+      throw new Error("Full upstream orchestration requires the complete 106-skill, 1740-file 8921a36 bundle.");
     }
     for (const [name, fallback, ceiling] of [
       ["deadlineMs", 120000, 2100000], ["maxModelCalls", 24, 100], ["maxProcedureCalls", 24, 100],
@@ -734,7 +734,7 @@ export class UpstreamCoordinator {
           text: summary, backendId: "copilot-sdk", model: o.coordinatorModel, finishReason: "stop",
           usage: aggregateBackendUsage([...coordinatorUsage, ...stages.flatMap(s => s.result.usage ? [s.result.usage] : [])]),
           stages: structuredClone(stages),
-          metadata: { upstreamCommit: o.bundle.identity.sourceCommit, upstreamVersion: o.bundle.identity.declaredVersion, rolloutVersion: "0.19.0-pre",
+          metadata: { upstreamCommit: o.bundle.identity.sourceCommit, upstreamVersion: o.bundle.identity.declaredVersion, rolloutVersion: "0.21.0",
             routing: o.routing?.mode ?? "economy", outcome: a.outcome as "accepted" | "findings", gaps, reports,
             verification: structuredClone(review), events: [...events], productionSmokeVerified: false },
         };

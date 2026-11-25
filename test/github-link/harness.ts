@@ -32,6 +32,7 @@ async function readBody(req: IncomingMessage): Promise<string> {
 }
 
 function listen(server: Server): Promise<string> {
+  server.keepAliveTimeout = 60_000;
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${(server.address() as AddressInfo).port}`));
   });

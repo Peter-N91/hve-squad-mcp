@@ -151,7 +151,7 @@ test("the production upstream factory holds for real Init under the linked user'
     assert.equal((await linkAs(h, service, ALICE, GH_ALICE)).final.status, 200);
     const credentials = new PerUserCopilotCredentials({
       tokens: service,
-      verifier: { verify: async () => ({ models: ["gpt-5.4", "gpt-5.4-mini"] }) },
+      verifier: { verify: async () => ({ models: ["claude-sonnet-5", "claude-haiku-5.5"] }) },
     });
     const users: PerUserStack = {
       service, credentials,
@@ -186,7 +186,7 @@ test("the production upstream factory holds for real Init under the linked user'
     let sessions = 0;
     const client: CopilotSdkClient = {
       createSession: async () => { sessions++; throw new Error("Init must pause before a session is opened."); },
-      ping: async () => ({}), listModels: async () => ["gpt-5.4"], stop: async () => {},
+      ping: async () => ({}), listModels: async () => ["claude-sonnet-5"], stop: async () => {},
       entitlementVerifier: () => ({ verify: async () => { throw new Error("A shared token must never be verified."); } }),
     };
     const config = loadOperatorConfig(perUserEnv(root, { SQUAD_MCP_UPSTREAM_RUNTIME_ENABLED: "true" }));

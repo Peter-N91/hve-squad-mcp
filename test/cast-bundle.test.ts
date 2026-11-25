@@ -337,10 +337,10 @@ test("the manifest counts agree with the recorded files", () => {
   assert.equal(manifest.files.length, manifest.agentFileCount + manifest.instructionFileCount + manifest.skillFileCount);
 });
 
-test("the rolling preview is pinned to an immutable commit, not its moving tag", () => {
+test("the release pin resolves to an immutable commit, not a moving tag", () => {
   const manifest = readManifest();
   const pin = JSON.parse(readFileSync(PIN_FILE, "utf8")) as { ref: string; commit: string };
-  assert.equal(pin.ref, "v0.19.0-pre");
+  assert.equal(pin.ref, "v0.21.0");
   assert.match(pin.commit, /^[a-f0-9]{40}$/);
   assert.equal(manifest.sourceRef, pin.ref);
   assert.equal(manifest.sourceCommit, pin.commit);
@@ -348,7 +348,7 @@ test("the rolling preview is pinned to an immutable commit, not its moving tag",
 
 test("active cast contains pinned agents, squad instructions and inert references only", () => {
   const manifest = readManifest();
-  assert.equal(manifest.linkedPackageVersion, "0.18.1");
+  assert.equal(manifest.linkedPackageVersion, "0.21.0");
   assert.equal(manifest.skillCount, 0);
   assert.equal(manifest.skillFileCount, 0);
   assert.equal(manifest.dataFileCount, 0);

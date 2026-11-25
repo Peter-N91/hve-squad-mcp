@@ -26,7 +26,14 @@ import {
 const TENANT = "11111111-1111-1111-1111-111111111111";
 const PROJECT = "acme";
 const RUN = "run-9";
-const TABLES = loadProfileTables();
+const BASE_TABLES = loadProfileTables();
+const TABLES = {
+  ...BASE_TABLES,
+  deliverableRoots: new Map([
+    ...BASE_TABLES.deliverableRoots,
+    ["presenter", ".copilot-tracking/ppt/<date>/<deck-slug>"],
+  ]),
+};
 const REQUEST: CoordinatorRequest = { toolId: "squad_run", request: "build the deck" };
 
 class FakeRenderer implements DeckRenderer {

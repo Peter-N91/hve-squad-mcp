@@ -107,10 +107,15 @@ export async function publishRunBillingProjection(
   if (!output || typeof output !== "object" || !("unitEconomics" in output) ||
       !output.unitEconomics || typeof output.unitEconomics !== "object") throw new Error("Run billing measurement omitted value.");
   const unit = output.unitEconomics as Record<string, unknown>;
-  const observed = "observed" in output ? output.observed : undefined;
-  const observedCredits = observed && typeof observed === "object" && "sessionAiu" in observed ? observed.sessionAiu : null;
-  if (snapshot.hostBilledCredits === null ? observedCredits !== null :
-      typeof observedCredits !== "number" || Math.abs(observedCredits - snapshot.hostBilledCredits) > 1e-9) {
+  const exact = "exact" in output && output.exact && typeof output.exact === "object"
+    ? output.exact as Record<string, unknown>
+    : null;
+  const observedCredits = exact && typeof exact.totalNanoAiu === "number"
+    ? exact.totalNanoAiu / 1_000_000_000
+    : null;
+  if (snapshot.hostBilledCredits === null ? observedCredits !== null || unit.costBasis !== "estimated" :
+      unit.costBasis !== "exact-native" || typeof observedCredits !== "number" ||
+      Math.abs(observedCredits - snapshot.hostBilledCredits) > 1e-9) {
     throw new Error("Squad omitted or altered the compatible host billing log.");
   }
   const count = (key: string): number => {
@@ -120,7 +125,7 @@ export async function publishRunBillingProjection(
   };
   const accepted = count("accepted");
   const ratio = snapshot.hostBilledCredits !== null && accepted > 0 ? snapshot.hostBilledCredits / accepted : null;
-  const reported = unit.hostBilledCreditsPerAccepted;
+  const reported = snapshot.hostBilledCredits !== null ? unit.creditsPerAccepted : unit.hostBilledCreditsPerAccepted;
   if (ratio === null ? reported !== null : typeof reported !== "number" || Math.abs(reported - ratio) > 1e-9) {
     throw new Error("Squad host-log projection disagrees with trusted SDK billing completeness.");
   }

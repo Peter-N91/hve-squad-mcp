@@ -49,7 +49,7 @@ async function fixture() {
       enabled: true, tenantId: current.tenantId, project: "project-a", runId: current.runId,
       workspace: w, store: artifacts, bundle, sessionState: new InMemoryCopilotSessionStateStore(),
       client: { createSession: async () => { throw new Error("No runtime should open before Init confirmation."); } },
-      modelIds: ["gpt-5.4", "gpt-5.4-mini", "gpt-5.6-sol"], coordinatorModel: "gpt-5.6-sol",
+      modelIds: ["gpt-6.1-terra", "claude-haiku-5.5", "gpt-5.6-sol"], coordinatorModel: "gpt-5.6-sol",
       gitHubToken: "test-only-operator-credential",
       confirmInitialization: async () => {
         seededConfirmations++;
@@ -126,7 +126,7 @@ test("persisted explicit Init response is mapped to actual subject and consumed 
         backendId: "copilot-sdk", text: "Verified advisory report.", finishReason: "stop", stages: [],
         usage: { inputTokens: 12, outputTokens: 4, costStatus: "unavailable" },
         metadata: { upstreamCommit: bundle.identity.sourceCommit, upstreamVersion: bundle.identity.declaredVersion,
-          rolloutVersion: "0.19.0-pre", routing: "economy", outcome: "accepted", gaps: [], reports: [],
+          rolloutVersion: "0.21.0", routing: "economy", outcome: "accepted", gaps: [], reports: [],
           verification: { verdict: "Pass", reviewerStageId: "review", ownerStageId: "owner", readHashes: [],
             reviewReceipt: { path: "docs/review.md", sha256: "0".repeat(64) }, findings: [], approvedActionablePipeline: false },
           events: [], productionSmokeVerified: false, ownsLedger: true },
@@ -158,7 +158,7 @@ test("broad yes and caller-supplied actor fields cannot become project Init conf
   }
 });
 
-for (const routing of [{ mode: "ranked" }, { mode: "economy" }, { mode: "manual", model: "gpt-5.4" }]) {
+for (const routing of [{ mode: "ranked" }, { mode: "economy" }, { mode: "manual", model: "gpt-6.1-terra" }]) {
   test(`durable Init response preserves the actual user's ${routing.mode} routing choice`, async () => {
     const f = await fixture();
     const held = await new UpstreamRunService(f.options).run(f.run, f.workspace, f.req);
